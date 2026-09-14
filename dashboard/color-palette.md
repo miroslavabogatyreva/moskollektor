@@ -660,7 +660,7 @@ ISA-18.2: цвета приоритетов резервируются и бол
   https://jfly.uni-koeln.de/color/
 - Machado G. M., Oliveira M. M., Fernandes L. A. F., «A Physiologically-based Model
   for Simulation of Color Vision Deficiency», IEEE TVCG, 2009 — матрицы симуляции.
-- Внутренний файл `history/11-dashboard-standards.md`, разделы 2.4, 2.6, 2.7.
+- Внутренний файл ISA-101 и «High Performance HMI» (Hollifield), разделы 2.4, 2.6, 2.7.
 
 **Мои расчёты.** Контрасты и симуляции дальтонизма я считал скриптом на Python:
 формула яркости из WCAG 2.2, преобразование в CIELAB через D65, ΔE76. Скрипты лежат

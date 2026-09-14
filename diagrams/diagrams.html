@@ -1,0 +1,173 @@
+<title>Схемы сервиса Москоллектор</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+:root{
+  --bg-app:#E8EBEE; --bg-surface:#F4F6F8; --border-subtle:#C9D0D8;
+  --text-primary:#15202B; --text-secondary:#47525E; --text-muted:#5F6A75;
+  --brand:#003882; --accent:#B35C00;
+  --font-ui:"Source Sans 3",system-ui,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Lexend","Source Sans 3",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg-app:#131A22; --bg-surface:#1B242E; --border-subtle:#303B47;
+  --text-primary:#E4E9EE; --text-secondary:#AEB9C5; --text-muted:#8A96A3;
+  --brand:#6FC2EA; --accent:#FFB566;
+}}
+:root[data-theme="dark"]{
+  --bg-app:#131A22; --bg-surface:#1B242E; --border-subtle:#303B47;
+  --text-primary:#E4E9EE; --text-secondary:#AEB9C5; --text-muted:#8A96A3;
+  --brand:#6FC2EA; --accent:#FFB566;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-app);color:var(--text-primary);
+  font-family:var(--font-ui);font-size:15px;line-height:1.55;padding:0 20px 56px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:30px}
+header{padding-block:32px 4px}
+h1{font-family:var(--font-display);font-size:27px;font-weight:600;margin:0 0 8px;
+  letter-spacing:-.02em;text-wrap:balance}
+header p{margin:0;color:var(--text-secondary);max-width:65ch}
+section{background:var(--bg-surface);border:1px solid var(--border-subtle);
+  border-radius:5px;overflow:hidden}
+section > div.head{padding:15px 20px 13px;border-bottom:1px solid var(--border-subtle)}
+h2{font-family:var(--font-display);font-size:18px;font-weight:600;margin:0 0 5px;
+  letter-spacing:-.01em}
+.head p{margin:0;color:var(--text-secondary);font-size:14px;max-width:78ch}
+.diagram{padding:22px 16px;overflow-x:auto;background:var(--bg-surface)}
+.mermaid{margin:0;display:flex;justify-content:center;min-width:min-content}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;padding:13px 20px;
+  border-top:1px solid var(--border-subtle);font-size:13.5px;color:var(--text-secondary)}
+.legend b{color:var(--text-primary);font-weight:600}
+.src{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+  color:var(--text-muted)}
+footer{color:var(--text-muted);font-size:13.5px;max-width:70ch}
+@media (max-width:560px){body{padding:0 16px 40px} h1{font-size:23px}}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Схемы сервиса прогнозирования аварий</h1>
+  <p>Две схемы из HLD: из чего собран сервис и что происходит за один прогон расчёта.
+  Исходники лежат в репозитории — <span class="src">diagrams/architecture.mmd</span> и
+  <span class="src">diagrams/forecast-budget.mmd</span>.</p>
+</header>
+
+<section>
+  <div class="head">
+    <h2>Из чего собран сервис</h2>
+    <p>Наружу открыт один порт — 443. Всё остальное живёт во внутренней сети Docker
+    и с хоста недоступно. Пунктиром показаны источники заказчика: способ доставки
+    данных пока не согласован, сегодня это ручная загрузка выгрузок через интерфейс
+    администратора.</p>
+  </div>
+  <div class="diagram"><pre class="mermaid">%% Сервис прогнозирования аварий АО «Москоллектор» — компоненты и потоки
+%% Источник: HLD.md, раздел 1. Наружу торчит один порт — 443.
+flowchart TB
+    subgraph ARM["АРМ диспетчера ОДС · браузер"]
+        SPA["Vite + Preact + TypeScript&lt;br/&gt;три экрана: дашборд, карта, журнал&lt;br/&gt;Leaflet 42 КБ, без WebGL"]
+    end
+
+    subgraph HOST["Сервер заказчика · один хост · Docker"]
+        direction TB
+        NGINX["&lt;b&gt;nginx&lt;/b&gt; :80 / :443&lt;br/&gt;статика, прокси, тайлы&lt;br/&gt;HTTP/2, brotli"]
+        API["&lt;b&gt;api&lt;/b&gt; :8000&lt;br/&gt;FastAPI + uvicorn&lt;br/&gt;REST и поток событий SSE"]
+        WRK["&lt;b&gt;worker&lt;/b&gt; · тот же образ&lt;br/&gt;APScheduler, стадии расчёта,&lt;br/&gt;загрузчики, DuckDB"]
+        ML["&lt;b&gt;ml&lt;/b&gt; :8100&lt;br/&gt;образ ML-команды&lt;br/&gt;инференс POST /predict"]
+        DB[("&lt;b&gt;db&lt;/b&gt; :5432&lt;br/&gt;PostgreSQL 18 + PostGIS&lt;br/&gt;smvu · feat · pred · geo&lt;br/&gt;ref · asset · maint · permit")]
+        VOL[("тома&lt;br/&gt;pgdata · tiles · parquet&lt;br/&gt;uploads · backups")]
+    end
+
+    subgraph SRC["Источники заказчика"]
+        S1["СМВУ · выгрузки .xlsx за 12 лет"]
+        S2["Журналы ОДС"]
+        S3["АРМ-Контроль · реестр допусков"]
+        S4["Реестр оборудования ОЭ"]
+    end
+
+    SPA -- "HTTPS/2 · GET /api/v1/* · SSE · тайлы" --&gt; NGINX
+    NGINX -- "proxy_pass HTTP/1.1" --&gt; API
+    NGINX -- "файлы с тома" --&gt; VOL
+    API -- "asyncpg · пул 10" --&gt; DB
+    WRK -- "asyncpg · пул 4" --&gt; DB
+    WRK -- "POST /predict · JSON колонками" --&gt; ML
+    ML -. "вероятность, вклад признаков, версия модели" .-&gt; WRK
+    WRK -- "NOTIFY forecast_ready" --&gt; DB
+    DB -- "LISTEN → кадр SSE" --&gt; API
+    WRK -- "Parquet: архив и метки для обучения" --&gt; VOL
+    S1 -. "способ доставки не согласован" .-&gt; WRK
+    S2 -.-&gt; WRK
+    S3 -.-&gt; WRK
+    S4 -.-&gt; WRK
+
+    classDef ours fill:#E8EEF7,stroke:#003882,stroke-width:2px,color:#15202B
+    classDef theirs fill:#F7EFE4,stroke:#B35C00,stroke-width:2px,color:#15202B
+    classDef store fill:#EDEFF2,stroke:#7D8894,stroke-width:1px,color:#15202B
+    classDef ext fill:#F4F6F8,stroke:#C9D0D8,stroke-dasharray:4 3,color:#47525E
+    class SPA,NGINX,API,WRK ours
+    class ML theirs
+    class DB,VOL store
+    class S1,S2,S3,S4 ext
+</pre></div>
+  <div class="legend">
+    <span><b>Синие</b> — делаем мы</span>
+    <span><b>Оранжевый</b> — контейнер ML-команды</span>
+    <span><b>Серые</b> — база и тома</span>
+    <span><b>Пунктир</b> — не согласовано</span>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Один прогон расчёта: восемь стадий и цена каждой</h2>
+    <p>Постановка даёт 5 минут, то есть 300 секунд. Целевая сумма — 41 секунда,
+    потолок — 155. Запас почти вдвое. Самая дорогая стадия не предсказание,
+    а сборка признаков: 20 секунд против одной. Сам инференс занимает 1,2 миллисекунды,
+    и если однажды расчёт не уложится в норматив, чинить будем третью стадию.</p>
+  </div>
+  <div class="diagram"><pre class="mermaid">%% Один прогон расчёта прогноза: восемь стадий и цена каждой
+%% Источник: HLD.md, раздел 8. Норматив постановки — 300 с.
+%% Цель 41 с, потолок 155 с.
+flowchart TB
+    START(["APScheduler: наступило :05"]) --&gt; LOCK{"pg_try_advisory_lock&lt;br/&gt;48217 взялась?"}
+    LOCK -- "нет" --&gt; SKIP["Пишем в журнал:&lt;br/&gt;расчёт уже идёт&lt;br/&gt;Выходим с кодом 0"]
+    LOCK -- "да" --&gt; RUN["INSERT pred.run&lt;br/&gt;status = running"]
+    RUN --&gt; CHECK{"Схема признаков ml&lt;br/&gt;совпала с контрактом?"}
+    CHECK -- "нет" --&gt; FAIL["status = failed&lt;br/&gt;Молча считать нельзя"]
+    CHECK -- "да" --&gt; S1
+
+    S1["1 · Дозабор событий СМВУ&lt;br/&gt;цель 5 с · потолок 30 с&lt;br/&gt;172 события в час — для COPY доли секунды"]
+    S2["2 · Суточная свёртка за двое суток&lt;br/&gt;цель 5 с · потолок 20 с&lt;br/&gt;8250 строк вместо 18 млн — выигрыш в 2200 раз"]
+    S3["3 · Сборка матрицы признаков&lt;br/&gt;цель 20 с · потолок 60 с&lt;br/&gt;скан 1,5 млн строк за 365 дней,&lt;br/&gt;джойн с реестром, нарядами, выводом датчиков&lt;br/&gt;объект под нарядом помечается «в работах»"]
+    S4["4 · Инференс: POST ml /predict&lt;br/&gt;цель 1 с · потолок 5 с&lt;br/&gt;сам расчёт 1,2 мс CatBoost, 57 мс LightGBM&lt;br/&gt;секунда в бюджете — накладные Python"]
+    S5["5 · Объяснения&lt;br/&gt;цель 5 с · потолок 20 с&lt;br/&gt;вклад признаков превращаем в текст"]
+    S6["6 · Запись и прогрев&lt;br/&gt;цель 5 с · потолок 20 с&lt;br/&gt;прогноз, раскраска карты, сброс кэша"]
+    S7["7 · Автозаявки на превентивное ТО&lt;br/&gt;есть открытая заявка — повышаем приоритет&lt;br/&gt;вторую не создаём&lt;br/&gt;наряд не родится до утверждения человеком"]
+    S8["8 · NOTIFY forecast_ready&lt;br/&gt;api рассылает кадр SSE&lt;br/&gt;дашборд обновился без перезагрузки"]
+
+    S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5 --&gt; S6 --&gt; S7 --&gt; S8
+    S8 --&gt; DONE["status = done&lt;br/&gt;objects_total = 4125&lt;br/&gt;шесть замеров по стадиям"]
+
+    DONE --&gt; TOTAL["Итого цель 41 с при нормативе 300 с"]
+
+    WD["Сторож: если расчёт висит в running&lt;br/&gt;дольше 15 минут, следующий запуск&lt;br/&gt;помечает его failed и идёт дальше"]
+    RUN -.-&gt; WD
+
+    classDef stage fill:#E8EEF7,stroke:#003882,stroke-width:2px,color:#15202B
+    classDef hot fill:#F7EFE4,stroke:#B35C00,stroke-width:3px,color:#15202B
+    classDef gate fill:#F4F6F8,stroke:#7D8894,stroke-width:1px,color:#15202B
+    classDef bad fill:#F6E7E5,stroke:#A81F16,stroke-width:2px,color:#15202B
+    classDef good fill:#E4EDE7,stroke:#1E5A38,stroke-width:2px,color:#15202B
+    class S1,S2,S4,S5,S6,S7,S8 stage
+    class S3 hot
+    class LOCK,CHECK,RUN,START,WD gate
+    class FAIL,SKIP bad
+    class DONE,TOTAL good
+</pre></div>
+  <div class="legend">
+    <span>Шесть замеров <b>ms_*</b> пишутся в каждый прогон — без разбивки
+    по стадиям на приёмке нечего показать</span>
+  </div>
+</section>
+
+<footer>Схемы отражают HLD.md на 14 сентября 2026 года. Если правится HLD —
+правятся и .mmd, они часть репозитория, а не картинка в переписке.</footer>
+</div>

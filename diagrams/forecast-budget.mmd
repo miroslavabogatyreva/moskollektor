@@ -1,0 +1,38 @@
+%% Один прогон расчёта прогноза: восемь стадий и цена каждой
+%% Источник: HLD.md, раздел 8. Норматив постановки — 300 с.
+%% Цель 41 с, потолок 155 с.
+flowchart TB
+    START(["APScheduler: наступило :05"]) --> LOCK{"pg_try_advisory_lock<br/>48217 взялась?"}
+    LOCK -- "нет" --> SKIP["Пишем в журнал:<br/>расчёт уже идёт<br/>Выходим с кодом 0"]
+    LOCK -- "да" --> RUN["INSERT pred.run<br/>status = running"]
+    RUN --> CHECK{"Схема признаков ml<br/>совпала с контрактом?"}
+    CHECK -- "нет" --> FAIL["status = failed<br/>Молча считать нельзя"]
+    CHECK -- "да" --> S1
+
+    S1["1 · Дозабор событий СМВУ<br/>цель 5 с · потолок 30 с<br/>172 события в час — для COPY доли секунды"]
+    S2["2 · Суточная свёртка за двое суток<br/>цель 5 с · потолок 20 с<br/>8250 строк вместо 18 млн — выигрыш в 2200 раз"]
+    S3["3 · Сборка матрицы признаков<br/>цель 20 с · потолок 60 с<br/>скан 1,5 млн строк за 365 дней,<br/>джойн с реестром, нарядами, выводом датчиков<br/>объект под нарядом помечается «в работах»"]
+    S4["4 · Инференс: POST ml /predict<br/>цель 1 с · потолок 5 с<br/>сам расчёт 1,2 мс CatBoost, 57 мс LightGBM<br/>секунда в бюджете — накладные Python"]
+    S5["5 · Объяснения<br/>цель 5 с · потолок 20 с<br/>вклад признаков превращаем в текст"]
+    S6["6 · Запись и прогрев<br/>цель 5 с · потолок 20 с<br/>прогноз, раскраска карты, сброс кэша"]
+    S7["7 · Автозаявки на превентивное ТО<br/>есть открытая заявка — повышаем приоритет<br/>вторую не создаём<br/>наряд не родится до утверждения человеком"]
+    S8["8 · NOTIFY forecast_ready<br/>api рассылает кадр SSE<br/>дашборд обновился без перезагрузки"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
+    S8 --> DONE["status = done<br/>objects_total = 4125<br/>шесть замеров по стадиям"]
+
+    DONE --> TOTAL["Итого цель 41 с при нормативе 300 с"]
+
+    WD["Сторож: если расчёт висит в running<br/>дольше 15 минут, следующий запуск<br/>помечает его failed и идёт дальше"]
+    RUN -.-> WD
+
+    classDef stage fill:#E8EEF7,stroke:#003882,stroke-width:2px,color:#15202B
+    classDef hot fill:#F7EFE4,stroke:#B35C00,stroke-width:3px,color:#15202B
+    classDef gate fill:#F4F6F8,stroke:#7D8894,stroke-width:1px,color:#15202B
+    classDef bad fill:#F6E7E5,stroke:#A81F16,stroke-width:2px,color:#15202B
+    classDef good fill:#E4EDE7,stroke:#1E5A38,stroke-width:2px,color:#15202B
+    class S1,S2,S4,S5,S6,S7,S8 stage
+    class S3 hot
+    class LOCK,CHECK,RUN,START,WD gate
+    class FAIL,SKIP bad
+    class DONE,TOTAL good

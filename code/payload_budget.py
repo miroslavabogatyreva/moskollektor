@@ -2,7 +2,7 @@
 """Сколько весит ответ дашборда по 4125 секциям и геометрия коллекторов.
 Меряет JSON/MessagePack/бинарь без сжатия, gzip -9 и brotli -q11.
 Нужна консольная утилита brotli. Запуск: python3 payload_budget.py
-Числа из этого скрипта приведены в history/18-performance-frontend.md, раздел 4."""
+Числа из этого скрипта приведены в HLD.md, раздел 4 (бюджет фронта и трафика)."""
 
 import json, gzip, random, struct, subprocess, os, tempfile
 random.seed(42)
