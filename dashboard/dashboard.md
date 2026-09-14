@@ -52,7 +52,7 @@
 SELECT started_at, finished_at,
        (extract(epoch FROM finished_at - started_at))::int AS sec
 FROM   pred.run
-WHERE  status = 'ok'
+WHERE  status = 'done'
 ORDER  BY run_id DESC
 LIMIT  1;
 ```
@@ -84,7 +84,7 @@ SELECT count(*) FILTER (WHERE f.risk_rank = 1)
 FROM   pred.forecast f
 JOIN   pred.run r USING (run_id)
 WHERE  r.run_id = (SELECT run_id FROM pred.run
-                   WHERE status = 'ok'
+                   WHERE status = 'done'
                      AND started_at <= now() - interval '24 hours'
                    ORDER BY started_at DESC LIMIT 1);
 ```
@@ -138,17 +138,23 @@ WHERE  event_time >= :shift_start;
 ### 3.4. Заявки на ТО — 9, принято 7, отклонено 2
 
 ```sql
-SELECT count(*) FILTER (WHERE true)                       AS created,
-       count(*) FILTER (WHERE status = 'accepted')        AS accepted,
-       count(*) FILTER (WHERE status = 'rejected')        AS rejected
+SELECT count(*)                                                      AS created,
+       count(*) FILTER (WHERE status IN ('IN_PROCESS','COMPLETED'))  AS accepted,
+       count(*) FILTER (WHERE status = 'CANCELLED')                  AS rejected
 FROM   maint.notification
 WHERE  created_at >= now() - interval '24 hours'
-  AND  origin = 'predictive';
+  AND  source_system = 'forecast';
 ```
 
-Поля `origin` в `schema_assets.sql` сейчас нет, его надо добавить — иначе
-автозаявки смешаются с теми, что диспетчер завёл руками, и показатель
-«сколько наших приняли» посчитать будет нельзя.
+**Своих заявок от чужих отделяем колонкой `source_system`, которая в таблице уже
+есть.** В `code/schema_assets.sql`, строка 600, у неё значение по умолчанию
+`'manual'` — то есть заявка, заведённая диспетчером руками. Автозаявка пишется
+со значением `'forecast'`. Новую колонку `origin` заводить не надо, это была бы
+вторая колонка того же смысла.
+
+**Статусы берём те, что объявлены в схеме:** `OPEN`, `IN_PROCESS`, `COMPLETED`,
+`CANCELLED`. Отдельных `accepted` и `rejected` у заявки нет, поэтому «принято» —
+это взятые в работу и выполненные, а «отклонено» — отменённые.
 
 Доля отклонённых — честный индикатор доверия. Если из девяти заявок отклоняют
 восемь, модель не работает, какими бы ни были Precision и Recall на отложенной выборке.
@@ -214,12 +220,33 @@ WHERE  s.is_active
 
 ```sql
 SELECT e.edge_id,
-       max(r.risk_rank) AS edge_rank
+       max(l.sort_order) FILTER (WHERE l.code <> 'no_data')      AS edge_rank,
+       bool_or(r.risk_code IS NULL OR r.risk_code = 'no_data')   AS has_gaps
 FROM   network_edge e
-JOIN   geo_object  o ON o.edge_id = e.edge_id
+JOIN   geo_object o
+         ON o.object_id IN (e.object_id, e.from_node_id, e.to_node_id)
 LEFT   JOIN object_risk r ON r.object_id = o.object_id
+LEFT   JOIN risk_level  l ON l.code      = r.risk_code
 GROUP  BY e.edge_id;
 ```
+
+Три вещи в этом запросе неочевидны, и каждая — про то, как устроена схема.
+
+**Объекты участка берём через три ссылки, а не через колонку `edge_id`.** Её
+в `geo_object` нет: в `code/schema_geo.sql` связь обратная — у ребра есть
+`object_id` (собственная запись ребра как объекта) и два конца `from_node_id`,
+`to_node_id`. Поэтому объекты участка — это его собственная запись и две камеры
+по краям.
+
+**Ранг берём из `risk_level.sort_order`**, колонки `risk_rank` в `object_risk`
+не существует, там `risk_code` и `score`.
+
+**`no_data` исключаем из максимума.** В справочнике порядок такой: `low` 1,
+`medium` 2, `high` 3, `no_data` 4. Наивный `max` дал бы участку с одним
+объектом без данных ранг 4 — выше, чем «высокий риск». Дыра в данных
+покрасилась бы как худшее состояние. Поэтому `FILTER` по максимуму
+и отдельный флаг `has_gaps`: отсутствие данных показываем штриховкой,
+а не цветом риска.
 
 Правило максимума задано нормативом, а не выбрано нами: пункт 4.4.6 Регламента
 говорит «достаточно наличия одного из наиболее опасных повреждений». Интуитивно
@@ -252,7 +279,7 @@ GROUP  BY e.edge_id;
 SELECT f.risk_rank, f.probability, f.factors,
        e.equipment_no, e.name
 FROM   pred.forecast_current f
-JOIN   asset.equipment e ON e.id = f.equipment_id
+JOIN   asset.equipment e ON e.id = f.section_id
 ORDER  BY f.probability DESC
 LIMIT  10;
 ```
@@ -313,7 +340,7 @@ SELECT r.started_at, e.equipment_no, f.direction, f.factors, f.horizon_h,
        fb.verdict, fb.reason_code
 FROM   pred.forecast f
 JOIN   pred.run r      USING (run_id)
-JOIN   asset.equipment e ON e.id = f.equipment_id
+JOIN   asset.equipment e ON e.id = f.section_id
 LEFT   JOIN pred.feedback fb ON fb.forecast_id = f.forecast_id
 ORDER  BY r.started_at DESC
 LIMIT  50;
@@ -394,7 +421,7 @@ GROUP  BY 1 ORDER BY 1;
 **Что:** события за любой полный месяц в том виде, в каком выгружается сейчас
 (ID датчика, время, тип, адрес, результат проверки).
 
-**Зачем:** сейчас у нас вилка по частоте событий **в 50 раз**. От неё зависит
+**Зачем:** сейчас у нас вилка по частоте событий **в 5 раз**, от 18,1 до 90,4 млн строк за 12 лет. От неё зависит
 всё: объём базы (18 или 90 млн строк), нужна ли TimescaleDB, влезаем ли в 5 минут,
 и сколько тревог в час реально увидит диспетчер.
 
@@ -561,7 +588,7 @@ WebGL2 обязательно, а Chrome с вехи 139 убирает прог
 | Сейчас в макете | Откуда возьмётся настоящее | Что может измениться |
 |---|---|---|
 | 6 объектов в критической зоне | `pred.forecast_current` | порог критической зоны придётся калибровать: если в красную попадёт треть парка, сигнал мёртв |
-| темп 4,2 тревоги в час | `smvu.event` за смену | вилка в 50 раз; при верхней границе понадобятся квоты по направлениям |
+| темп 4,2 тревоги в час | `smvu.event` за смену | вилка в 5 раз, 18,1 против 90,4 млн строк; при верхней границе понадобятся квоты |
 | точность 0,78 / полнота 0,56 | `evaluate_alerts()` | реальные значения на первой модели будут ниже; порогами по значению они не берутся |
 | 23 молчащих датчика | `smvu.sensor` + `permit_detector_inhibit` | зависит от того, найдём ли мы журнал вывода датчиков под ППР |
 | 8 участков на схеме | `network_edge` | 4125 участков не поместятся: понадобится выбор коллектора и уровень «район → коллектор → участок» |
@@ -596,7 +623,7 @@ WebGL2 обязательно, а Chrome с вехи 139 убирает прог
 |---|---|
 | `dashboard-mockup.html` | сам макет, кнопка «Показать обоснования» раскрывает записки на экране |
 | `color-palette.md` | палитра, пять состояний риска, контрасты WCAG, готовый CSS |
-| `docs/acceptance-test.md` | 145 требований с источником, способом проверки и критерием |
+| `docs/acceptance-test.md` | 130 требований с источником, способом проверки и критерием |
 | `code/predictive_metrics.py` | методика замера Precision, Recall и упреждения |
 | `code/signal_fusion.py` | сведение нескольких сигналов в оценку и уверенность |
 | `code/schema_events.sql` | события СМВУ, признаки, прогнозы |
