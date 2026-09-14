@@ -261,6 +261,8 @@ CREATE TABLE asset.func_location (
     -- в SAP копируется в сообщение и заказ ТОРО автоматически
     resp_work_center_id bigint       REFERENCES ref.work_center(id),
     criticality_id      bigint       REFERENCES ref.criticality(id),
+    -- код профиля каталога; ключа нет: в ref.catalog_profile код повторяется
+    -- на каждую группу кодов, уникальна только тройка (code, catalog, code_group)
     catalog_profile     varchar(8),
     -- даты и паспортные данные самого места (в SAP они есть и у ТМ, и у ЕО)
     in_service_from     date,                       -- «В эксплуатации С», SAP INBDT
@@ -363,7 +365,8 @@ CREATE TABLE asset.equipment_install_history (
     parent_equipment_id bigint       REFERENCES asset.equipment(id),
     installed_at        timestamptz  NOT NULL,
     dismantled_at       timestamptz,
-    -- заказ ТОРО, в рамках которого произошла перестановка (если была)
+    -- заказ ТОРО, в рамках которого произошла перестановка (если была);
+    -- внешний ключ добавлен ниже, после CREATE TABLE maint.work_order
     order_id            bigint,
     reason              text,
     created_by          text,
@@ -613,6 +616,10 @@ CREATE TABLE maint.notification (
     malfunction_end     timestamptz,                -- конец неисправности
     downtime_hours      numeric(10,2),              -- простой объекта
     -- режим отказа по каталогу U (ISO 14224): FTO, FTC, NOO, SPO, VIB, ...
+    -- Внешнего ключа на ref.catalog_code нет и не будет: код уникален только
+    -- внутри пары (catalog, code_group), одним столбцом на него не сослаться.
+    -- То же для четырёх кодов в notification_item и object_part_code в
+    -- part_replacement. Проверяет приложение по тройке, как в SAP.
     failure_mode_code   varchar(6),
     status              text         NOT NULL DEFAULT 'OPEN'
                         CHECK (status IN ('OPEN','IN_PROCESS','COMPLETED','CANCELLED')),
@@ -620,8 +627,20 @@ CREATE TABLE maint.notification (
     created_at          timestamptz  NOT NULL DEFAULT now(),
     source_system       text         NOT NULL DEFAULT 'manual',
     source_key          text,
-    CHECK (func_location_id IS NOT NULL OR equipment_id IS NOT NULL)
+    -- Автозаявка от прогноза. Новую колонку origin не заводим: source_system
+    -- уже отличает 'manual' (диспетчер завёл руками) от 'forecast' (родил расчёт).
+    -- Внешнего ключа на pred.forecast здесь нет намеренно: его ставит
+    -- schema_xref.sql, потому что schema_events.sql накатывается после этого файла.
+    forecast_id         bigint,
+    -- Срок выполнения. Для превентивной заявки он обязан наступить РАНЬШЕ
+    -- прогнозируемого отказа, иначе заявка не превентивная (М-13).
+    due_at              timestamptz,
+    CHECK (func_location_id IS NOT NULL OR equipment_id IS NOT NULL),
+    CHECK (source_system <> 'forecast' OR forecast_id IS NOT NULL)
 );
+
+CREATE INDEX ix_notif_forecast ON maint.notification(forecast_id)
+    WHERE forecast_id IS NOT NULL;
 COMMENT ON TABLE  maint.notification IS 'Сообщение ТОиР (SAP QMEL): зафиксированное отклонение состояния объекта. Основа истории отказов';
 COMMENT ON COLUMN maint.notification.failure_mode_code IS 'Режим отказа по каталогу U: NOO нет сигнала, SPO ложное срабатывание, FTO не открылось, VIB вибрация';
 COMMENT ON COLUMN maint.notification.source_key IS 'ID исходной записи: сработка СМВУ, запись журнала ОДС';
@@ -676,6 +695,10 @@ COMMENT ON TABLE maint.work_order IS 'Заказ ТОиР (SAP AUFK/AFIH): уп�
 CREATE INDEX ix_order_eq   ON maint.work_order(equipment_id, planned_start DESC);
 CREATE INDEX ix_order_floc ON maint.work_order(func_location_id, planned_start DESC);
 
+-- История монтажа объявлена раньше заказов (раздел 2), поэтому ключ ставим здесь.
+ALTER TABLE asset.equipment_install_history
+    ADD CONSTRAINT instl_order_fk FOREIGN KEY (order_id) REFERENCES maint.work_order(id);
+
 CREATE TABLE maint.work_order_operation (
     id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     order_id            bigint       NOT NULL REFERENCES maint.work_order(id) ON DELETE CASCADE,
@@ -689,7 +712,8 @@ CREATE TABLE maint.work_order_operation (
     actual_work         numeric(10,2),
     work_uom            varchar(4)   DEFAULT 'ЧАС',
     capacity_count      smallint     DEFAULT 1,
-    -- ссылка на наряд-допуск из АРМ-Контроль
+    -- ссылка на наряд-допуск из АРМ-Контроль = permit.permit.number;
+    -- внешний ключ ставит schema_xref.sql, потому что наряды накатываются позже
     permit_no           varchar(30),
     deviation_reason    varchar(4),                 -- справочник причин отклонения
     UNIQUE (order_id, operation_no)
@@ -838,3 +862,36 @@ CREATE RECURSIVE VIEW asset.v_floc_path (id, code, name, level, path, path_names
       JOIN asset.v_floc_path p ON p.id = c.parent_id;
 
 COMMENT ON VIEW asset.v_floc_path IS 'Полный путь технического места от предприятия до объекта — для дерева и хлебных крошек';
+
+
+-- ---------------------------------------------------------------------------
+-- Наработка оборудования с цензурой. Обещана в docs/HLD.md разд. 5.1 и до сих
+-- пор отсутствовала.
+--
+-- Главное здесь — failed. Ноль означает «объект ещё работает», а НЕ «отказа
+-- не было». Насос, отработавший 900 дней и сломавшийся, и насос, работающий
+-- 900 дней и живой, — две разные записи. Смешаем их — средняя наработка выйдет
+-- заниженной, потому что долгожители не попадут в статистику: в примере
+-- code/reliability_fit.py занижение вышло в 2,4 раза.
+--
+-- На этой таблице стоят три расчёта: критерий прогнозируемости k, оценка
+-- Каплана-Мейера и подгонка Вейбулла. Без неё вопрос «имеет ли смысл прогноз
+-- по этому типу оборудования» остаётся без ответа.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE maint.equipment_life (
+    equipment_id   bigint  NOT NULL REFERENCES asset.equipment(id),
+    equipment_type text    NOT NULL,      -- насос, вентилятор, датчик: по чему группируем
+    ttf_days       numeric(10,2) NOT NULL CHECK (ttf_days > 0),
+    failed         smallint NOT NULL CHECK (failed IN (0, 1)),
+    observed_from  timestamptz NOT NULL,  -- с какого момента наблюдаем
+    observed_to    timestamptz NOT NULL,  -- отказ, если failed=1; иначе конец наблюдения
+    notification_id bigint REFERENCES maint.notification(id),  -- чем подтверждён отказ
+    PRIMARY KEY (equipment_id, observed_from),
+    CHECK (failed = 0 OR notification_id IS NOT NULL)
+);
+
+CREATE INDEX ix_eqlife_type ON maint.equipment_life(equipment_type, failed);
+
+COMMENT ON COLUMN maint.equipment_life.failed IS
+    'Цензура: 1 отказ наступил, 0 объект дожил до конца наблюдения и работает';
