@@ -1,6 +1,11 @@
 -- schema_events.sql — события СМВУ, телеметрия, признаки и прогнозы
 -- PostgreSQL 15+ (нативное декларативное партиционирование), расширения: btree_gist.
 -- Целевая версия поставки: 18.6 (образ postgis/postgis:18-3.6).
+--
+-- Порядок накатывания: schema_assets.sql -> schema_geo.sql -> schema_permits.sql ->
+-- ЭТОТ ФАЙЛ -> schema_xref.sql. Здесь есть ссылки на asset.equipment, load.batch
+-- и permit.permit, поэтому раньше трёх первых файлов накатывать нельзя.
+-- Ссылки section_id -> ref.object_xref добавляет schema_xref.sql (см. шапку там).
 -- PostGIS здесь не нужен: геометрия живёт в schema_geo.sql, сюда приходит только section_id.
 -- TimescaleDB НЕ требуется. Если заказчик отдаст сырую телеметрию и smvu.reading
 -- перевалит за 300–500 млн строк — см. комментарий в разделе 4 этого файла.
@@ -13,6 +18,7 @@
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
+CREATE SCHEMA IF NOT EXISTS ref;    -- справочники; создаётся и в schema_assets.sql
 CREATE SCHEMA IF NOT EXISTS smvu;   -- сырьё: события и показания
 CREATE SCHEMA IF NOT EXISTS feat;   -- предрасчёт: суточные свёртки и вектор признаков
 CREATE SCHEMA IF NOT EXISTS pred;   -- прогнозы и журнал расчётов
@@ -30,13 +36,17 @@ CREATE TABLE smvu.event_type (
 );
 
 -- Датчик. Один физический прибор = одна строка. Ключ склейки с реестром оборудования —
--- equipment_id из asset.equipment (schema_assets.sql). Если склейка не состоялась,
--- equipment_id остаётся NULL, а датчик всё равно попадает в модель по section_id.
+-- asset.equipment.id (schema_assets.sql). Если склейка не состоялась, equipment_id
+-- остаётся NULL, а датчик всё равно попадает в модель по section_id. Списали
+-- оборудование — ссылка обнуляется, а датчик с его историей событий остаётся.
 CREATE TABLE smvu.sensor (
     sensor_id      integer PRIMARY KEY,
     external_id    text NOT NULL UNIQUE,       -- как датчик зовут в выгрузке СМВУ
-    equipment_id   text,                       -- -> asset.equipment.equipment_id
-    section_id     integer NOT NULL,           -- -> geo_object, участок 200 м
+    equipment_id   bigint REFERENCES asset.equipment(id) ON DELETE SET NULL,
+    -- Участок 200 м. Внешний ключ на ref.object_xref добавляет schema_xref.sql:
+    -- таблица перекодировки создаётся последней, потому что ссылается сразу
+    -- на geo, asset и permit.
+    section_id     integer NOT NULL,
     sensor_type    text NOT NULL,              -- ДМТ-6, ТК-1, СЕНСИС-500, МОД, СИГМА-1, БСМ
     installed_at   date,
     removed_at     date,
@@ -61,7 +71,9 @@ CREATE TABLE smvu.event (
     value_num    real,                          -- показание в момент события, если есть
     check_result smallint,                      -- NULL = не проверяли, 0 = ложная, 1 = подтверждена
     checked_at   timestamptz,
-    source_batch bigint,                        -- -> load.batch, из какого файла строка
+    -- Из какого файла строка. Удалить пакет, чьи события уже лежат в базе,
+    -- нельзя (NO ACTION по умолчанию): пропадёт след, откуда взялась строка.
+    source_batch bigint REFERENCES load.batch(id),
     PRIMARY KEY (event_id, event_time)
 ) PARTITION BY RANGE (event_time);
 
@@ -118,7 +130,7 @@ CREATE INDEX event_confirmed_idx ON smvu.event (section_id, event_time)
 -- Дискретность — 1 минута. Тоньше смысла нет: время срабатывания датчика метана
 -- по регламенту 8–15 с, и «секундная» телеметрия описывала бы шум прибора, а не процесс.
 CREATE TABLE smvu.reading (
-    sensor_id  integer     NOT NULL,
+    sensor_id  integer     NOT NULL REFERENCES smvu.sensor,
     read_time  timestamptz NOT NULL,
     value_num  real        NOT NULL,
     quality    smallint    NOT NULL DEFAULT 0,  -- 0 ок, 1 подозрение, 2 брак
@@ -142,7 +154,7 @@ CREATE INDEX reading_time_brin ON smvu.reading USING brin (read_time) WITH (page
 -- событий, но строка втрое уже и читается одним сканом.
 
 CREATE TABLE feat.section_daily (
-    section_id      integer NOT NULL,
+    section_id      integer NOT NULL,        -- FK на ref.object_xref — в schema_xref.sql
     day             date    NOT NULL,
     events_total    integer NOT NULL DEFAULT 0,
     events_ch4      integer NOT NULL DEFAULT 0,
@@ -200,7 +212,7 @@ END $$ LANGUAGE plpgsql;
 -- 4125 строк. Таблица целиком влезает в shared_buffers и читается за миллисекунды.
 -- Признаки-«окна» (7/30/90/365 дней) считаются из feat.section_daily, а не из событий.
 CREATE TABLE feat.section_features (
-    section_id      integer PRIMARY KEY,
+    section_id      integer PRIMARY KEY,     -- FK на ref.object_xref — в schema_xref.sql
     computed_at     timestamptz NOT NULL,
     ev_1d           integer,
     ev_7d           integer,
@@ -244,13 +256,24 @@ CREATE TABLE pred.run (
 );
 
 CREATE TABLE pred.forecast (
+    -- Собственный ключ нужен, чтобы на прогноз можно было сослаться одним числом:
+    -- из заявки (maint.notification.forecast_id), из вердикта (pred.feedback),
+    -- из ссылки в интерфейсе. Пара (run_id, section_id) для этого не годится:
+    -- в одном прогоне у одного участка может быть несколько направлений.
+    forecast_id  bigint  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id       bigint  NOT NULL REFERENCES pred.run,
-    section_id   integer NOT NULL,
+    section_id   integer NOT NULL,       -- FK на ref.object_xref — в schema_xref.sql
+    -- Четыре направления из постановки. Без этой колонки нельзя ни отфильтровать
+    -- журнал, ни посчитать метрики отдельно по каждому направлению, а постановка
+    -- разрешает взять одно направление и отвечать только за него.
+    direction    text    NOT NULL
+                 CHECK (direction IN ('sensor_failure','fire',
+                                      'unauthorized_access','wear')),
     horizon_h    smallint NOT NULL,      -- 24 и более
     probability  real     NOT NULL,
     risk_rank    integer  NOT NULL,
     factors      jsonb    NOT NULL,      -- топ-5 вкладов признаков: [{"f":"ev_7d","v":0.31}, ...]
-    PRIMARY KEY (run_id, section_id)
+    UNIQUE (run_id, section_id, direction)
 );
 
 CREATE INDEX forecast_rank_idx ON pred.forecast (run_id, risk_rank);
@@ -258,7 +281,7 @@ CREATE INDEX forecast_rank_idx ON pred.forecast (run_id, risk_rank);
 -- Текущий прогноз — то, что отдаёт API на каждый чих. Одна строка на участок,
 -- переписывается в конце расчёта одной транзакцией.
 CREATE TABLE pred.forecast_current (
-    section_id   integer PRIMARY KEY,
+    section_id   integer PRIMARY KEY,    -- FK на ref.object_xref — в schema_xref.sql
     run_id       bigint  NOT NULL REFERENCES pred.run,
     computed_at  timestamptz NOT NULL,
     horizon_h    smallint NOT NULL,
@@ -278,22 +301,74 @@ CREATE INDEX forecast_current_rank_idx ON pred.forecast_current (risk_rank);
 -- Лечится диапазонным типом + GiST-индексом из btree_gist: по одному индексу
 -- проверяются и участок (btree-часть), и пересечение интервалов (gist-часть).
 
-CREATE TABLE permit_window (
-    permit_id   bigint PRIMARY KEY,
-    section_id  integer NOT NULL,
+-- Это витрина, а не источник: строку сюда кладёт сборка признаков из permit.permit
+-- через ref.object_xref (permit.location -> section_id). Удалили наряд —
+-- удаляется и его окно, поэтому ON DELETE CASCADE.
+CREATE TABLE feat.permit_window (
+    permit_id   bigint PRIMARY KEY REFERENCES permit.permit(id) ON DELETE CASCADE,
+    section_id  integer NOT NULL,            -- FK на ref.object_xref — в schema_xref.sql
     valid       tstzrange NOT NULL,
     work_kind   text NOT NULL,
     EXCLUDE USING gist (section_id WITH =, valid WITH &&)  -- заодно запрет двух нарядов внахлёст
 );
 
-CREATE INDEX permit_window_gist ON permit_window USING gist (section_id, valid);
+CREATE INDEX permit_window_gist ON feat.permit_window USING gist (section_id, valid);
 
 -- Запрос, который после этого работает по индексу:
 --   SELECT e.event_id, p.permit_id
 --     FROM smvu.event e
---     LEFT JOIN permit_window p
+--     LEFT JOIN feat.permit_window p
 --       ON p.section_id = e.section_id AND p.valid @> e.event_time
 --    WHERE e.event_time >= now() - interval '7 days';
+
+-- ---------------------------------------------------------------------------
+-- Вердикт диспетчера по прогнозу.
+--
+-- ВАЖНО: это НЕ требование постановки. Постановка велит считать Precision
+-- и Recall на тестовой выборке (docs/task.md, «Описание итогового продукта»),
+-- а для этого хватает исторической разметки smvu.event.check_result, которую
+-- заказчик отдаёт вместе с выгрузками. Эта таблица нужна, только если мы хотим
+-- показывать качество на живой работе. Решение о её включении — за Мирославой,
+-- см. docs/plan.md, веха 6.
+--
+-- Вердикт пишется ВСТАВКОЙ, а не правкой: журнал служит доказательством
+-- на приёмке, а таблица, которую можно отредактировать, доказательством не служит.
+-- Ошибочный вердикт исправляется новой строкой, последняя по decided_at — текущая.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE ref.feedback_reason (
+    code  text PRIMARY KEY,
+    name  text NOT NULL,
+    -- Разделяет «сломалось оборудование» и «наврала модель». Без этого нельзя
+    -- понять, что ухудшается — модель или парк.
+    bucket text NOT NULL
+           CHECK (bucket IN ('equipment','instrument','model','human'))
+);
+
+INSERT INTO ref.feedback_reason (code, name, bucket) VALUES
+    ('sensor_fault',   'Отказ датчика',            'instrument'),
+    ('planned_works',  'Плановые работы',          'human'),
+    ('weather',        'Погода',                   'equipment'),
+    ('neighbour_work', 'Ремонт соседней сети',     'human'),
+    ('model_error',    'Модель ошиблась',          'model'),
+    ('unknown',        'Неизвестно',               'model');
+
+CREATE TABLE pred.feedback (
+    feedback_id bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    forecast_id bigint      NOT NULL REFERENCES pred.forecast(forecast_id),
+    verdict     smallint    NOT NULL CHECK (verdict IN (0, 1)),  -- 1 подтвердилось, 0 ложная
+    reason_code text        REFERENCES ref.feedback_reason(code),
+    comment     text,
+    decided_at  timestamptz NOT NULL DEFAULT now(),
+    -- Логин диспетчера. Внешнего ключа нет: таблицы пользователей ref.app_user
+    -- (docs/HLD.md разд. 3.5) в схеме пока нет. Появится — ставить ключ сюда.
+    decided_by  text        NOT NULL,
+    -- Для вердикта «ложная» причина обязательна и берётся из закрытого списка:
+    -- свободный текст в этом поле убивает статистику (Ф-35).
+    CHECK (verdict = 1 OR reason_code IS NOT NULL)
+);
+
+CREATE INDEX feedback_forecast_idx ON pred.feedback (forecast_id, decided_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- 9. Опорные запросы, под которые всё это заточено
