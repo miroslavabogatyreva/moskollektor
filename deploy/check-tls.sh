@@ -34,7 +34,7 @@ OPENSSL=/opt/homebrew/bin/openssl
 
 echo "# Протокол НФ-75: версии TLS и наборы шифров"
 echo
-echo "Замер $(date '+%d.%m.%Y %H:%M %Z'), узел \`$HOST:$PORT\`, адрес вида $KIND."
+echo "Замер $(date '+%d.%m.%Y %H:%M %Z'), узел \`$TARGET:$PORT\`, адрес вида $KIND."
 echo "Инструменты: \`$(nmap --version 2>/dev/null | head -1)\`, \`$($OPENSSL version)\`."
 echo
 echo '## Главное доказательство: nmap'
@@ -79,8 +79,15 @@ for V in tls1 tls1_1 tls1_2 tls1_3; do
             VERDICT="ОТКАЗАЛ НАШ КЛИЕНТ — рукопожатия не было, замер не засчитан" ;;
         *"alert protocol version"*|*"alert handshake failure"*|*"Cipher is (NONE)"*)
             VERDICT="СЕРВЕР ОТКЛОНИЛ — это и есть доказательство для НФ-75" ;;
-        *)
+        # Успех опознаём по положительному признаку, а не по отсутствию возражений.
+        # Строку `New, TLSv1.2, Cipher is ...` openssl печатает только после
+        # состоявшегося рукопожатия. Пока этой ветки не было, «всё остальное»
+        # объявлялось успехом — и скрипт, наведённый на порт, где никто не слушает,
+        # писал четыре «СЕРВЕР ПРИНЯЛ» подряд при полном отсутствии сервера.
+        *"New, TLS"*)
             VERDICT="СЕРВЕР ПРИНЯЛ — $(echo "$OUT" | grep -m1 '^New,' | sed 's/^New, //')" ;;
+        *)
+            VERDICT="СОЕДИНЕНИЯ НЕ БЫЛО — сервер не ответил, замер не засчитан" ;;
     esac
 
     echo "### -$V"
@@ -89,7 +96,7 @@ for V in tls1 tls1_1 tls1_2 tls1_3; do
     echo
     echo '```'
     echo "$OUT" \
-        | grep -E 'CONNECTED|Protocol|Cipher|alert|no protocols available|handshake failure' \
+        | grep -E 'CONNECTED|Protocol|Cipher|alert|no protocols available|handshake failure|connect:' \
         | head -6 || true
     echo '```'
     echo
