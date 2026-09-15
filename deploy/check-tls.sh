@@ -16,8 +16,16 @@
 # что умеет линкованная библиотека, — поэтому его ответ говорит о сервере.
 set -eu
 
-HOST="${1:-localhost}"
+HOST="${1:-127.0.0.1}"
 PORT="${2:-443}"
+
+# Адрес нового вида (IPv6) оба инструмента берут иначе: nmap требует флага -6,
+# а openssl — адреса в квадратных скобках, иначе он примет двоеточие внутри
+# адреса за отделитель порта. Узнаём такой адрес по двоеточию в нём.
+case "$HOST" in
+    *:*) NMAP6="-6"; TARGET="[$HOST]"; KIND="IPv6" ;;
+    *)   NMAP6="";   TARGET="$HOST";   KIND="IPv4" ;;
+esac
 
 # На маке два openssl: /usr/bin/openssl — это LibreSSL, он ведёт себя с флагами
 # иначе. Берём тот, что из homebrew, если он есть.
@@ -26,7 +34,7 @@ OPENSSL=/opt/homebrew/bin/openssl
 
 echo "# Протокол НФ-75: версии TLS и наборы шифров"
 echo
-echo "Замер $(date '+%d.%m.%Y %H:%M %Z'), узел \`$HOST:$PORT\`."
+echo "Замер $(date '+%d.%m.%Y %H:%M %Z'), узел \`$HOST:$PORT\`, адрес вида $KIND."
 echo "Инструменты: \`$(nmap --version 2>/dev/null | head -1)\`, \`$($OPENSSL version)\`."
 echo
 echo '## Главное доказательство: nmap'
@@ -37,7 +45,8 @@ echo
 echo '```'
 # -n выключает обратный DNS: без него nmap печатает в протокол предупреждение
 # mass_dns про ненайденные серверы имён, а заказчику это читать незачем.
-nmap -n --script ssl-enum-ciphers -p "$PORT" "$HOST" 2>&1 || true
+# shellcheck disable=SC2086
+nmap -n $NMAP6 --script ssl-enum-ciphers -p "$PORT" "$HOST" 2>&1 || true
 echo '```'
 echo
 echo '## Контроль: четыре форсированных подключения openssl'
@@ -59,7 +68,7 @@ for V in tls1 tls1_1 tls1_2 tls1_3; do
         *)           EXTRA="" ;;
     esac
     # shellcheck disable=SC2086
-    OUT=$(echo | $OPENSSL s_client -connect "$HOST:$PORT" -"$V" $EXTRA 2>&1 || true)
+    OUT=$(echo | $OPENSSL s_client -connect "$TARGET:$PORT" -"$V" $EXTRA 2>&1 || true)
 
     # Вывод openssl читается неверно без этой строки. При отказе сервера он всё
     # равно печатает `Protocol: TLSv1`, потому что показывает запрошенную версию,
