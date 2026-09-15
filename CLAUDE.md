@@ -195,6 +195,12 @@ REST API или без карты объектов не сдан, каким б�
   пароль или не пропишет `NOPASSWD` в `/etc/sudoers.d/`. **Открытый вопрос,
   не решён.**
 
+**Вход по паролю в SSH отключён для всех учёток, 15.09.2026.** Стоял на `yes`
+из-за `/etc/ssh/sshd_config.d/50-cloud-init.conf` — cloud-init подключается
+раньше основного `sshd_config` и перебивал его `PasswordAuthentication no`.
+Правили файл cloud-init, не основной конфиг; эффективное значение проверяется
+командой `sshd -T | grep passwordauthentication` на сервере.
+
 ## Git: где живёт проект
 
 **Репозиторий:** `https://github.com/miroslavabogatyreva/moskollektor.git`, приватный.
