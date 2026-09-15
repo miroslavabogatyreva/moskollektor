@@ -1,0 +1,20 @@
+{
+  "schema_version": "feat.v1",
+  "run_id": 48217,
+  "computed_at": "2026-09-14T09:05:12+03:00",
+  "horizon_h": 24,
+  "directions": ["sensor_failure"],
+  "feature_names": [
+    "readings_1d", "readings_7d", "readings_30d", "readings_365d",
+    "alarms_7d", "alarms_365d", "days_since_last_reading", "sensor_count",
+    "silent_share_30d", "chatter_7d", "fault_30d", "freeze_3",
+    "undefined_share_7d", "rate_ratio_7d", "rate_ratio_year", "gap_to_median",
+    "long_gap_share_7d", "silence_normalized", "neighbor_fault_7d", "bad7",
+    "season_sin", "season_cos"
+  ],
+  "section_ids": [40421, 40422],
+  "values": [
+    [210, 1480, 6320, 78210, 3, 41, 0, 8, 0.125, 6, 1, 0, 0.02, 0.31, 0.18, 4.7, 0.42, 6.1, 1, 14, 0.71, 0.70],
+    [340, 2380, 10120, 121870, 0, 2, 0, 6, 0.0, 0, 0, 0, 0.01, 0.98, 1.02, 1.03, null, 0.9, 0, 0, 0.71, 0.70]
+  ]
+}

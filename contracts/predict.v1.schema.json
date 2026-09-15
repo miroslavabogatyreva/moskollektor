@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moskollektor.local/contracts/predict.v1.schema.json",
+  "title": "Контракт POST /predict — запрос и ответ",
+  "$comment": "Источник признаков и их порядка — contracts/features.v1.yaml (rules.order_is_contract, rules.null_means_missing). Оба сообщения проверяются одним вызовом jsonschema.validate(doc, схема) — oneOf различает их по форме. НО для разбора ошибки берите ветку напрямую (#/$defs/PredictRequest или #/$defs/PredictResponse): через корневой oneOf движок печатает дамп всего документа и не говорит, какое поле неверно, а через ветку — 'predictions[0].probability[0]: 1.4 is greater than the maximum of 1'. Проверено 15.09.2026 на jsonschema 4.26.0.",
+  "oneOf": [
+    { "$ref": "#/$defs/PredictRequest" },
+    { "$ref": "#/$defs/PredictResponse" }
+  ],
+  "$defs": {
+    "PredictRequest": {
+      "type": "object",
+      "title": "Запрос расчёта к POST /predict",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "run_id", "computed_at", "horizon_h",
+        "directions", "feature_names", "section_ids", "values"
+      ],
+      "properties": {
+        "schema_version": { "const": "feat.v1" },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "computed_at": { "type": "string", "format": "date-time" },
+        "horizon_h": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "$comment": "Постановка требует горизонт не короче 24 часов — это проверяет приёмка, а не эта схема."
+        },
+        "directions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "feature_names": {
+          "const": [
+            "readings_1d", "readings_7d", "readings_30d", "readings_365d",
+            "alarms_7d", "alarms_365d", "days_since_last_reading", "sensor_count",
+            "silent_share_30d", "chatter_7d", "fault_30d", "freeze_3",
+            "undefined_share_7d", "rate_ratio_7d", "rate_ratio_year", "gap_to_median",
+            "long_gap_share_7d", "silence_normalized", "neighbor_fault_7d", "bad7",
+            "season_sin", "season_cos"
+          ],
+          "$comment": "Ровно 22 имени в порядке contracts/features.v1.yaml. const — а не items+enum — потому что порядок сам является контрактом (rules.order_is_contract): переставленные колонки должны падать здесь же, а не только на стороне ML-контейнера."
+        },
+        "section_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer" }
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 22,
+            "maxItems": 22,
+            "items": { "type": ["number", "null"] }
+          },
+          "$comment": "null — «признака нет», а не 0 (rules.null_means_missing). Число строк values должно совпадать с числом section_ids; это проверяет ML-контейнер, а не JSON Schema — она не сравнивает длины двух разных полей."
+        }
+      }
+    },
+    "PredictResponse": {
+      "type": "object",
+      "title": "Ответ модели на POST /predict",
+      "additionalProperties": false,
+      "required": ["schema_version", "model_version", "run_id", "horizon_h", "predictions"],
+      "properties": {
+        "schema_version": { "const": "pred.v1" },
+        "model_version": { "type": "string", "minLength": 1 },
+        "model_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "$comment": "Необязательное поле: заполняет Николай, формат версии модели ещё не согласован (см. docs/HLD.md разд. 6.5)."
+        },
+        "degraded": {
+          "type": "boolean",
+          "$comment": "Необязательное поле по той же причине, что и model_sha256."
+        },
+        "run_id": { "type": "integer", "minimum": 1 },
+        "horizon_h": { "type": "integer", "exclusiveMinimum": 0 },
+        "predictions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["direction", "section_ids", "probability"],
+            "properties": {
+              "direction": { "type": "string", "minLength": 1 },
+              "section_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "integer" }
+              },
+              "probability": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            },
+            "$comment": "Поля factors здесь нет и не будет: решение Q7 в docs/plan.md — вклады признаков от модели (contributions) не берём, три признака для объяснения выбирает наш бэкенд сам, по отклонению от нормы. additionalProperties: false ловит возврат, если это поле вернётся."
+          }
+        }
+      }
+    }
+  }
+}

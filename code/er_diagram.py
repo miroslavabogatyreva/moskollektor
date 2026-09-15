@@ -20,7 +20,10 @@ from pathlib import Path
 # Ядро первой версии: по этим таблицам идёт расчёт прогноза и рождение заявки.
 CORE = [
     "ref.object_xref",
-    "smvu.sensor", "smvu.event", "smvu.event_type",
+    # smvu.event слита в smvu.reading (004_events.sql разд. 2), физических датчиков
+    # нет — есть каналы; smvu.event_type не заведена: типизированное событие пока
+    # не вычисляется.
+    "smvu.channel", "smvu.reading",
     "feat.section_daily", "feat.permit_window",
     "pred.run", "pred.forecast", "pred.forecast_current", "pred.feedback",
     "ref.feedback_reason",

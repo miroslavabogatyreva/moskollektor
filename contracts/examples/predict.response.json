@@ -1,0 +1,13 @@
+{
+  "schema_version": "pred.v1",
+  "model_version": "lgbm-sensor-stub-0.1",
+  "run_id": 48217,
+  "horizon_h": 24,
+  "predictions": [
+    {
+      "direction": "sensor_failure",
+      "section_ids": [40421, 40422],
+      "probability": [0.1843, 0.0212]
+    }
+  ]
+}

@@ -4,45 +4,40 @@ erDiagram
         uuid geo_object_id FK
         bigint func_location_id FK
         bigint permit_location_id FK
-        text smvu_address
+        text smvu_key
         text inventory_no
     }
-    smvu__sensor {
-        integer sensor_id PK
-        text external_id
+    smvu__channel {
+        integer channel_id PK
+        text system_kind FK
+        text sensor_kind FK
+        text tag
+        text name
+        text collector
+        integer picket
+        integer section_id FK
         bigint equipment_id FK
-        integer section_id FK
-        text sensor_type
-        date installed_at
-        date removed_at
-        boolean is_active
     }
-    smvu__event {
-        bigint event_id
-        timestamptz event_time
-        integer sensor_id FK
+    smvu__reading {
+        bigint journal_id
+        timestamptz read_time
+        integer channel_id FK
         integer section_id FK
-        text type_code FK
+        boolean is_alarm
+        text value_text
         real value_num
         bigint source_batch FK
-    }
-    smvu__event_type {
-        text type_code PK
-        text type_name
-        text system_code
-        boolean is_alarm
-        text comment
     }
     feat__section_daily {
         integer section_id FK
         date day
-        integer events_total
-        integer events_flood
-        integer events_fire
+        integer readings_total
+        integer alarms_total
+        integer alarms_fire
+        integer alarms_gas
+        integer alarms_security
+        integer alarms_flood
         integer confirmed_total
-        integer false_total
-        smallint active_sensors
-        smallint silent_sensors
     }
     feat__permit_window {
         bigint permit_id PK
@@ -197,25 +192,24 @@ erDiagram
     asset__equipment ||--o{ maint__notification : "equipment_id"
     asset__equipment ||--o{ maint__equipment_life : "equipment_id"
     maint__notification ||--o{ maint__equipment_life : "notification_id"
-    asset__equipment ||--o{ smvu__sensor : "equipment_id"
-    smvu__sensor ||--o{ smvu__event : "sensor_id"
-    smvu__event_type ||--o{ smvu__event : "type_code"
-    pred__run ||--o{ pred__forecast : "run_id"
-    pred__run ||--o{ pred__forecast_current : "run_id"
-    permit__permit ||--o{ feat__permit_window : "permit_id"
-    pred__forecast ||--o{ pred__feedback : "forecast_id"
-    ref__feedback_reason ||--o{ pred__feedback : "reason_code"
     geo__geo_object ||--o{ geo__network_edge : "object_id"
     geo__geo_object ||--o{ geo__object_risk : "object_id"
     geo__risk_level ||--o{ geo__object_risk : "risk_code"
     permit__location ||--o{ permit__location : "parent_id"
     permit__permit ||--o{ permit__permit : "template_id"
     permit__location ||--o{ permit__permit : "location_id"
+    asset__equipment ||--o{ smvu__channel : "equipment_id"
+    smvu__channel ||--o{ smvu__reading : "channel_id"
+    pred__run ||--o{ pred__forecast : "run_id"
+    pred__run ||--o{ pred__forecast_current : "run_id"
+    permit__permit ||--o{ feat__permit_window : "permit_id"
+    pred__forecast ||--o{ pred__feedback : "forecast_id"
+    ref__feedback_reason ||--o{ pred__feedback : "reason_code"
     geo__geo_object ||--o{ ref__object_xref : "geo_object_id"
     asset__func_location ||--o{ ref__object_xref : "func_location_id"
     permit__location ||--o{ ref__object_xref : "permit_location_id"
-    ref__object_xref ||--o{ smvu__sensor : "section_id"
-    ref__object_xref ||--o{ smvu__event : "section_id"
+    ref__object_xref ||--o{ smvu__channel : "section_id"
+    ref__object_xref ||--o{ smvu__reading : "section_id"
     ref__object_xref ||--o{ feat__section_daily : "section_id"
     ref__object_xref ||--o{ feat__permit_window : "section_id"
     ref__object_xref ||--o{ pred__forecast : "section_id"
