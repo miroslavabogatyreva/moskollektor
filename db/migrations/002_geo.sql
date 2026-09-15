@@ -1,4 +1,4 @@
--- schema_geo.sql — геосхема карты объектов Москоллектора (PostgreSQL 14+ / PostGIS 3+)
+-- 002_geo.sql — геосхема карты объектов Москоллектора (PostgreSQL 14+ / PostGIS 3+)
 --
 -- Откуда взято:
 --   * реестр объектов с GUID + внешним кодом, пара "полное/краткое имя", разделение слоёв
@@ -15,7 +15,7 @@
 --   то есть длина участка по проекции завышена почти вдвое. ТЗ Арктик СПГ 2 про это
 --   предупреждает прямым текстом, и мы на эти грабли не наступаем.
 
--- Порядок накатывания: после schema_assets.sql (нужен ref.district), до schema_permits.sql.
+-- Порядок накатывания: после 001_assets.sql (нужен ref.district), до 003_permits.sql.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

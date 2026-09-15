@@ -3,14 +3,14 @@
 
 Зачем генерировать, а не рисовать руками: нарисованная руками диаграмма
 расходится с кодом на первой же правке, и заметить это некому. Здесь схема
-читается из code/schema_*.sql, поэтому диаграмма либо верна, либо падает.
+читается из db/migrations/*.sql, поэтому диаграмма либо верна, либо падает.
 
 Первая версия базы — это не все 88 таблиц, а те, через которые проходит
 путь от события СМВУ до заявки. Остальные — НСИ ТОиР и наряды-допуски,
 они нужны, но на диаграмме связей первой версии только мешают.
 
 Связи берутся и из REFERENCES в CREATE TABLE, и из ALTER TABLE ... FOREIGN KEY:
-ключи между схемами лежат в schema_xref.sql отдельными ALTER.
+ключи между схемами лежат в 005_xref.sql отдельными ALTER.
 """
 
 import re
@@ -46,7 +46,7 @@ def strip_comments(sql):
 def parse(root):
     """Возвращает {таблица: [(колонка, тип, признак ключа)]} и список связей."""
     tables, links = {}, []
-    for f in sorted(root.glob("schema_*.sql")):
+    for f in sorted(root.glob("[0-9][0-9][0-9]_*.sql")):
         sql = strip_comments(f.read_text())
         for name, body in RE_TABLE.findall(sql):
             cols = []
@@ -109,10 +109,10 @@ def _selfcheck(tables, links):
 
 
 if __name__ == "__main__":
-    root = Path(__file__).parent
-    tables, links = parse(root)
+    root = Path(__file__).resolve().parent.parent
+    tables, links = parse(root / "db" / "migrations")
     _selfcheck(tables, links)
     text = mermaid(tables, links, only=CORE)
-    out = root.parent / "diagrams" / "er-v1.mmd"
+    out = root / "diagrams" / "er-v1.mmd"
     out.write_text(text + "\n")
-    print(f"записано: {out.relative_to(root.parent)}, {len(text.splitlines())} строк")
+    print(f"записано: {out.relative_to(root)}, {len(text.splitlines())} строк")

@@ -1,12 +1,12 @@
--- schema_events.sql — события СМВУ, телеметрия, признаки и прогнозы
+-- 004_events.sql — события СМВУ, телеметрия, признаки и прогнозы
 -- PostgreSQL 15+ (нативное декларативное партиционирование), расширения: btree_gist.
 -- Целевая версия поставки: 18.6 (образ postgis/postgis:18-3.6).
 --
--- Порядок накатывания: schema_assets.sql -> schema_geo.sql -> schema_permits.sql ->
--- ЭТОТ ФАЙЛ -> schema_xref.sql. Здесь есть ссылки на asset.equipment, load.batch
+-- Порядок накатывания: 001_assets.sql -> 002_geo.sql -> 003_permits.sql ->
+-- ЭТОТ ФАЙЛ -> 005_xref.sql. Здесь есть ссылки на asset.equipment, load.batch
 -- и permit.permit, поэтому раньше трёх первых файлов накатывать нельзя.
--- Ссылки section_id -> ref.object_xref добавляет schema_xref.sql (см. шапку там).
--- PostGIS здесь не нужен: геометрия живёт в schema_geo.sql, сюда приходит только section_id.
+-- Ссылки section_id -> ref.object_xref добавляет 005_xref.sql (см. шапку там).
+-- PostGIS здесь не нужен: геометрия живёт в 002_geo.sql, сюда приходит только section_id.
 -- TimescaleDB НЕ требуется. Если заказчик отдаст сырую телеметрию и smvu.reading
 -- перевалит за 300–500 млн строк — см. комментарий в разделе 4 этого файла.
 --
@@ -18,7 +18,7 @@
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-CREATE SCHEMA IF NOT EXISTS ref;    -- справочники; создаётся и в schema_assets.sql
+CREATE SCHEMA IF NOT EXISTS ref;    -- справочники; создаётся и в 001_assets.sql
 CREATE SCHEMA IF NOT EXISTS smvu;   -- сырьё: события и показания
 CREATE SCHEMA IF NOT EXISTS feat;   -- предрасчёт: суточные свёртки и вектор признаков
 CREATE SCHEMA IF NOT EXISTS pred;   -- прогнозы и журнал расчётов
@@ -135,7 +135,7 @@ CREATE TABLE smvu.channel (
     name         text,                         -- название_датчика, "КД АВ ПК106 ур.3"
     collector    text,                         -- префикс тега: коллектор
     picket       integer,                      -- номер ПК из названия
-    -- Участок. Внешний ключ на ref.object_xref добавляет schema_xref.sql.
+    -- Участок. Внешний ключ на ref.object_xref добавляет 005_xref.sql.
     -- NULL — канал не в коллекторе либо канал-заглушка, см. комментарий выше.
     section_id   integer,
     equipment_id bigint REFERENCES asset.equipment(id) ON DELETE SET NULL,
@@ -398,7 +398,7 @@ CREATE INDEX reading_fault_idx ON smvu.reading (channel_id, read_time)
 -- событий, но строка втрое уже и читается одним сканом.
 
 CREATE TABLE feat.section_daily (
-    section_id      integer NOT NULL,        -- FK на ref.object_xref — в schema_xref.sql
+    section_id      integer NOT NULL,        -- FK на ref.object_xref — в 005_xref.sql
     day             date    NOT NULL,
     readings_total  integer NOT NULL DEFAULT 0,   -- все показания за сутки
     alarms_total    integer NOT NULL DEFAULT 0,   -- из них с флагом тревожное
@@ -498,7 +498,7 @@ END $$ LANGUAGE plpgsql;
 -- 4125 строк. Таблица целиком влезает в shared_buffers и читается за миллисекунды.
 -- Признаки-«окна» (7/30/90/365 дней) считаются из feat.section_daily, а не из событий.
 CREATE TABLE feat.section_features (
-    section_id      integer PRIMARY KEY,     -- FK на ref.object_xref — в schema_xref.sql
+    section_id      integer PRIMARY KEY,     -- FK на ref.object_xref — в 005_xref.sql
     computed_at     timestamptz NOT NULL,
     ev_1d           integer,
     ev_7d           integer,
@@ -553,7 +553,7 @@ CREATE TABLE pred.forecast (
     -- в одном прогоне у одного участка может быть несколько направлений.
     forecast_id  bigint  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     run_id       bigint  NOT NULL REFERENCES pred.run,
-    section_id   integer NOT NULL,       -- FK на ref.object_xref — в schema_xref.sql
+    section_id   integer NOT NULL,       -- FK на ref.object_xref — в 005_xref.sql
     -- Четыре направления из постановки. Без этой колонки нельзя ни отфильтровать
     -- журнал, ни посчитать метрики отдельно по каждому направлению, а постановка
     -- разрешает взять одно направление и отвечать только за него.
@@ -572,7 +572,7 @@ CREATE INDEX forecast_rank_idx ON pred.forecast (run_id, risk_rank);
 -- Текущий прогноз — то, что отдаёт API на каждый чих. Одна строка на участок,
 -- переписывается в конце расчёта одной транзакцией.
 CREATE TABLE pred.forecast_current (
-    section_id   integer PRIMARY KEY,    -- FK на ref.object_xref — в schema_xref.sql
+    section_id   integer PRIMARY KEY,    -- FK на ref.object_xref — в 005_xref.sql
     run_id       bigint  NOT NULL REFERENCES pred.run,
     computed_at  timestamptz NOT NULL,
     horizon_h    smallint NOT NULL,
@@ -597,7 +597,7 @@ CREATE INDEX forecast_current_rank_idx ON pred.forecast_current (risk_rank);
 -- удаляется и его окно, поэтому ON DELETE CASCADE.
 CREATE TABLE feat.permit_window (
     permit_id   bigint PRIMARY KEY REFERENCES permit.permit(id) ON DELETE CASCADE,
-    section_id  integer NOT NULL,            -- FK на ref.object_xref — в schema_xref.sql
+    section_id  integer NOT NULL,            -- FK на ref.object_xref — в 005_xref.sql
     valid       tstzrange NOT NULL,
     work_kind   text NOT NULL,
     EXCLUDE USING gist (section_id WITH =, valid WITH &&)  -- заодно запрет двух нарядов внахлёст

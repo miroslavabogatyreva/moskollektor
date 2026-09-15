@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка пяти файлов схемы до накатывания на базу.
+"""Проверка пяти миграций db/migrations/001…005 до накатывания на базу.
 
 Зачем. Postgres на машине разработчика может не стоять, а ошибка вида «таблица
 ссылается на несуществующую» вылезет только при накатывании миграций — то есть
@@ -48,10 +48,12 @@ import re
 import sys
 from pathlib import Path
 
-# Порядок накатывания. Он же порядок миграций из docs/HLD.md разд. 5.4,
-# свёрнутый до пяти файлов: НСИ и ТОиР -> гео -> наряды -> события -> перекодировка.
-FILES = ["schema_assets.sql", "schema_geo.sql", "schema_permits.sql",
-         "schema_events.sql", "schema_xref.sql"]
+# Порядок накатывания: НСИ и ТОиР -> гео -> наряды -> события -> перекодировка.
+# Это и есть порядок пяти миграций из docs/plan.md, задача Q2.1. Файлы лежат
+# в db/migrations/, а не рядом со скриптом: проверять надо то, что накатывается.
+MIGRATIONS = Path(__file__).resolve().parent.parent / "db" / "migrations"
+FILES = ["001_assets.sql", "002_geo.sql", "003_permits.sql",
+         "004_events.sql", "005_xref.sql"]
 
 # Схемы, которые обещает docs/HLD.md разд. 5.1
 EXPECTED = {"smvu", "feat", "pred", "ref", "asset", "maint", "load", "geo", "permit"}
@@ -200,7 +202,7 @@ def scan(root):
     return tables, schemas, views, funcs, links, order_problems
 
 
-def check(root=Path(__file__).parent):
+def check(root=MIGRATIONS):
     tables, schemas, views, funcs, links, order_problems = scan(root)
     problems = list(order_problems)
 
