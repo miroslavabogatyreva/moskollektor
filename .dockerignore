@@ -1,0 +1,20 @@
+# Контекст сборки backend/Dockerfile — корень репозитория (context: .. в
+# deploy/docker-compose.yml). Без этого файла docker отправляет демону всё
+# дерево: 15 ГБ dataset/ и 161 МБ истории .git, а копируются в образ только
+# backend/app и db/migrations.
+.git/
+dataset/
+docs/
+delivery/
+analysis/
+diagrams/
+final-presentation/
+dashboard/
+code/
+.DS_Store
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+deploy/.env
+deploy/nginx/certs/
