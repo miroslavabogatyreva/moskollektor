@@ -27,6 +27,7 @@ ERA5 от ECMWF. Проверено 15.09.2026: весь наш период п�
 
 import csv
 import json
+import os
 import sys
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -73,6 +74,12 @@ def проверить(часы, начало, конец):
 
 
 def записать(часы, путь):
+    # Каталог создаём сами: dataset/ лежит в .gitignore, и на свежем клоне
+    # репозитория его нет вовсе. Без этой строки команда из инструкции падает
+    # с FileNotFoundError у любого, кто клонировал проект и сразу запустил скрипт.
+    каталог = os.path.dirname(путь)
+    if каталог:
+        os.makedirs(каталог, exist_ok=True)
     колонки = ["time", "temperature_2m", "relative_humidity_2m", "precipitation", "surface_pressure"]
     with open(путь, "w", encoding="utf-8", newline="") as ф:
         писатель = csv.writer(ф)
