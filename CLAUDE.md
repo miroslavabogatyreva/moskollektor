@@ -133,15 +133,15 @@ REST API или без карты объектов не сдан, каким б�
 
 | Блок | Каталог |
 |---|---|
-| `E1` Развёртывание | `deploy/` |
-| `E2` Данные | `db/`, `backend/app/ingest/`, `backend/app/archive/` |
-| `E3` Расчётное ядро | `backend/app/worker/` |
-| `E4` API и доступ | `backend/app/api/`, `backend/app/auth/` |
-| `E5` Интерфейс | `frontend/` |
-| `E6` Заявки | `backend/app/domain/`, `frontend/src/screens/orders/` |
-| `E7` Граница с ML | `contracts/`, `backend/app/mlclient/` |
-| `E8` Модель | репозиторий Николая |
-| `E9` Приёмка | `docs/`, `delivery/` |
+| `Q1` Развёртывание | `deploy/` |
+| `Q2` Данные | `db/`, `backend/app/ingest/`, `backend/app/archive/` |
+| `Q3` Расчётное ядро | `backend/app/worker/` |
+| `Q4` API и доступ | `backend/app/api/`, `backend/app/auth/` |
+| `Q5` Интерфейс | `frontend/` |
+| `Q6` Заявки | `backend/app/domain/`, `frontend/src/screens/orders/` |
+| `Q7` Граница с ML | `contracts/`, `backend/app/mlclient/` |
+| `Q8` Модель | репозиторий Николая |
+| `Q9` Приёмка | `docs/`, `delivery/` |
 
 Продукта ещё нет — в репозитории сегодня исследование и заготовки:
 `docs/` документы, `code/` прототипы и схемы с самопроверками, `analysis/` счётные
