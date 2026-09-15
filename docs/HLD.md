@@ -33,17 +33,17 @@ flowchart TB
         SPA["Vite + Preact SPA, три экрана"]
     end
     subgraph host["Сервер заказчика, один хост, Docker"]
-        NGINX["nginx :80/:443<br/>статика, прокси, тайлы, brotli, HTTP/2"]
+        NGINX["nginx :80/:443<br/>статика, прокси, brotli, HTTP/2"]
         API["api :8000<br/>FastAPI + uvicorn, REST + SSE"]
         WRK["worker<br/>тот же образ: планировщик, расчёт, загрузчики"]
         ML["ml :8100<br/>образ ML-команды, инференс"]
         DB[("db :5432<br/>PostgreSQL 18 + PostGIS<br/>smvu feat pred ref asset maint load geo permit")]
-        VOL[("тома: pgdata, tiles, parquet, uploads, backups")]
+        VOL[("тома: pgdata, parquet, uploads, backups")]
     end
     subgraph ext["Источники заказчика"]
         SRC["СМВУ .xlsx · журналы ОДС · АРМ-Контроль · реестр ОЭ"]
     end
-    SPA -- "HTTPS/2: GET /api/v1/*, SSE /api/v1/stream, тайлы /tiles/z/x/y.webp" --> NGINX
+    SPA -- "HTTPS/2: GET /api/v1/*, SSE /api/v1/stream" --> NGINX
     NGINX -- "proxy_pass HTTP/1.1" --> API
     NGINX -- "файлы с тома" --> VOL
     API -- "asyncpg, пул 10" --> DB
@@ -107,17 +107,19 @@ moskollektor-service/
 ├── db/migrations/        нумерованные .sql, порядок — в разделе 5.4
 ├── db/seed/              типы событий, уставки Регламента, нормативы ТО
 ├── backend/app/
-│   ├── api/ stream/ worker/ ingest/ archive/ mlclient/ domain/
-├── frontend/src/screens/ {dashboard, map, log}
+│   ├── api/ auth/ stream/ worker/ ingest/ archive/ mlclient/ domain/
+├── frontend/src/screens/ {dashboard, map, log, orders}
 ├── frontend/lh-arm.js, lighthouserc.json   профиль «АРМ-ОДС», часть поставки
-├── tiles/                генерация растровой подложки
 ├── deploy/               docker-compose{,.dev,.stand}.yml, nginx/, .env.example
+├── delivery/             презентация и страница сдачи
 └── code/                 прототипы расчёта, схемы БД, разборщики выгрузок
 
 moskollektor-ml/          репозиторий ML-команды
 ├── contracts/            копия наших файлов, обновляется по тегу
 ├── training/ serving/ models/ Dockerfile
 ```
+
+*Дерево исправлено 15.09.2026 при заведении репозитория (`MOS-17`). Три правки. Каталог `tiles/` убран: карта Москвы заменена схемой коллектора решением ОВ-53, подкладывать растр не подо что — разд. 4 и 7.2 этого же файла уже говорили, что том `tiles` не создаётся, а дерево и схема разд. 1 всё ещё его рисовали. Каталог `auth/` добавлен: его требует `Q4.1` (роли), а в дереве он отсутствовал, хотя `docs/project-structure.md` называл его с самого начала. Каталог `delivery/` добавлен: в него кладёт файлы `Q9.7` (страница сдачи).*
 
 Контракт живёт у нас, а не у них: перед заказчиком за приёмку отвечаем мы. Изменение
 контракта — это PR в наш репозиторий, который ML-команда открывает сама, а мы
