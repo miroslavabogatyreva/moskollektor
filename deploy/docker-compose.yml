@@ -115,7 +115,10 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
-    command: ["python", "-m", "app.db.migrate"]
+    # Имя модуля — из docs/HLD.md разд. 7.1: там app.migrate, тридцать строк, читает
+    # db/migrations/*.sql по возрастанию номера. Раньше здесь стояло app.db.migrate,
+    # то есть пакет app/db/ — такого каталога нет ни в дереве, ни в HLD.
+    command: ["python", "-m", "app.migrate"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
