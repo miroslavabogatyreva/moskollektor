@@ -1,0 +1,126 @@
+# Стенд «Москоллектор». Состав описан в docs/HLD.md разд. 1.
+#
+# Сегодня поднимаются два сервиса из пяти: db и nginx. Остальные три собирать
+# не из чего — backend/ пуст до Q3 и Q4, образ ml приезжает от Николая (Q7.3).
+# Они описаны ниже под профилем app и включатся командой
+#   docker compose --profile app up -d
+# когда появится код. Так файл остаётся описью системы целиком, а не только
+# той части, что работает сегодня.
+
+name: moskollektor
+
+services:
+
+  db:
+    image: postgis/postgis:18-3.6
+    # Образ собран только под linux/amd64: в манифесте тега 18-3.6 ветки arm64
+    # нет. На сервере заказчика это родная архитектура (x86_64), на маке
+    # разработчика — эмуляция. Пишем платформу явно, чтобы на маке видеть
+    # осознанный выбор, а не предупреждение о несовпадении при первом запуске.
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      # В PostgreSQL 18 каталог данных переехал: PGDATA теперь
+      # /var/lib/postgresql/18/docker, а VOLUME объявлен на /var/lib/postgresql.
+      # Смонтировать том на .../data, как делали до 17-й ветки, — значит отдать
+      # кластер анонимному тому: `docker compose down -v` сотрёт базу, а бэкап
+      # заберёт ноль байт из пустого каталога.
+      - pgdata:/var/lib/postgresql
+      - backups:/backups
+    ports:
+      # Наружу база не смотрит: только петля хоста, чтобы ходить psql-ом со стенда.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.31-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    # ponytail: сжатие здесь gzip, а не brotli. HLD разд. 3.5 считает размеры
+    # ответов по brotli, но модуля ngx_brotli в официальном образе нет, а своя
+    # сборка nginx ради сжатия статики, которой ещё не существует, — работа
+    # не этой задачи. Вернуться в Q5.1, когда появится фронт: либо образ
+    # с модулем, либо статика, пожатая заранее, и ngx_http_gzip_static_module.
+
+  api:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ML_URL: ${ML_URL}
+      TZ: ${TZ}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.worker.run"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ML_URL: ${ML_URL}
+      TZ: ${TZ}
+    volumes:
+      - parquet:/srv/parquet
+      - uploads:/srv/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ml:
+    profiles: ["app"]
+    # Образ Николая. Пока его нет, здесь стоит заглушка из Q7.3 (MOS-66).
+    image: ${ML_IMAGE}
+    restart: unless-stopped
+
+  # Накат миграций. Живёт секунды и выходит: HLD разд. 7.1 называет его
+  # отдельным контейнером, чтобы схема не накатывалась из api при каждом старте.
+  migrate:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.db.migrate"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
+  parquet:
+  uploads:
+  backups:
