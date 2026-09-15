@@ -134,6 +134,67 @@ docker compose --profile app run --rm migrate
 docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < ../db/seed/<файл>.sql
 ```
 
+## Залить выгрузку СМВУ
+
+Заливает `backend/app/ingest/smvu_csv.py`, командой из корня репозитория (не из `deploy`).
+Порядок внутри команды обязателен: объекты, каналы, журнал — его держат внешние ключи.
+
+```
+PYTHONPATH=backend .venv/bin/python -u -m app.ingest.smvu_csv \
+    --dsn "postgresql://moskollektor:ПАРОЛЬ@127.0.0.1:5432/moskollektor" \
+    --objects dataset/справочник_объектов_диспетчер.csv \
+    --channels dataset/справочник_каналов_датчиков.csv \
+    dataset/ext-journal-*.csv
+```
+
+Пароль берётся из `deploy/.env`, переменная `POSTGRES_PASSWORD`. Нужен `asyncpg`:
+`python3 -m venv .venv && .venv/bin/pip install asyncpg`.
+
+**Команду можно запускать повторно.** Уже залитые справочники она пропускает
+с сообщением, а не падает на существующем ключе. Журнал повторный прогон зальёт
+заново — перед ним `TRUNCATE smvu.reading`.
+
+**Чего ждать.** 313 546 016 строк идут около двух часов при 50 тыс. строк/с; после
+последнего файла строятся три вторичных индекса, это ещё время. Загрузчик печатает
+после каждого файла размер базы и остаток свободного места на диске — заливке нужно
+порядка 50 ГБ, и нехватка обязана вылезти на третьем файле, а не на восьмом.
+
+**Вторичные индексы на время заливки снимаются** и создаются в конце. Упал прогон
+на середине — они остались снятыми; вернуть их можно повторным прогоном с `--keep-indexes`
+или руками по `db/migrations/004_events.sql`, разделы 3.2–3.4.
+
+Проверить, что получилось:
+
+```
+docker compose exec -T db psql -U moskollektor -d moskollektor -c "
+SELECT count(*) FROM smvu.reading;
+SELECT count(*) AS в_default FROM smvu.reading_default;          -- обязано быть 0
+SELECT * FROM load.batch ORDER BY id DESC LIMIT 1;               -- отчёт о качестве
+SELECT rule_code, message, payload FROM load.error ORDER BY id;  -- причины отказа
+"
+```
+
+## Поднять заглушку модели
+
+Пока обученной модели нет, её место занимает `ml-stub/` (MOS-66). Собирается из корня
+репозитория, потому что в образ едет и `contracts/`:
+
+```
+docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .
+docker compose --profile app up -d ml
+```
+
+Проверить:
+
+```
+docker compose exec -T ml python -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://ml:8100/model')))"
+# ждём: model_version stub-0.1, feature_schema feat.v1, degraded True
+```
+
+Флаг `degraded: true` стоит в каждом ответе нарочно: пока он на месте, заглушку
+не выдать за прогноз. Подмена на образ Николая — правка `ML_IMAGE` в `.env`,
+код при этом не меняется.
+
 ## Замер TLS для приёмки
 
 Строку НФ-75 закрывает отдельный скрипт, его вывод и есть протокол:

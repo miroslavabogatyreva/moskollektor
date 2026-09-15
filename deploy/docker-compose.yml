@@ -106,8 +106,22 @@ services:
 
   ml:
     profiles: ["app"]
-    # Образ Николая. Пока его нет, здесь стоит заглушка из Q7.3 (MOS-66).
+    # Образ Николая. Пока его нет, здесь стоит заглушка из Q7.3 (MOS-66):
+    # собирается командой `docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .`
+    # из корня репозитория. Подмена на настоящую модель — правка ML_IMAGE в deploy/.env,
+    # ни одной строки кода у нас при этом не меняется.
     image: ${ML_IMAGE}
+    healthcheck:
+      # Проверяем /model, а не /predict: это метод из контракта (docs/HLD.md разд. 6),
+      # он есть и у заглушки, и у образа Николая, и он ничего не считает. curl
+      # в python:3.14-slim нет, поэтому зовём питоном — он есть в любом ML-образе.
+      # Разойдётся устройство образа Николая — снимаем эти четыре строки, они не
+      # держат ни одной зависимости: service_healthy на ml никто не ждёт.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/model').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   # Накат миграций. Живёт секунды и выходит: HLD разд. 7.1 называет его
