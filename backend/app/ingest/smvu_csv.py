@@ -1,0 +1,655 @@
+#!/usr/bin/env python3
+"""Заливка выгрузки СМВУ в PostgreSQL: два справочника и журнал показаний.
+
+Переехал сюда из `code/load_smvu.py` 15.09.2026 задачей Q2.4 и дорос до продуктивного:
+прототип умел только положить файл в staging, а разбор в `smvu.reading`, заглушки
+каналов и отчёт о качестве оставлял на потом. Здесь они есть.
+
+Что заливаем и в каком порядке — порядок обязателен, его держат внешние ключи:
+
+    1. dataset/справочник_объектов_диспетчер.csv  -> smvu.object_tree     95 строк
+    2. dataset/справочник_каналов_датчиков.csv    -> ref.object_xref + smvu.channel
+                                                                      11 485 строк
+    3. dataset/ext-journal-YYYY.csv (восемь штук) -> smvu.reading  313 546 016 строк
+
+Справочник каналов даёт участок: `code` разбора живёт рядом, в tag_to_section.py.
+Пара «коллектор, пикет» («847:106») становится строкой ref.object_xref, её section_id
+копируется в smvu.channel.section_id, а оттуда — в каждую строку показаний.
+
+**Чанк вместо общего staging.** Прототип клал в staging весь архив и разбирал типы
+после. На 313 млн строк это 40 ГБ text-таблицы вдобавок к 30 ГБ самих показаний,
+и на стенде столько места нет. Здесь staging живёт по 500 тыс. строк: COPY в
+типизированную load.smvu_chunk, оттуда INSERT ... SELECT в reading, TRUNCATE, дальше.
+Пик — полгигабайта, и та лежит в кэше.
+
+**Почему разбор типов вернулся в Python.** У чанка есть цена: INSERT упадёт целиком,
+если в нём хоть одна битая метка времени, и вместе с ней пропадут 499 999 хороших
+строк. Поэтому строку разбирает Python — битая не доходит до базы, а попадает
+в отчёт со своим номером в файле.
+
+**Зачем тогда чанк в базе, если строки уже разобраны.** Из-за дублей. COPY не умеет
+ON CONFLICT, а дубли в выгрузке возможны: ext-journal-2025.csv склеен из двух выгрузок
+встык, и если их периоды перекрываются, одно и то же ид_события приедет дважды.
+Прямой COPY в reading упал бы на первом таком, а INSERT ... SELECT из чанка
+с ON CONFLICT DO NOTHING считает дубли и продолжает.
+
+**Заглушки каналов.** 1 143 канала есть в журнале и нет в справочнике заказчика —
+снятое оборудование, чью историю нам всё равно прислали. Перед вставкой чанка
+заводим на них строку smvu.channel c is_stub = true, иначе внешний ключ отверг бы
+9,4 млн строк (3 % истории). Список заранее не нужен: ищем их по самому чанку.
+
+**Три вторичных индекса на время заливки снимаем.** Полные btree на 313 млн строк
+превращают вставку в перекладывание индекса. Четыре остальных остаются: PK ловит
+дубли (ради него всё и затевалось), BRIN почти ничего не стоит, а `reading_fault_idx`
+частичный — под условие попадает 0,48 % строк. Создаём снятое обратно после
+последнего файла; упал прогон на середине — индексы остались снятыми, и отчёт
+об этом говорит.
+
+Запуск (из корня репозитория, справочники и журнал за один проход):
+
+    PYTHONPATH=backend .venv/bin/python -m app.ingest.smvu_csv \
+        --dsn "postgresql://moskollektor:ПАРОЛЬ@127.0.0.1:5432/moskollektor" \
+        --objects dataset/справочник_объектов_диспетчер.csv \
+        --channels dataset/справочник_каналов_датчиков.csv \
+        dataset/ext-journal-*.csv
+
+    PYTHONPATH=backend .venv/bin/python -m app.ingest.smvu_csv --selfcheck
+"""
+
+import argparse
+import asyncio
+import csv
+import glob
+import shutil
+import sys
+import time
+from collections import Counter
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from .tag_to_section import section_key
+
+# Пояс заказчик не назвал (ОВ-48). Ставим московский и пишем это в отчёт:
+# среди значений встречается «01.01.1970 03:00:00» — нулевая эпоха, сдвинутая на три часа.
+MSK = ZoneInfo("Europe/Moscow")
+
+CHUNK = 500_000
+
+# Ключ — нормализованный заголовок из файла, значение — поле записи.
+# Незнакомый заголовок роняет разбор с явной ошибкой: лучше падение, чем сдвиг колонок.
+HEADER_MAP = {
+    "ид_события": "journal_id", "ид события": "journal_id",
+    "ид_канала_данных": "channel_id", "ид канала данных": "channel_id",
+    "дата": "day_s",
+    "время": "time_s",
+    "тревожное": "is_alarm_s",
+    "значение_датчика": "value_s", "значение датчика": "value_s",
+    # Приложение 1 ТЗ показывало другую форму того же журнала. Если заказчик привезёт
+    # на приёмку её, а не то, что прислал в сентябре, загрузчик должен принять и её.
+    "ид записи журнала": "journal_id",
+    "ид типа канала данных": "channel_type_s",
+    "текущее значение": "value_s",
+    "дата записи": "day_s",
+}
+
+FIELDS = ["journal_id", "channel_id", "day_s", "time_s", "is_alarm_s", "value_s"]
+
+# Как заказчик пишет истину и ложь. Файлы 2019 года — f/t, пример 2026 года — false/true.
+TRUE_WORDS = {"t", "true", "1", "да", "истина"}
+FALSE_WORDS = {"f", "false", "0", "нет", "ложь"}
+
+CHUNK_COLUMNS = ["journal_id", "read_time", "channel_id", "is_alarm", "value_text", "value_num"]
+
+CHUNK_DDL = """
+CREATE UNLOGGED TABLE IF NOT EXISTS load.smvu_chunk (
+    journal_id bigint,
+    read_time  timestamptz,
+    channel_id integer,
+    is_alarm   boolean,
+    value_text text,
+    value_num  real
+)
+"""
+
+# Канал из журнала, которого нет в справочнике заказчика. is_active = false:
+# это снятое с эксплуатации оборудование, живым его показывать нельзя.
+NEW_STUBS = """
+INSERT INTO smvu.channel (channel_id, is_stub, is_active)
+SELECT DISTINCT k.channel_id, true, false
+  FROM load.smvu_chunk k
+ WHERE NOT EXISTS (SELECT 1 FROM smvu.channel c WHERE c.channel_id = k.channel_id)
+ON CONFLICT (channel_id) DO NOTHING
+"""
+
+INSERT_CHUNK = """
+INSERT INTO smvu.reading
+    (journal_id, read_time, channel_id, section_id, is_alarm, value_text, value_num, source_batch)
+SELECT k.journal_id, k.read_time, k.channel_id, c.section_id,
+       k.is_alarm, k.value_text, k.value_num, $1
+  FROM load.smvu_chunk k
+  JOIN smvu.channel c USING (channel_id)
+ON CONFLICT DO NOTHING
+"""
+
+# Три вторичных индекса из db/migrations/004_events.sql, разделы 3.2-3.4. Текст
+# обязан совпадать с миграцией дословно: пересозданный иначе индекс разойдётся
+# со схемой чистого стенда, и планы запросов на приёмке будут другими.
+SECONDARY_INDEXES = {
+    "reading_channel_time_idx":
+        "CREATE INDEX reading_channel_time_idx ON smvu.reading (channel_id, read_time DESC)",
+    "reading_section_time_idx":
+        "CREATE INDEX reading_section_time_idx ON smvu.reading (section_id, read_time DESC)",
+    "reading_alarm_idx":
+        "CREATE INDEX reading_alarm_idx ON smvu.reading (section_id, read_time DESC) WHERE is_alarm",
+}
+
+
+def norm_header(h):
+    return str(h).strip().lower().replace("ё", "е").replace("\n", " ")
+
+
+def map_headers(row):
+    """Список полей записи по заголовку файла. None — колонку игнорируем."""
+    out = []
+    for h in row:
+        key = norm_header(h)
+        if key in HEADER_MAP:
+            out.append(HEADER_MAP[key])
+        elif key == "" or key.startswith("unnamed"):
+            out.append(None)
+        else:
+            raise ValueError(f"незнакомый заголовок колонки: {h!r}")
+    missing = {"journal_id", "channel_id", "day_s"} - set(out)
+    if missing:
+        raise ValueError(f"в файле нет обязательных колонок: {sorted(missing)}")
+    return out
+
+
+def parse_bool(s):
+    """Флаг тревоги из любого написания. None — значение непонятно."""
+    if s is None:
+        return None
+    key = str(s).strip().lower()
+    if key in TRUE_WORDS:
+        return True
+    if key in FALSE_WORDS:
+        return False
+    return None
+
+
+def parse_number(s):
+    """Число из значения датчика, или None.
+
+    Значение приходит текстом и смешивает три вещи: числа («28», «0.01»), состояния
+    («Норма», «Обнаружено движение») и «01.01.1970 03:00:00» — нулевую эпоху, которая
+    означает «значения нет». Замер на первых 2 млн строк файла за 2019 год: числами
+    разбираются 47,1 %, остальные 52,9 % числами не являются и обязаны лечь
+    в value_text, а не потеряться.
+    """
+    if s is None:
+        return None
+    text = str(s).strip().replace(",", ".")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def parse_time(day_s, time_s):
+    """Дата и время двумя колонками -> момент с московским поясом. None — не разобрано.
+
+    Пояс проставляем явно: в самой выгрузке его нет ни колонкой, ни суффиксом,
+    и без явного указания Postgres взял бы пояс сессии — то есть значение
+    менялось бы от того, кто запустил загрузку.
+    """
+    if not day_s:
+        return None
+    try:
+        return datetime.fromisoformat(f"{day_s.strip()}T{(time_s or '00:00:00').strip()}") \
+            .replace(tzinfo=MSK)
+    except ValueError:
+        return None
+
+
+def rows_from_file(path):
+    """Генератор (номер строки в файле, запись для чанка, причина отказа).
+
+    Запись — кортеж в порядке CHUNK_COLUMNS. Причина заполнена, когда строка
+    не годится: тогда запись None, и строка попадает только в отчёт о качестве.
+    """
+    if path.lower().endswith(".csv"):
+        with open(path, encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header is None:
+                return
+            yield from _rows(reader, header, start=2)
+    else:
+        from python_calamine import CalamineWorkbook
+
+        wb = CalamineWorkbook.from_path(path)
+        data = wb.get_sheet_by_index(0).to_python(skip_empty_area=False)
+        if not data:
+            return
+        yield from _rows(iter(data[1:]), data[0], start=2)
+
+
+def _rows(reader, header, start):
+    order = map_headers(header)
+    idx = {name: i for i, name in enumerate(order) if name}
+    header_norm = [norm_header(h) for h in header]
+    width = len(header)
+    for n, raw in enumerate(reader, start=start):
+        # Ловушка: две выгрузки склеены встык, заголовок повторяется внутри файла.
+        # В ext-journal-2025.csv он стоит на 26 140 585-й строке. COPY ... HEADER true
+        # пропускает ровно одну строку, второй заголовок приехал бы как данные.
+        if [norm_header(c) for c in raw] == header_norm:
+            yield n, None, "повторный заголовок"
+            continue
+        if len(raw) < width:
+            yield n, None, "короткая строка"
+            continue
+        get = lambda name: str(raw[idx[name]]) if name in idx else None  # noqa: E731
+        try:
+            journal_id = int(get("journal_id"))
+            channel_id = int(get("channel_id"))
+        except (TypeError, ValueError):
+            yield n, None, "ид события или канала не число"
+            continue
+        read_time = parse_time(get("day_s"), get("time_s"))
+        if read_time is None:
+            yield n, None, "дата или время не разобраны"
+            continue
+        is_alarm = parse_bool(get("is_alarm_s"))
+        if is_alarm is None:
+            # NOT NULL в схеме. Подставить false — значит тихо сочинить данные:
+            # пропущенная тревога стоит дороже отброшенной строки.
+            yield n, None, "флаг тревоги не разобран"
+            continue
+        value_text = get("value_s")
+        yield n, (journal_id, read_time, channel_id, is_alarm,
+                  value_text, parse_number(value_text)), None
+
+
+async def load_objects(conn, path):
+    """Дерево диспетчерских объектов: 95 строк, три уровня.
+
+    Уже залитый справочник не трогаем: команда из инструкции должна переживать
+    повторный запуск, а COPY на существующем ключе упал бы.
+    """
+    if await conn.fetchval("SELECT count(*) FROM smvu.object_tree"):
+        print("объекты: уже залиты, пропускаю")
+        return 0
+    with open(path, encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    ids = {int(r["ид_объект"]) for r in rows}
+    orphan = 0
+    recs = []
+    for r in rows:
+        parent = int(r["родитель"]) if r["родитель"] else None
+        # В выгрузке корень (район, ид_объект 5773) ссылается на 3831, которого в файле
+        # нет. Обнуляем ссылку: иначе ключ отверг бы корень, а с ним и всё дерево.
+        if parent is not None and parent not in ids:
+            parent, orphan = None, orphan + 1
+        recs.append((int(r["ид_объект"]), int(r["иерархия_уровень"]), parent,
+                     r["вид_объекта"], r["диспетчерское_название_объекта"]))
+    # По уровню: ссылка на родителя проверяется сразу, значит родитель уже должен лежать.
+    recs.sort(key=lambda t: t[1])
+    await conn.executemany(
+        "INSERT INTO smvu.object_tree (object_id, level, parent_id, kind, name) "
+        "VALUES ($1, $2, $3, $4, $5) ON CONFLICT (object_id) DO NOTHING", recs)
+    print(f"объекты: {len(recs)} строк, ссылок на родителя вне файла обнулено {orphan}")
+    return len(recs)
+
+
+async def load_channels(conn, path):
+    """Справочник каналов плюс участки, собранные из тега и названия.
+
+    Пропускаем, если справочник уже залит, — по той же причине, что и объекты.
+    Заглушки каналов из журнала сюда не считаем: их заводит flush().
+    """
+    if await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE NOT is_stub"):
+        print("каналы: уже залиты, пропускаю")
+        return 0
+    with open(path, encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    keys = {}
+    for r in rows:
+        pair = section_key(r["тег_инженерной_системы"], r["название_датчика"])
+        keys[int(r["ид_канала_данных"])] = pair
+    uniq = sorted({f"{pair[0]}:{pair[1]}" for pair in keys.values() if pair})
+    await conn.executemany(
+        "INSERT INTO ref.object_xref (smvu_key) VALUES ($1) ON CONFLICT (smvu_key) DO NOTHING",
+        [(k,) for k in uniq])
+    xref = dict(await conn.fetch(
+        "SELECT smvu_key, section_id FROM ref.object_xref WHERE smvu_key IS NOT NULL"))
+
+    recs = []
+    for r in rows:
+        cid = int(r["ид_канала_данных"])
+        pair = keys[cid]
+        smvu_key = f"{pair[0]}:{pair[1]}" if pair else None
+        recs.append((cid, r["тип_инж_системы"], r["тип_датчика"],
+                     r["тег_инженерной_системы"], r["название_датчика"],
+                     pair[0] if pair else None, pair[1] if pair else None,
+                     xref.get(smvu_key), False, True))
+    await conn.copy_records_to_table(
+        "channel", schema_name="smvu", records=recs,
+        columns=["channel_id", "system_kind", "sensor_kind", "tag", "name",
+                 "collector", "picket", "section_id", "is_stub", "is_active"])
+    без_участка = sum(1 for pair in keys.values() if not pair)
+    print(f"каналы: {len(recs)} строк, участков {len(uniq)}, "
+          f"без участка {без_участка} (датчики в диспетчерских пунктах)")
+    return len(recs)
+
+
+async def flush(conn, batch, records, rep):
+    """Чанк в базу: COPY -> заглушки каналов -> INSERT в reading -> очистка."""
+    await conn.copy_records_to_table("smvu_chunk", schema_name="load",
+                                     records=records, columns=CHUNK_COLUMNS)
+    stubs = await conn.execute(NEW_STUBS)
+    status = await conn.execute(INSERT_CHUNK, batch)
+    вставлено = int(status.split()[-1])
+    rep["вставлено"] += вставлено
+    # Разница может взяться только от PK: заглушки заведены строкой выше, значит
+    # join с channel никого не теряет. Если счётчик начнёт расти — сначала проверить
+    # это допущение, а уже потом искать дубли в файле.
+    rep["дубль ид_события"] += len(records) - вставлено
+    rep["заглушек каналов"] += int(stubs.split()[-1])
+    await conn.execute("TRUNCATE load.smvu_chunk")
+
+
+async def load_journal(conn, path, batch, chunk_size):
+    """Один годовой файл журнала. Возвращает отчёт о качестве."""
+    t0 = time.time()
+    rep = Counter()
+    buf = []
+    for _, record, flag in rows_from_file(path):
+        if flag:
+            rep[flag] += 1
+            continue
+        buf.append(record)
+        if len(buf) >= chunk_size:
+            await flush(conn, batch, buf, rep)
+            buf.clear()
+            print(f"    {path}: {rep['вставлено']:,} строк".replace(",", " "), flush=True)
+    if buf:
+        await flush(conn, batch, buf, rep)
+    dt = time.time() - t0
+    скорость = rep["вставлено"] / dt if dt else 0
+    print(f"{path}: вставлено {rep['вставлено']:,} за {dt / 60:.1f} мин "
+          f"({скорость:,.0f} строк/с)".replace(",", " "))
+    for причина, сколько in sorted(rep.items()):
+        if причина != "вставлено" and сколько:
+            print(f"    {причина}: {сколько:,}".replace(",", " "))
+    return rep
+
+
+async def drop_secondary_indexes(conn):
+    for name in SECONDARY_INDEXES:
+        await conn.execute(f"DROP INDEX IF EXISTS smvu.{name}")
+    print(f"сняты вторичные индексы: {', '.join(SECONDARY_INDEXES)}")
+
+
+async def create_secondary_indexes(conn):
+    # 64 МБ по умолчанию заставляют сортировать 313 млн строк во временных файлах.
+    # Гигабайт — цифра из шапки db/migrations/004_events.sql, там же целевое железо.
+    await conn.execute("SET maintenance_work_mem = '1GB'")
+    for name, ddl in SECONDARY_INDEXES.items():
+        t0 = time.time()
+        await conn.execute(ddl)
+        print(f"индекс {name}: построен за {(time.time() - t0) / 60:.1f} мин", flush=True)
+
+
+async def run(args):
+    import asyncpg
+
+    conn = await asyncpg.connect(args.dsn, command_timeout=None)
+    try:
+        # Первичная заливка: ждать подтверждения записи журнала на диск после каждой
+        # транзакции здесь незачем. Упадёт база посреди заливки — мы перезальём файл
+        # целиком, а не станем искать, какие последние строки не доехали.
+        await conn.execute("SET synchronous_commit = off")
+        await conn.execute("CREATE SCHEMA IF NOT EXISTS load")
+        await conn.execute(CHUNK_DDL)
+        await conn.execute("TRUNCATE load.smvu_chunk")
+
+        if args.objects:
+            await load_objects(conn, args.objects)
+        if args.channels:
+            await load_channels(conn, args.channels)
+
+        if args.check:
+            return await check(conn)
+
+        paths = [p for pat in args.files for p in sorted(glob.glob(pat))]
+        if not paths:
+            return 0
+
+        batch = await conn.fetchval(
+            "INSERT INTO load.batch (object_name, source_file, tool, planned_rows, stage) "
+            "VALUES ($1, $2, 'smvu_csv', 0, 'production') RETURNING id",
+            "Журнал СМВУ", ", ".join(paths))
+        print(f"пакет загрузки load.batch.id = {batch}, файлов {len(paths)}, "
+              f"пояс {args.tz}", flush=True)
+
+        if not args.keep_indexes:
+            await drop_secondary_indexes(conn)
+
+        итог = Counter()
+        t0 = time.time()
+        for path in paths:
+            итог += await load_journal(conn, path, batch, args.chunk)
+            await conn.execute(
+                "UPDATE load.batch SET loaded_rows = $2, failed_rows = $3 WHERE id = $1",
+                batch, итог["вставлено"],
+                sum(v for k, v in итог.items()
+                    if k not in ("вставлено", "заглушек каналов")))
+            # Место кончается не там, где его считали, а на седьмом файле из восьми.
+            # Замер после каждого: 313 млн строк это 23 ГБ кучи и столько же индексов,
+            # а на машине разработчика свободно бывает 70. Пусть нехватка видна заранее.
+            занято = await conn.fetchval(
+                "SELECT pg_size_pretty(pg_database_size(current_database()))")
+            print(f"    база {занято}, свободно на диске "
+                  f"{shutil.disk_usage('/').free / 2**30:.1f} ГБ", flush=True)
+
+        if not args.keep_indexes:
+            await create_secondary_indexes(conn)
+
+        await conn.execute(
+            "UPDATE load.batch SET finished_at = now(), planned_rows = $2 WHERE id = $1",
+            batch, итог["вставлено"] + sum(
+                v for k, v in итог.items() if k not in ("вставлено", "заглушек каналов")))
+        # Причины отказа — в отчёт о качестве по одной строке на причину, а не по строке
+        # на запись: их могут быть миллионы, и load.error раздулся бы больше самих данных.
+        for причина, сколько in sorted(итог.items()):
+            if причина in ("вставлено", "заглушек каналов") or not сколько:
+                continue
+            await conn.execute(
+                "INSERT INTO load.error (batch_id, rule_code, severity, message, payload) "
+                "VALUES ($1, 'ROW_REJECTED', 'warning', $2, $3::jsonb)",
+                batch, причина, f'{{"строк": {сколько}}}')
+
+        print(f"\nитого: вставлено {итог['вставлено']:,} строк за "
+              f"{(time.time() - t0) / 60:.1f} мин, заглушек каналов "
+              f"{итог['заглушек каналов']:,}".replace(",", " "))
+        for причина, сколько in sorted(итог.items()):
+            if причина not in ("вставлено", "заглушек каналов") and сколько:
+                print(f"    отброшено, {причина}: {сколько:,}".replace(",", " "))
+        print()
+        return await check(conn)
+    finally:
+        await conn.close()
+    return 0
+
+
+# Контрольные числа выгрузки от 09.09.2026. Все получены проходом по 15,9 ГБ
+# (analysis/inventory.py, docs/day-one.md) и связаны попарно: каналов в справочнике
+# плюс заглушек равно каналам журнала, числовых плюс текстовых равно всем строкам.
+# Пара — это проверка, которой не нужны ни данные, ни инструменты: если два числа
+# перестали складываться, одно из них неверно, и пересчитывать ничего не надо.
+КОНТРОЛЬНЫЕ = [
+    ("строк журнала",            313_546_016,
+     "SELECT loaded_rows + failed_rows FROM load.batch ORDER BY id DESC LIMIT 1"),
+    ("каналов в журнале",             12_627,
+     "SELECT count(*) FROM smvu.channel"),
+    ("из них в справочнике",          11_485,
+     "SELECT count(*) FROM smvu.channel WHERE NOT is_stub"),
+    ("из них заглушек",                1_142,
+     "SELECT count(*) FROM smvu.channel WHERE is_stub"),
+    ("участков",                       3_173,
+     "SELECT count(*) FROM ref.object_xref"),
+    ("объектов диспетчера",               95,
+     "SELECT count(*) FROM smvu.object_tree"),
+]
+
+# Проверки, у которых ожидание — не число, а утверждение о схеме.
+ОБЯЗАНЫ_БЫТЬ_НУЛЁМ = [
+    ("строк в партиции default", "SELECT count(*) FROM smvu.reading_default"),
+    ("расхождений section_id с каналом",
+     "SELECT count(*) FROM smvu.reading r JOIN smvu.channel c USING (channel_id) "
+     "WHERE r.section_id IS DISTINCT FROM c.section_id"),
+    ("месяцев выгрузки без единой строки",
+     "SELECT count(*) FROM generate_series(date '2019-01-01', date '2026-06-01', "
+     "interval '1 month') m WHERE NOT EXISTS (SELECT 1 FROM smvu.reading "
+     "WHERE read_time >= m AND read_time < m + interval '1 month')"),
+]
+
+
+async def check(conn):
+    """Сверка залитого с контрольными числами. Возвращает 1, если что-то разошлось.
+
+    Зачем отдельная команда. «Заливка закончилась без ошибки» и «залито то, что
+    в файлах» — разные утверждения: молча потерянный файл, отвалившийся join
+    и съеденные дубли не роняют ни COPY, ни INSERT.
+    """
+    плохо = 0
+    print(f"{'что':38} {'ждали':>12} {'вышло':>12}")
+    for имя, ждали, sql in КОНТРОЛЬНЫЕ:
+        вышло = await conn.fetchval(sql)
+        сошлось = вышло == ждали
+        плохо += not сошлось
+        print(f"{имя:38} {ждали:>12,} {вышло:>12,} {'' if сошлось else '  ← РАЗОШЛОСЬ'}"
+              .replace(",", " "))
+    for имя, sql in ОБЯЗАНЫ_БЫТЬ_НУЛЁМ:
+        вышло = await conn.fetchval(sql)
+        плохо += вышло != 0
+        print(f"{имя:38} {0:>12} {вышло:>12,}{'' if вышло == 0 else '  ← РАЗОШЛОСЬ'}"
+              .replace(",", " "))
+
+    # Не сверка, а срез: этих чисел до заливки никто не знал.
+    print()
+    for имя, sql in (
+        ("показаний в smvu.reading", "SELECT count(*) FROM smvu.reading"),
+        ("из них числовых", "SELECT count(*) FROM smvu.reading WHERE value_num IS NOT NULL"),
+        ("из них тревожных", "SELECT count(*) FROM smvu.reading WHERE is_alarm"),
+        ("записей «Неисправен»",
+         "SELECT count(*) FROM smvu.reading WHERE value_text = 'Неисправен'"),
+        ("каналов с «Неисправен»",
+         "SELECT count(DISTINCT channel_id) FROM smvu.reading WHERE value_text = 'Неисправен'"),
+        ("индексов на smvu.reading",
+         "SELECT count(*) FROM pg_indexes WHERE schemaname = 'smvu' AND tablename = 'reading'"),
+    ):
+        print(f"{имя:38} {await conn.fetchval(sql):>25,}".replace(",", " "))
+    print(f"\n{'размер базы':38} "
+          f"{await conn.fetchval('SELECT pg_size_pretty(pg_database_size(current_database()))'):>25}")
+    print("сверка: всё сошлось" if not плохо else f"сверка: расхождений {плохо}")
+    return 1 if плохо else 0
+
+
+def selfcheck():
+    # заголовки настоящей выгрузки
+    assert map_headers(["ид_события", "ид_канала_данных", "дата", "время",
+                        "тревожное", "значение_датчика"]) == FIELDS
+    # форма из Приложения 1 ТЗ тоже принимается
+    assert map_headers(["ИД записи журнала", "ИД канала данных", "Дата записи"]) == \
+        ["journal_id", "channel_id", "day_s"]
+    for заголовки, кусок in ((["ид_события", "ид_канала_данных", "дата", "погода за окном"],
+                              "незнакомый заголовок"),
+                             (["дата", "время"], "обязательных колонок")):
+        try:
+            map_headers(заголовки)
+        except ValueError as e:
+            assert кусок in str(e), e
+        else:
+            raise AssertionError(f"должно было упасть: {заголовки}")
+
+    # оба написания булева: 2019 год пишет f/t, 2026-й false/true
+    assert parse_bool("f") is False and parse_bool("t") is True
+    assert parse_bool("false") is False and parse_bool("TRUE") is True
+    assert parse_bool("") is None and parse_bool(None) is None and parse_bool("м. б.") is None
+
+    # значение датчика: числа разбираются, состояния нет, и это не ошибка
+    assert parse_number("28") == 28.0 and parse_number("0.01") == 0.01
+    assert parse_number("25,40") == 25.40           # запятая как разделитель
+    assert parse_number("Норма") is None and parse_number("Обнаружено движение") is None
+    assert parse_number("01.01.1970 03:00:00") is None
+    assert parse_number("") is None and parse_number(None) is None
+
+    # время: пояс проставлен явно, иначе значение зависело бы от того, кто запустил
+    t = parse_time("2026-08-01", "03:09:27")
+    assert t == datetime(2026, 8, 1, 3, 9, 27, tzinfo=MSK), t
+    assert t.utcoffset().total_seconds() == 3 * 3600
+    assert parse_time("2026-13-01", "03:09:27") is None      # месяца 13 не бывает
+    assert parse_time("01.08.2026", "03:09:27") is None      # не ISO — в отчёт, не в базу
+    assert parse_time("", "03:09:27") is None
+
+    # Разбор строк файла. Проверка обязана поймать каждую причину отказа по отдельности,
+    # иначе она не отличает «файл чистый» от «загрузчик перестал замечать брак».
+    header = ["ид_события", "ид_канала_данных", "дата", "время", "тревожное", "значение_датчика"]
+    body = [
+        ["4524243389", "120473", "2026-08-01", "03:09:27", "false", "28"],
+        header,                                              # вторая выгрузка встык
+        ["4524253385", "120475", "2026-08-01", "03:19:55", "true", "Неисправен"],
+        ["1409185555", "213358"],                            # оборванная строка
+        ["не число", "120473", "2026-08-01", "03:09:27", "f", "0.01"],
+        ["4524243390", "120473", "01.08.2026", "03:09:27", "f", "0.01"],
+        ["4524243391", "120473", "2026-08-01", "03:09:27", "может быть", "0.01"],
+    ]
+    out = list(_rows(iter(body), header, start=2))
+    assert [flag for _, _, flag in out] == [
+        None, "повторный заголовок", None, "короткая строка",
+        "ид события или канала не число", "дата или время не разобраны",
+        "флаг тревоги не разобран"], [f for _, _, f in out]
+    хорошие = [rec for _, rec, flag in out if flag is None]
+    assert len(хорошие) == 2
+    # порядок полей записи обязан совпадать с CHUNK_COLUMNS: COPY кладёт по позиции,
+    # и перепутанные местами значение и флаг база приняла бы молча
+    assert хорошие[0] == (4524243389, datetime(2026, 8, 1, 3, 9, 27, tzinfo=MSK),
+                          120473, False, "28", 28.0)
+    assert хорошие[1][4] == "Неисправен"        # целевая переменная не теряется
+    assert хорошие[1][5] is None                # и числом не притворяется
+    assert len(CHUNK_COLUMNS) == len(хорошие[0])
+
+    print("selfcheck ok")
+    return 0
+
+
+def main(argv):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("files", nargs="*", help="файлы журнала, можно маской")
+    ap.add_argument("--dsn")
+    ap.add_argument("--objects", help="справочник_объектов_диспетчер.csv")
+    ap.add_argument("--channels", help="справочник_каналов_датчиков.csv")
+    ap.add_argument("--chunk", type=int, default=CHUNK)
+    ap.add_argument("--keep-indexes", action="store_true",
+                    help="не снимать вторичные индексы: для доливки поверх залитого")
+    ap.add_argument("--tz", default="Europe/Moscow",
+                    help="часовой пояс выгрузки; заказчик его не назвал, см. ОВ-48")
+    ap.add_argument("--check", action="store_true",
+                    help="сверить залитое с контрольными числами и выйти")
+    ap.add_argument("--selfcheck", action="store_true")
+    args = ap.parse_args(argv)
+
+    if args.selfcheck:
+        return selfcheck()
+    if not args.dsn:
+        ap.error("нужен --dsn")
+    return asyncio.run(run(args))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
