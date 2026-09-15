@@ -98,6 +98,23 @@ docker compose exec -T db pg_isready
 # ждём: /var/run/postgresql:5432 - accepting connections
 ```
 
+**Зайти в базу запросом.** Имя пользователя и имя базы — не `postgres` и не `mos`: они
+задаются в `.env` переменными `POSTGRES_USER` и `POSTGRES_DB`, и в `.env.example` там
+стоит `moskollektor`. Скопировав команду с другим именем, вы получите
+`role "mos" does not exist` при полностью исправной базе:
+
+```
+docker compose exec -T db psql -U moskollektor -d moskollektor -c '\dn'
+# ждём: 12 строк. Наших девять — asset feat geo load maint permit pred ref smvu;
+# ещё три служебные: public, а также tiger и topology, их заводит PostGIS
+```
+
+Накатить файл схемы или сида:
+
+```
+docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < ../db/migrations/006_explain_templates.sql
+```
+
 ## Замер TLS для приёмки
 
 Строку НФ-75 закрывает отдельный скрипт, его вывод и есть протокол:
