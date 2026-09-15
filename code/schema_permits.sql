@@ -437,9 +437,11 @@ CREATE TABLE permit.permit_isolation (
 CREATE TABLE permit.permit_detector_inhibit (
     id                     bigserial PRIMARY KEY,
     permit_id              bigint NOT NULL REFERENCES permit.permit(id) ON DELETE CASCADE,
-    -- ID датчика в выгрузке СМВУ = smvu.sensor.external_id (текст, не smvu.sensor.sensor_id).
+    -- Идентификатор датчика в выгрузке СМВУ = smvu.channel.tag, тег инженерной системы
+    -- вида «847-11.1.131.2.» (текст, не числовой channel_id). Колонка называется
+    -- sensor_id по названию поля в бланке наряда-допуска, менять её не стали.
     -- NULL, если блокируется шлейф целиком. Ключ ставит schema_xref.sql:
-    -- датчики накатываются позже нарядов.
+    -- каналы накатываются позже нарядов.
     sensor_id              text,
     loop_code              text,                      -- шлейф / зона
     location_id            bigint REFERENCES permit.location(id),

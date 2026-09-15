@@ -1,12 +1,33 @@
 #!/usr/bin/env python3
-"""Сколько весит ответ дашборда по 4125 секциям и геометрия коллекторов.
+"""Сколько весит ответ дашборда по участкам и геометрия коллекторов.
 Меряет JSON/MessagePack/бинарь без сжатия, gzip -9 и brotli -q11.
 Нужна консольная утилита brotli. Запуск: python3 payload_budget.py
-Числа из этого скрипта приведены в docs/HLD.md, раздел 4 (бюджет фронта и трафика)."""
+Числа из этого скрипта приведены в docs/HLD.md, раздел 4 (бюджет фронта и трафика).
 
-import json, gzip, random, struct, subprocess, os, tempfile
+ЧИСЛО УЧАСТКОВ ИЗМЕНИЛОСЬ. Раньше здесь стояло 4125 — расчётная оценка «825 км
+делить на 200 м». Выгрузка заказчика от 09.09.2026 дала фактические 3173 участка
+на 30 коллекторах (code/tag_to_section.py, разбор пары коллектор-пикет). Все размеры
+ответа поэтому меньше прежних примерно на 23 %, и числа в docs/HLD.md разд. 3.4
+надо перенести отсюда заново, а не пересчитывать в уме.
+
+ВТОРОЕ, ЧТО ЗДЕСЬ БЫЛО НЕВЕРНО: строка ответа несла одно значение риска на участок.
+А pred.forecast хранит прогноз по каждому направлению отдельно, и строка приёмки Ф-27
+требует на карте отдельный слой на каждое сдаваемое направление. Значит ответ карты
+умножается на число направлений. Замер по обоим случаям ниже: DIRECTIONS = 1 — как
+считали раньше, DIRECTIONS = 4 — как будет, если сдаём все четыре направления.
+
+Самопроверка: python3 payload_budget.py --selfcheck. Она не меряет байты (для этого
+нужна утилита brotli), а проверяет, что соотношения между способами упаковки
+не перевернулись: компактный JSON меньше форматированного, колонки меньше объектов,
+бинарь меньше любого JSON, дельта меньше полного кадра."""
+
+import json, gzip, random, struct, subprocess, os, sys, tempfile
 random.seed(42)
-N = 4125
+
+# Фактическое число участков по выгрузке заказчика, а не расчётное 825 км / 200 м.
+N = 3173
+# Сколько направлений прогноза показываем на карте. Ф-27: по слою на направление.
+DIRECTIONS = 4
 D = tempfile.mkdtemp()
 
 statuses = ["ok","warn","alarm","nodata"]
@@ -47,9 +68,17 @@ for r in rows:
     buf.append(statuses.index(r["status"]) | (r["risk_level"]<<2))
     buf.append(int(r["risk_score"]*255))
 bin6 = bytes(buf)
-# 7. дельта: изменилось 40 секций из 4125
+# 7. дельта: изменилось 40 участков из 3173
 changed = random.sample(range(N), 40)
 v7 = json.dumps([{"i":i,"st":cols["st"][i],"r":cols["risk"][i]} for i in changed], separators=(",",":")).encode()
+# 10. то же колонками, но риск по каждому направлению отдельно (Ф-27: слой на направление).
+# Это ответ карты, а не дашборда: дашборд показывает сводный риск, карта — слои.
+dir_cols = dict(cols)
+del dir_cols["risk"], dir_cols["lvl"]
+for d in range(DIRECTIONS):
+    dir_cols[f"risk{d}"] = [round(random.random(), 4) for _ in range(N)]
+    dir_cols[f"lvl{d}"] = [random.choices([1, 2, 3], weights=[80, 15, 5])[0] for _ in range(N)]
+v10 = json.dumps(dir_cols, separators=(",", ":")).encode()
 
 # минимальный msgpack-энкодер (map/str/int/float/array)
 def mp(o):
@@ -79,6 +108,48 @@ def mp(o):
 v8 = mp(rows)          # msgpack, тот же массив объектов
 v9 = mp(cols)          # msgpack колонками
 
+# ------------------------------------------------------------ самопроверка
+
+
+def selfcheck():
+    """Проверяет не байты, а соотношения: они не должны переворачиваться.
+
+    Абсолютные числа зависят от машины и от версии brotli, и закреплять их ассертом
+    бессмысленно. А вот порядок способов упаковки — это и есть вывод скрипта, ради
+    которого его читают. Если компактный JSON вдруг окажется больше форматированного,
+    сломан замер, а не формат.
+    """
+    assert N == 3173, "число участков берётся из выгрузки, а не из оценки 825 км / 200 м"
+    assert len(rows) == N
+
+    assert len(v2) < len(v1), "компактный JSON обязан быть меньше форматированного"
+    assert len(v2) < len(v2e), "UTF-8 меньше, чем \\uXXXX-экранирование кириллицы"
+    assert len(v3) < len(v2), "колонки меньше массива объектов: ключи не повторяются"
+    assert len(v4) < len(v3), "кадр статусов меньше полных колонок"
+    assert len(bin6) < len(v4), "бинарь меньше любого JSON"
+    assert len(bin6) == 2 * N, "два байта на участок"
+    assert len(v7) < len(v4), "дельта на 40 участков меньше полного кадра"
+    assert len(v9) < len(v8), "MessagePack колонками меньше, чем объектами"
+
+    # Главное новое соотношение: карта с четырьмя направлениями тяжелее сводки.
+    assert len(v10) > len(v3), "слой на направление не может весить меньше одного риска"
+    ratio = len(v10) / len(v3)
+    assert 1.5 < ratio < 4.5, f"ответ карты вырос в {ratio:.1f} раза — проверьте DIRECTIONS"
+
+    # gzip обязан сжимать колонки лучше, чем объекты: в колонках однородные значения.
+    assert len(gzip.compress(v3, 9)) < len(gzip.compress(v2, 9))
+
+    print(f"selfcheck ok: N={N}, направлений={DIRECTIONS}, "
+          f"ответ карты тяжелее сводки в {ratio:.1f} раза")
+
+
+# Самопроверка идёт ДО замеров: ей не нужна ни утилита brotli, ни минуты работы,
+# а нужны только уже собранные байтовые строки. Так её можно гонять на любой машине.
+if "--selfcheck" in sys.argv:
+    selfcheck()
+    sys.exit(0)
+
+
 def br(data, q=11):
     p=os.path.join(D,"t.bin"); open(p,"wb").write(data)
     subprocess.run(["brotli","-f","-q",str(q),p,"-o",p+".br"],check=True)
@@ -86,8 +157,9 @@ def br(data, q=11):
 
 names = ["1 JSON pretty (объекты, indent=2)","2 JSON compact (объекты, UTF-8)","3 JSON compact с \\uXXXX-экранированием",
          "4 JSON колонками, без имён","5 кадр статусов (только st+lvl)","6 бинарно 2 байта/секцию",
-         "7 дельта на 40 изменившихся секций","8 MessagePack (объекты)","9 MessagePack (колонки)"]
-for nm,d in zip(names,[v1,v2,v2e,v3,v4,bin6,v7,v8,v9]):
+         "7 дельта на 40 изменившихся участков","8 MessagePack (объекты)","9 MessagePack (колонки)",
+         f"10 колонками, риск по {DIRECTIONS} направлениям (карта, Ф-27)"]
+for nm,d in zip(names,[v1,v2,v2e,v3,v4,bin6,v7,v8,v9,v10]):
     g=len(gzip.compress(d,9)); b=br(d)
     print(f"{nm:48s} raw={len(d):8,d}  gzip={g:7,d}  br11={b:7,d}  байт/секцию_br={b/N:6.2f}")
 
@@ -102,7 +174,7 @@ def br(d,q=11):
 def rep(nm,d):
     print(f"{nm:52s} raw={len(d):9,d} gzip={len(gzip.compress(d,9)):8,d} br11={br(d):8,d}")
 
-N=4125
+N = 3173
 # участок 200 м ≈ 0.0026 градуса широты; ломаная из 8 точек
 feats=[]
 lat0,lon0=55.75,37.62
@@ -115,7 +187,7 @@ for i in range(N):
       "properties":{"risk":round(random.random(),4),"lvl":random.choice([1,1,1,1,2,3]),"kind":"section"},
       "geometry":{"type":"LineString","coordinates":pts}})
 fc={"type":"FeatureCollection","features":feats}
-rep("GeoJSON 4125 участков, 8 точек, полная точность", json.dumps(fc,separators=(",",":")).encode())
+rep(f"GeoJSON {N} участков, 8 точек, полная точность", json.dumps(fc,separators=(",",":")).encode())
 
 def round_coords(o,nd):
     if isinstance(o,float): return round(o,nd)
