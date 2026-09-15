@@ -109,10 +109,29 @@ docker compose exec -T db psql -U moskollektor -d moskollektor -c '\dn'
 # ещё три служебные: public, а также tiger и topology, их заводит PostGIS
 ```
 
-Накатить файл схемы или сида:
+**Накатить схему** (MOS-85, 15.09.2026):
 
 ```
-docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < ../db/migrations/006_explain_templates.sql
+docker compose --profile app build migrate
+docker compose --profile app run --rm migrate
+```
+
+Берёт `db/migrations/*.sql` по возрастанию номера, каждый файл в своей транзакции,
+список накатанного — в `public.schema_migration`. Повторный прогон ничего не
+накатывает заново и выходит с кодом 0 — так и проверять, что накат прошёл
+целиком: `docker compose --profile app run --rm migrate` второй раз подряд.
+
+Файл миграции через `psql -f` руками не гонять: результат не попадёт в журнал,
+и следующий настоящий прогон попробует накатить его ещё раз и упадёт на
+`already exists`. На стенде, где часть файлов уже накатана руками (наш случай
+15.09.2026 до появления `migrate.py`), это обходится один раз через
+`deploy/bootstrap-schema-migration.sql` — второй раз этот сценарий заводить
+незачем.
+
+Сиды из `db/seed/` накатом не занимаются, их отдельно:
+
+```
+docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < ../db/seed/<файл>.sql
 ```
 
 ## Замер TLS для приёмки
