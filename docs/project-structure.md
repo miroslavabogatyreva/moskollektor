@@ -89,7 +89,7 @@ backend/app/
   mlclient/         вызов модели по контракту
   domain/           правила заявок, объяснение прогноза
 frontend/src/screens/{dashboard, map, log, orders}
-deploy/             docker-compose, nginx, .env.example, backup.sh
+deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
 delivery/           презентация и страница сдачи
 ```
 
