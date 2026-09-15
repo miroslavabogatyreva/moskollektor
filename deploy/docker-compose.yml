@@ -51,8 +51,12 @@ services:
       - ./nginx/certs:/etc/nginx/certs:ro
       - ./nginx/html:/usr/share/nginx/html:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost/"]
-      interval: 30s
+      # Адрес именно 127.0.0.1, а не localhost. В контейнере /etc/hosts отдаёт на имя
+      # localhost два адреса, и wget из busybox берёт первым ::1, а nginx слушает
+      # только IPv4 (listen 443 ssl без строки listen [::]:443). Ответ — connection
+      # refused, healthcheck краснеет навсегда при исправно работающем сервере.
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://127.0.0.1/"]
+      interval: 10s
       timeout: 5s
       retries: 3
     restart: unless-stopped

@@ -35,14 +35,21 @@ echo 'Ожидание: секции TLSv1.2 и TLSv1.3 со списком на
 echo 'секций TLSv1.0 и TLSv1.1 нет вообще.'
 echo
 echo '```'
-nmap --script ssl-enum-ciphers -p "$PORT" "$HOST" 2>&1 || true
+# -n выключает обратный DNS: без него nmap печатает в протокол предупреждение
+# mass_dns про ненайденные серверы имён, а заказчику это читать незачем.
+nmap -n --script ssl-enum-ciphers -p "$PORT" "$HOST" 2>&1 || true
 echo '```'
 echo
 echo '## Контроль: четыре форсированных подключения openssl'
 echo
-echo 'Как читать: текст `no protocols available` ДО строки CONNECTED означает,'
-echo 'что отказал наш клиент, — такой замер не засчитывается. Доказательством'
-echo 'служит алерт сервера ПОСЛЕ CONNECTED (`alert protocol version`).'
+echo 'Как читать: смотреть на строку «Итог», а не на строку `Protocol`.'
+echo 'openssl печатает в `Protocol` запрошенную версию, а не согласованную, поэтому'
+echo 'при отказе сервера там всё равно стоит `TLSv1` — и без строки «Итог» протокол'
+echo 'читается как «TLS 1.0 прошёл». Настоящий признак отказа сервера — текст'
+echo '`alert protocol version` и `Cipher is (NONE)`; признак отказа нашего клиента —'
+echo '`no protocols available`, при нём рукопожатия не было и замер не засчитывается.'
+echo 'Порядок строк внутри блока ни о чём не говорит: ошибки идут в поток ошибок'
+echo 'и смешиваются с обычным выводом не в том порядке, в каком происходили.'
 echo
 
 for V in tls1 tls1_1 tls1_2 tls1_3; do
@@ -51,10 +58,28 @@ for V in tls1 tls1_1 tls1_2 tls1_3; do
         tls1|tls1_1) EXTRA="-cipher DEFAULT@SECLEVEL=0" ;;
         *)           EXTRA="" ;;
     esac
-    echo "### -$V"
-    echo '```'
     # shellcheck disable=SC2086
-    echo | $OPENSSL s_client -connect "$HOST:$PORT" -"$V" $EXTRA 2>&1 \
+    OUT=$(echo | $OPENSSL s_client -connect "$HOST:$PORT" -"$V" $EXTRA 2>&1 || true)
+
+    # Вывод openssl читается неверно без этой строки. При отказе сервера он всё
+    # равно печатает `Protocol: TLSv1`, потому что показывает запрошенную версию,
+    # а не согласованную, — и человек, листающий протокол, видит «TLS 1.0 прошёл».
+    # Отличаем три случая по тексту, а не по строке Protocol.
+    case "$OUT" in
+        *"no protocols available"*)
+            VERDICT="ОТКАЗАЛ НАШ КЛИЕНТ — рукопожатия не было, замер не засчитан" ;;
+        *"alert protocol version"*|*"alert handshake failure"*|*"Cipher is (NONE)"*)
+            VERDICT="СЕРВЕР ОТКЛОНИЛ — это и есть доказательство для НФ-75" ;;
+        *)
+            VERDICT="СЕРВЕР ПРИНЯЛ — $(echo "$OUT" | grep -m1 '^New,' | sed 's/^New, //')" ;;
+    esac
+
+    echo "### -$V"
+    echo
+    echo "**Итог: $VERDICT**"
+    echo
+    echo '```'
+    echo "$OUT" \
         | grep -E 'CONNECTED|Protocol|Cipher|alert|no protocols available|handshake failure' \
         | head -6 || true
     echo '```'

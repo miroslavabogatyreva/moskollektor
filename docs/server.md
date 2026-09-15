@@ -53,7 +53,40 @@ rsync -av nikolay-hakaton@135.106.216.101:/srv/moskollektor-hakaton-data/books/ 
   в `/home/nikolay-hakaton/.ssh/authorized_keys`. Пароль на учётке я заблокировала
   (`passwd -l`), так что вход только по ключу. `sudo` работает без пароля —
   правило `nikolay-hakaton ALL=(ALL) NOPASSWD:ALL` я положила
-  в `/etc/sudoers.d/nikolay-hakaton` 15.09.2026.
+  в `/etc/sudoers.d/nikolay-hakaton` 15.09.2026. Там же 15.09.2026 я добавила его
+  в группу `docker` (`usermod -aG docker nikolay-hakaton`), чтобы он запускал
+  контейнеры без `sudo`: `id nikolay-hakaton` показывает
+  `groups=1000(nikolay-hakaton),27(sudo),989(docker)`. Новых прав это ему не дало —
+  полный root у него и так был по правилу `NOPASSWD:ALL` строкой выше; членство
+  в группе только убирает `sudo` перед каждой командой.
+
+## Докер стоит с 15.09.2026
+
+До этого дня на сервере не было ни движка, ни плагина: `dpkg -l | grep -iE 'docker|containerd'`
+не давал ни строки. Поставили из официального репозитория Docker, а не пакетом `docker.io`
+из Ubuntu: наш `deploy/docker-compose.yml` написан под `docker compose` второй версии,
+а в репозитории Ubuntu плагин лежит отдельно и отстаёт по версии.
+
+```
+docker --version        -> Docker version 29.8.0, build 88096ef
+docker compose version  -> Docker Compose version v5.5.1
+systemctl is-enabled docker -> enabled
+systemctl is-active  docker -> active
+```
+
+Автозапуск после перезагрузки есть: apt создал симлинки на `docker.service`,
+`docker.socket` и `containerd.service` в `multi-user.target.wants`. Это нужно строке
+приёмки НФ-39 — стенд, который не встаёт сам, восстановление за 4 часа не закроет.
+
+Установка съела 1,54 ГиБ вместе с образами `hello-world` и `postgis/postgis:18-3.6`.
+На диске было занято 16 ГиБ из 119, стало 18 ГиБ, свободно 96 ГиБ. Вычесть 16 ГиБ
+выгрузки в `/srv` — под базу с журналом СМВУ на 313 546 016 строк остаётся около
+80 ГиБ, и это до места под WAL и индексы, которое при заливке уходит быстрее,
+чем под сами строки.
+
+Образ базы проверен на месте: `docker run --rm postgis/postgis:18-3.6 postgres --version`
+отвечает `postgres (PostgreSQL) 18.6 (Debian 18.6-1.pgdg13+2)`, а PostGIS в нём 3.6.4.
+Архитектура сервера `x86_64` — для этого образа родная, эмуляции нет.
 
 ## Вход по паролю отключён для всех учёток
 
