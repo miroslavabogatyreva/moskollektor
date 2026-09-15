@@ -391,6 +391,10 @@ CREATE INDEX reading_fault_idx ON smvu.reading (channel_id, read_time)
 -- Это ручной аналог continuous aggregate из TimescaleDB. Разница в том, что тут
 -- я сам решаю, когда и какой кусок пересчитать, и мне не нужно расширение.
 -- Размер: 4125 участков × 365 дней × 12 лет = 18,07 млн строк — столько же, сколько
+-- (4125 здесь и ниже — расчётное допущение «825 км / 200 м» из docs/HLD.md разд. 4,
+--  а не замер. По справочнику каналов участков получилось 3 173 на 30 коллекторах —
+--  проверено 15.09.2026 разбором тега. Оценку места оставляем с запасом, но в тексте
+--  про число участков надо называть 3 173.)
 -- событий, но строка втрое уже и читается одним сканом.
 
 CREATE TABLE feat.section_daily (
@@ -408,10 +412,19 @@ CREATE TABLE feat.section_daily (
     -- Вердикт ОДС: подтвердилась тревога или оказалась ложной. В выгрузке СМВУ такого
     -- поля нет вовсе, поэтому счётчики остаются нулями до прихода журналов ОДС (ОВ-47).
     -- Колонки держим: на них стоят признаки confirmed_365d и false_rate_365d.
-    confirmed_total integer NOT NULL DEFAULT 0,
-    false_total     integer NOT NULL DEFAULT 0,
+    -- Пустые нарочно, без DEFAULT 0: правило контракта (docs/HLD.md разд. 6.3)
+    -- говорит, что null означает «признака нет», а ноль — настоящее значение.
+    -- С DEFAULT 0 признак confirmed_365d приехал бы к модели утверждением
+    -- «ни разу не подтверждалось», а false_rate_365d — «датчик не врёт»,
+    -- хотя правильный ответ обоим — «мы не знаем». Исправлено 15.09.2026.
+    confirmed_total integer,
+    false_total     integer,
     active_channels smallint NOT NULL DEFAULT 0,
-    silent_channels smallint NOT NULL DEFAULT 0,  -- каналы без единой записи за сутки
+    -- Каналы участка без единой записи за сутки. До 15.09.2026 колонка стояла
+    -- NOT NULL DEFAULT 0, а функция feat.refresh_section_daily её не заполняла —
+    -- признак silent_sensor_share выходил ровно нулём у всех участков, без ошибки
+    -- и без предупреждения. Теперь считается ниже, в самой функции.
+    silent_channels smallint NOT NULL DEFAULT 0,
     max_value       real,                         -- максимум разобравшегося числа
     PRIMARY KEY (section_id, day)
 );
@@ -441,7 +454,7 @@ BEGIN
     INSERT INTO feat.section_daily AS d (
         section_id, day, readings_total, alarms_total,
         alarms_fire, alarms_gas, alarms_security, alarms_flood,
-        active_channels, max_value)
+        active_channels, silent_channels, max_value)
     SELECT r.section_id,
            r.read_time::date,
            count(*),
@@ -451,6 +464,13 @@ BEGIN
            count(*) FILTER (WHERE r.is_alarm AND c.system_kind = 'Охранная подсистема'),
            count(*) FILTER (WHERE r.is_alarm AND c.sensor_kind = 'Датчик затопления'),
            count(DISTINCT r.channel_id),
+           -- GREATEST(0, …) не украшение: 1 142 канала пишут в журнал, но в справочнике
+           -- заказчика их нет (smvu.channel.is_stub), и на таком участке писавших
+           -- каналов окажется больше, чем числится за ним. Без обрезки счётчик уйдёт
+           -- в минус и smallint переполнится.
+           GREATEST(0, (SELECT count(*) FROM smvu.channel ch
+                         WHERE ch.section_id = r.section_id)
+                       - count(DISTINCT r.channel_id))::smallint,
            max(r.value_num)
       FROM smvu.reading r
       JOIN smvu.channel c ON c.channel_id = r.channel_id
@@ -466,6 +486,7 @@ BEGIN
         alarms_security = excluded.alarms_security,
         alarms_flood    = excluded.alarms_flood,
         active_channels = excluded.active_channels,
+        silent_channels = excluded.silent_channels,
         max_value       = excluded.max_value;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;
@@ -489,7 +510,12 @@ CREATE TABLE feat.section_features (
     days_since_last_confirmed  integer,
     days_since_last_repair     integer, -- из maint.work_order
     sensor_count    smallint,
-    silent_sensor_share real,           -- доля молчащих датчиков: признак «мы ослепли»
+    -- Доля молчащих каналов участка. Подпись «признак „мы ослепли“» убрана
+    -- 15.09.2026 как неверная: за сутки 1 августа 2026 говорил 1 241 канал
+    -- из 11 485, то есть молчат 89 % парка, и это норма. Признак меряет
+    -- активность объекта, а не здоровье датчика, и сравнивать его можно только
+    -- внутри типа канала — docs/HLD.md разд. 6.3-бис.
+    silent_sensor_share real,
     zero_drift_max  real,               -- дрейф нуля метановых датчиков (см. 15-reglament)
     age_years       real,               -- возраст участка из реестра
     criticality     smallint,           -- из ref.criticality
