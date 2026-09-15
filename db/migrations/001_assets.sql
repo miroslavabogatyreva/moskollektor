@@ -630,7 +630,7 @@ CREATE TABLE maint.notification (
     -- Автозаявка от прогноза. Новую колонку origin не заводим: source_system
     -- уже отличает 'manual' (диспетчер завёл руками) от 'forecast' (родил расчёт).
     -- Внешнего ключа на pred.forecast здесь нет намеренно: его ставит
-    -- schema_xref.sql, потому что schema_events.sql накатывается после этого файла.
+    -- 005_xref.sql, потому что 004_events.sql накатывается после этого файла.
     forecast_id         bigint,
     -- Срок выполнения. Для превентивной заявки он обязан наступить РАНЬШЕ
     -- прогнозируемого отказа, иначе заявка не превентивная (М-13).
@@ -713,7 +713,7 @@ CREATE TABLE maint.work_order_operation (
     work_uom            varchar(4)   DEFAULT 'ЧАС',
     capacity_count      smallint     DEFAULT 1,
     -- ссылка на наряд-допуск из АРМ-Контроль = permit.permit.number;
-    -- внешний ключ ставит schema_xref.sql, потому что наряды накатываются позже
+    -- внешний ключ ставит 005_xref.sql, потому что наряды накатываются позже
     permit_no           varchar(30),
     deviation_reason    varchar(4),                 -- справочник причин отклонения
     UNIQUE (order_id, operation_no)
@@ -859,7 +859,7 @@ CREATE RECURSIVE VIEW asset.v_floc_path (id, code, name, level, path, path_names
     SELECT c.id, c.code, c.name, c.hierarchy_level,
            p.path || ' / ' || c.code, p.path_names || ' / ' || c.name
       FROM asset.func_location c
-      JOIN asset.v_floc_path p ON p.id = c.parent_id;
+      JOIN v_floc_path p ON p.id = c.parent_id;   -- без схемы: имя рекурсивного CTE, а не таблицы
 
 COMMENT ON VIEW asset.v_floc_path IS 'Полный путь технического места от предприятия до объекта — для дерева и хлебных крошек';
 
