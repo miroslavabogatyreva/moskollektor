@@ -103,6 +103,12 @@ def evaluate_alerts(alerts, failures, horizon_hours=24, max_lead_hours=None,
         "f1": round(f1, 3),
         "median_lead_hours": round(median(leads), 1) if leads else None,
         "min_lead_hours": round(min(leads), 1) if leads else None,
+        # Доля пойманных отказов, о которых предупредили позже чем за 24 часа.
+        # Смысл имеет только при horizon_hours = 0: при ненулевом горизонте отбор
+        # совпадений уже выбросил такие предупреждения, и доля выйдет нулевой
+        # не потому, что их нет, а потому, что их не пустили в выборку.
+        "lead_under_24h_share": (
+            round(sum(1 for x in leads if x < 24) / len(leads), 3) if leads else None),
         "horizon_hours": horizon_hours,   # нужен verdict(), см. ниже
     }
     if observed_object_days:
@@ -111,7 +117,8 @@ def evaluate_alerts(alerts, failures, horizon_hours=24, max_lead_hours=None,
     return out
 
 
-def verdict(metrics, min_precision=0.7, min_recall=0.5, min_lead_hours=24):
+def verdict(metrics, min_precision=0.7, min_recall=0.5, min_lead_hours=24,
+            max_under_share=0.20):
     """Приёмочное решение по целевым метрикам Москоллектора.
 
     Про lead_time. evaluate_alerts уже выбросила все предупреждения с
@@ -120,12 +127,23 @@ def verdict(metrics, min_precision=0.7, min_recall=0.5, min_lead_hours=24):
     В этом случае возвращаем None вместо True, чтобы вакуумная проверка
     не выглядела на приёмке как пройденная. Чтобы реально померить упреждение,
     прогоните evaluate_alerts(..., horizon_hours=0) и смотрите распределение.
+
+    Что именно проверяем при честном прогоне. Раньше здесь стоял МИНИМУМ упреждения:
+    «ни один прогноз не выдан позже чем за 24 часа». Такой порог не берёт никто —
+    достаточно одного позднего прогноза из тысячи, чтобы вся приёмка провалилась,
+    и пример в docs/acceptance-test.md это показывал: медиана 72 часа при минимуме 6.
+    Поэтому проверяем два числа вместе, как записано в строке М-20:
+    медиана не ниже 24 часов И доля поздних прогнозов не выше max_under_share.
+    Минимум по-прежнему считается и выводится, но приёмку в одиночку не рушит.
     """
     horizon = metrics.get("horizon_hours", 0)
     if horizon >= min_lead_hours:
         lead_ok = None          # не измерено: отбор совпадений уже гарантировал порог
     else:
-        lead_ok = (metrics["min_lead_hours"] or 0) >= min_lead_hours
+        median_ok = (metrics.get("median_lead_hours") or 0) >= min_lead_hours
+        share = metrics.get("lead_under_24h_share")
+        share_ok = share is not None and share <= max_under_share
+        lead_ok = median_ok and share_ok
     checks = {
         "precision": metrics["precision"] >= min_precision,
         "recall": metrics["recall"] >= min_recall,
@@ -186,6 +204,32 @@ def _demo():
         horizon_hours=24, observed_object_days=500)
     assert good["precision"] == 1.0 and good["recall"] == 1.0, good
     assert verdict(good)[0] is True
+
+    # Честный прогон: horizon_hours=0 ничего не отбрасывает, и упреждение измеряется
+    # по-настоящему. Пять отказов, один из них предупреждён поздно — это доля 0,20,
+    # ровно на границе допустимого по М-20.
+    late_alerts, late_failures = [], []
+    for i, lead_h in enumerate([72, 48, 36, 30, 6]):
+        obj = f"S-{i}"
+        fail_at = d("2026-04-10 00:00")
+        late_alerts.append((obj, fail_at - timedelta(hours=lead_h)))
+        late_failures.append((obj, fail_at))
+    honest = evaluate_alerts(late_alerts, late_failures, horizon_hours=0)
+    assert honest["median_lead_hours"] == 36.0, honest
+    assert honest["min_lead_hours"] == 6.0, honest          # минимум порог не берёт
+    assert honest["lead_under_24h_share"] == 0.2, honest    # один поздний из пяти
+    ok_lead, checks_lead = verdict(honest, min_precision=0, min_recall=0)
+    assert checks_lead["lead_time"] is True, checks_lead    # медиана 36 ч, доля 0,20
+    assert ok_lead is True, checks_lead
+
+    # Шестой отказ, тоже предупреждённый поздно: доля 2 из 6 = 0,33 — порог пробит,
+    # хотя медиана всё ещё выше 24 часов. Именно это и обязана поймать проверка.
+    late_alerts.append(("S-5", d("2026-04-10 00:00") - timedelta(hours=10)))
+    late_failures.append(("S-5", d("2026-04-10 00:00")))
+    worse = evaluate_alerts(late_alerts, late_failures, horizon_hours=0)
+    assert worse["median_lead_hours"] == 33.0, worse
+    assert worse["lead_under_24h_share"] == 0.333, worse
+    assert verdict(worse, min_precision=0, min_recall=0)[1]["lead_time"] is False, worse
 
     print("rule_compliance: 50+30 из 100 ->", pct, "% | сработали:", hit)
     print("evaluate_alerts:", m)
