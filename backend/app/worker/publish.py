@@ -41,17 +41,27 @@ def ранги(вероятности: list[float]) -> list[int]:
 
 async def записать(conn, run_id: int, as_of, horizon_h: int, direction: str,
                    участки: list[int], вероятности: list[float],
-                   факторы: list[list[dict]]) -> int:
-    """Стадии 6 и 7: прогноз в историю, свёртка в текущее, NOTIFY. Возвращает число строк."""
+                   факторы: list[list[dict]],
+                   тексты: list[str | None] | None = None) -> int:
+    """Стадии 6 и 7: прогноз в историю, свёртка в текущее, NOTIFY. Возвращает число строк.
+
+    Текст объяснения кладётся ТОЙ ЖЕ вставкой, что и прогноз, а не отдельным
+    UPDATE следом. Иначе между двумя запросами существует состояние «прогноз есть,
+    объяснения нет», и если второй запрос не дойдёт, диспетчер получит число
+    без причины. Прогноз и его объяснение появляются в базе вместе или никак.
+    """
+    тексты = тексты or [None] * len(участки)
     места = ранги(вероятности)
-    строки = [(run_id, sid, direction, horizon_h, float(p), место, json.dumps(ф, ensure_ascii=False))
-              for sid, p, место, ф in zip(участки, вероятности, места, факторы)]
+    строки = [(run_id, sid, direction, horizon_h, float(p), место,
+               json.dumps(ф, ensure_ascii=False), т)
+              for sid, p, место, ф, т in zip(участки, вероятности, места, факторы, тексты)]
 
     async with conn.transaction():
         await conn.executemany(
             """INSERT INTO pred.forecast
-                   (run_id, section_id, direction, horizon_h, probability, risk_rank, factors)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)""", строки)
+                   (run_id, section_id, direction, horizon_h, probability, risk_rank,
+                    factors, explanation_ru)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)""", строки)
 
         # Полная перезапись, а не UPDATE по участкам: участок, выпавший из расчёта,
         # обязан исчезнуть из текущего прогноза, а не остаться там с прошлым числом.
