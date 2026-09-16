@@ -1,4 +1,8 @@
 # Версии сверены в docs/HLD.md разд. 7.1.2 (14.09.2026). Пополняется по мере
-# того, как Q3/Q4 кладут код в api/ и worker/ — сейчас нужен только asyncpg,
-# им пользуется app.migrate.
+# того, как Q3/Q4 кладут код в api/ и worker/.
 asyncpg==0.31.0
+# app.auth.deps (Q4.1) — Depends/Header/HTTPException.
+fastapi==0.141.1
+pydantic==2.13.5
+# app.api.main (Q4.3) — сервер, которым CMD в backend/Dockerfile поднимает api.
+uvicorn==0.52.4
