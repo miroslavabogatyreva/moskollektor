@@ -1,0 +1,169 @@
+/* Цвета и обводки — dashboard/color-palette.md, раздел 9, дословно.
+   Шкала риска (--risk-*) сюда не перенесена: она понадобится задачам 5.2/5.3/5.5,
+   переносить её раньше времени незачем. */
+
+/* Шрифты: два файла с Google Fonts, снятые один раз и положенные в assets/fonts —
+   браузер их больше не запрашивает. Каждый файл вариативный (один .woff2 на все
+   начертания 400–700), поэтому диапазон веса указан через дефис, а не отдельным
+   правилом на каждый вес. У Lexend нет кириллического начертания вовсе: для русского
+   текста браузер сам подставит Source Sans 3 по стеку шрифтов — это штатное
+   поведение CSS, а не ошибка. */
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../assets/fonts/source-sans-3-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../assets/fonts/source-sans-3-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Lexend";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../assets/fonts/lexend-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+:root {
+  --font-ui: "Source Sans 3", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Lexend", "Source Sans 3", system-ui, sans-serif;
+
+  /* фон и поверхности */
+  --bg-app: #e8ebee;
+  --bg-surface: #f4f6f8;
+  --bg-table: #fafbfc;
+  --bg-table-alt: #f1f4f6;
+  --bg-row-hover: #edf1f4;
+  --border-subtle: #c9d0d8;
+  --border-strong: #7d8894;
+
+  /* текст */
+  --text-primary: #15202b;
+  --text-secondary: #47525e;
+  --text-muted: #5f6a75;
+  --text-on-brand: #ffffff;
+
+  /* бренд */
+  --brand: #003882;
+  --brand-header-bg: #003882;
+  --brand-nav-active: #1a4e9e;
+  --brand-nav-marker: #38bdf8;
+  --brand-action: #003882;
+  --brand-action-hover: #002a63;
+  --link: #003882;
+
+  /* служебные */
+  --state-success: #1e7a46;
+  --state-warning: #8a5a00;
+  --state-error: #8f1d18;
+  --state-info: #003882;
+  --row-selected: #d9e6f2;
+  --row-selected-bar: #003882;
+  --focus-ring: #0b6fcb;
+  --focus-ring-offset: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: #131a22;
+    --bg-surface: #1b242e;
+    --bg-table: #202a35;
+    --bg-table-alt: #1a232d;
+    --bg-row-hover: #232e3a;
+    --border-subtle: #303b47;
+    --border-strong: #6b7886;
+
+    --text-primary: #e4e9ee;
+    --text-secondary: #aeb9c5;
+    --text-muted: #8a96a3;
+    --text-on-brand: #ffffff;
+
+    --brand: #1a5cb0;
+    --brand-header-bg: #06264f;
+    --brand-nav-active: #123a6e;
+    --brand-nav-marker: #38bdf8;
+    --brand-action: #1a5cb0;
+    --brand-action-hover: #2470c9;
+    --link: #6fc2ea;
+
+    --state-success: #6fd39b;
+    --state-warning: #e8b75a;
+    --state-error: #ff9a8d;
+    --state-info: #6fc2ea;
+    --row-selected: #24384c;
+    --row-selected-bar: #6fc2ea;
+    --focus-ring: #6fc2ea;
+    --focus-ring-offset: #131a22;
+  }
+}
+
+[data-theme="dark"] {
+  --bg-app: #131a22;
+  --bg-surface: #1b242e;
+  --bg-table: #202a35;
+  --bg-table-alt: #1a232d;
+  --bg-row-hover: #232e3a;
+  --border-subtle: #303b47;
+  --border-strong: #6b7886;
+
+  --text-primary: #e4e9ee;
+  --text-secondary: #aeb9c5;
+  --text-muted: #8a96a3;
+  --text-on-brand: #ffffff;
+
+  --brand: #1a5cb0;
+  --brand-header-bg: #06264f;
+  --brand-nav-active: #123a6e;
+  --brand-nav-marker: #38bdf8;
+  --brand-action: #1a5cb0;
+  --brand-action-hover: #2470c9;
+  --link: #6fc2ea;
+
+  --state-success: #6fd39b;
+  --state-warning: #e8b75a;
+  --state-error: #ff9a8d;
+  --state-info: #6fc2ea;
+  --row-selected: #24384c;
+  --row-selected-bar: #6fc2ea;
+  --focus-ring: #6fc2ea;
+  --focus-ring-offset: #131a22;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-ring-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
