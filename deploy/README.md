@@ -235,6 +235,66 @@ docker compose exec -T ml python -c "import urllib.request,json; print(json.load
 не выдать за прогноз. Подмена на образ Николая — правка `ML_IMAGE` в `.env`,
 код при этом не меняется.
 
+## Поднять API и выложить интерфейс
+
+**Найдено 16.09.2026: из шести контейнеров HLD на стенде работали три.** Контейнер `api`
+не поднимался ни разу, а на корне nginx отдавал заглушку «Москоллектор — стенд»,
+написанную в первый день. По кодам ответа строка приёмки М-03 «интерфейс открывается
+в браузере по ссылке» выглядела закрытой — а открылась бы эта заглушка.
+
+**Сначала код на сервер.** На сервере лежит rsync-копия рабочего дерева, и она отстаёт.
+Каталог `deploy/.env` не трогать: там пароль базы, и однажды он уже приехал туда копией
+с мака (разбор — `docs/server.md`).
+
+```
+rsync -a --delete --exclude '__pycache__' backend/app/ root@СЕРВЕР:/srv/moskollektor/backend/app/
+rsync -a backend/Dockerfile backend/requirements.txt root@СЕРВЕР:/srv/moskollektor/backend/
+rsync -a db/migrations/ root@СЕРВЕР:/srv/moskollektor/db/migrations/
+rsync -a contracts/ root@СЕРВЕР:/srv/moskollektor/contracts/
+rsync -a deploy/docker-compose.yml root@СЕРВЕР:/srv/moskollektor/deploy/
+```
+
+**Потом образ и контейнер.** `migrate` поднимется сам: `api` ждёт его через
+`condition: service_completed_successfully`, накат идёт по журналу и повторно ничего
+не делает.
+
+```
+cd /srv/moskollektor
+docker compose -f deploy/docker-compose.yml --profile app build api
+docker compose -f deploy/docker-compose.yml --profile app up -d api
+```
+
+**Интерфейс — это статика, а не контейнер.** nginx монтирует `./nginx/html`
+на `/usr/share/nginx/html`, поэтому собранный фронт кладётся туда файлами:
+
+```
+cd frontend && npm run build          # проверить бюджет: gzip -c dist/assets/*.js | wc -c < 153600
+rsync -a --delete frontend/dist/ root@СЕРВЕР:/srv/moskollektor/deploy/nginx/html/
+```
+
+**Важно про порядок.** Каждая правка фронта требует повторить оба шага, иначе стенд
+покажет вчерашнюю версию, а комиссия — вчерашний интерфейс. Автоматики нет.
+
+**Проверять уловом, а не статусом.** `docker compose ps` скажет `running` и у контейнера,
+который отвечает пятисотками. Замер 16.09.2026, все ответы с боевого контура:
+
+```
+curl -sk -o /dev/null -w "%{http_code}\n" https://СЕРВЕР/                      # 200, index.html интерфейса
+curl -sk -o /dev/null -w "%{http_code}\n" https://СЕРВЕР/dashboard             # 200 — try_files отдаёт index.html
+curl -sk -o /dev/null -w "%{http_code}\n" https://СЕРВЕР/api/risks             # 401 без заголовка
+curl -sk -H "X-User-Login: dispatcher1" -o /dev/null -w "%{http_code} %{size_download}\n" \
+     https://СЕРВЕР/api/risks                                                   # 200, 455 865 байт
+```
+
+Последняя строка — главная: она доказывает, что интерфейс и данные приходят с одного
+адреса, без туннелей. Размер ответа — это 3 173 участка с уровнем риска.
+
+**Ловушка, на которую я наступил дважды за день.** В `bash` на сервере не работают
+кириллические имена переменных: `for п in …` отвечает `not a valid identifier`, цикл
+не выполняется вовсе, а вывод выглядит как пустой результат, а не как ошибка. В командах
+для сервера имена только латиницей — это записано и в `docs/server.md`, и я всё равно
+наступил.
+
 ## Замер TLS для приёмки
 
 Строку НФ-75 закрывает отдельный скрипт, его вывод и есть протокол:
