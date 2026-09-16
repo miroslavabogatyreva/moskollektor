@@ -20,6 +20,8 @@
 после. На 313 млн строк это 40 ГБ text-таблицы вдобавок к 30 ГБ самих показаний,
 и на стенде столько места нет. Здесь staging живёт по 500 тыс. строк: COPY в
 типизированную load.smvu_chunk, оттуда INSERT ... SELECT в reading, TRUNCATE, дальше.
+Файлы можно лить несколькими процессами сразу: --slot даёт каждому свою чанк-таблицу,
+а годы ложатся в разные месячные партиции и друг другу не мешают.
 Пик — полгигабайта, и та лежит в кэше.
 
 **Почему разбор типов вернулся в Python.** У чанка есть цена: INSERT упадёт целиком,
@@ -101,7 +103,7 @@ FALSE_WORDS = {"f", "false", "0", "нет", "ложь"}
 CHUNK_COLUMNS = ["journal_id", "read_time", "channel_id", "is_alarm", "value_text", "value_num"]
 
 CHUNK_DDL = """
-CREATE UNLOGGED TABLE IF NOT EXISTS load.smvu_chunk (
+CREATE UNLOGGED TABLE IF NOT EXISTS load.{t} (
     journal_id bigint,
     read_time  timestamptz,
     channel_id integer,
@@ -116,7 +118,7 @@ CREATE UNLOGGED TABLE IF NOT EXISTS load.smvu_chunk (
 NEW_STUBS = """
 INSERT INTO smvu.channel (channel_id, is_stub, is_active)
 SELECT DISTINCT k.channel_id, true, false
-  FROM load.smvu_chunk k
+  FROM load.{t} k
  WHERE NOT EXISTS (SELECT 1 FROM smvu.channel c WHERE c.channel_id = k.channel_id)
 ON CONFLICT (channel_id) DO NOTHING
 """
@@ -126,7 +128,7 @@ INSERT INTO smvu.reading
     (journal_id, read_time, channel_id, section_id, is_alarm, value_text, value_num, source_batch)
 SELECT k.journal_id, k.read_time, k.channel_id, c.section_id,
        k.is_alarm, k.value_text, k.value_num, $1
-  FROM load.smvu_chunk k
+  FROM load.{t} k
   JOIN smvu.channel c USING (channel_id)
 ON CONFLICT DO NOTHING
 """
@@ -346,12 +348,12 @@ async def load_channels(conn, path):
     return len(recs)
 
 
-async def flush(conn, batch, records, rep):
+async def flush(conn, batch, records, rep, t):
     """Чанк в базу: COPY -> заглушки каналов -> INSERT в reading -> очистка."""
-    await conn.copy_records_to_table("smvu_chunk", schema_name="load",
+    await conn.copy_records_to_table(t, schema_name="load",
                                      records=records, columns=CHUNK_COLUMNS)
-    stubs = await conn.execute(NEW_STUBS)
-    status = await conn.execute(INSERT_CHUNK, batch)
+    stubs = await conn.execute(NEW_STUBS.format(t=t))
+    status = await conn.execute(INSERT_CHUNK.format(t=t), batch)
     вставлено = int(status.split()[-1])
     rep["вставлено"] += вставлено
     # Разница может взяться только от PK: заглушки заведены строкой выше, значит
@@ -359,10 +361,10 @@ async def flush(conn, batch, records, rep):
     # это допущение, а уже потом искать дубли в файле.
     rep["дубль ид_события"] += len(records) - вставлено
     rep["заглушек каналов"] += int(stubs.split()[-1])
-    await conn.execute("TRUNCATE load.smvu_chunk")
+    await conn.execute(f"TRUNCATE load.{t}")
 
 
-async def load_journal(conn, path, batch, chunk_size):
+async def load_journal(conn, path, batch, chunk_size, t):
     """Один годовой файл журнала. Возвращает отчёт о качестве."""
     t0 = time.time()
     rep = Counter()
@@ -373,11 +375,11 @@ async def load_journal(conn, path, batch, chunk_size):
             continue
         buf.append(record)
         if len(buf) >= chunk_size:
-            await flush(conn, batch, buf, rep)
+            await flush(conn, batch, buf, rep, t)
             buf.clear()
             print(f"    {path}: {rep['вставлено']:,} строк".replace(",", " "), flush=True)
     if buf:
-        await flush(conn, batch, buf, rep)
+        await flush(conn, batch, buf, rep, t)
     dt = time.time() - t0
     скорость = rep["вставлено"] / dt if dt else 0
     print(f"{path}: вставлено {rep['вставлено']:,} за {dt / 60:.1f} мин "
@@ -414,8 +416,12 @@ async def run(args):
         # целиком, а не станем искать, какие последние строки не доехали.
         await conn.execute("SET synchronous_commit = off")
         await conn.execute("CREATE SCHEMA IF NOT EXISTS load")
-        await conn.execute(CHUNK_DDL)
-        await conn.execute("TRUNCATE load.smvu_chunk")
+        # Своя промежуточная таблица на поток: восемь файлов можно лить несколькими
+        # процессами сразу (годы ложатся в разные месячные партиции и не мешают друг
+        # другу), но общий чанк они затирали бы друг у друга TRUNCATE-ом.
+        t = f"smvu_chunk_{args.slot}" if args.slot else "smvu_chunk"
+        await conn.execute(CHUNK_DDL.format(t=t))
+        await conn.execute(f"TRUNCATE load.{t}")
 
         if args.objects:
             await load_objects(conn, args.objects)
@@ -424,6 +430,9 @@ async def run(args):
 
         if args.check:
             return await check(conn)
+        if args.build_indexes:
+            await create_secondary_indexes(conn)
+            return 0
 
         paths = [p for pat in args.files for p in sorted(glob.glob(pat))]
         if not paths:
@@ -442,7 +451,7 @@ async def run(args):
         итог = Counter()
         t0 = time.time()
         for path in paths:
-            итог += await load_journal(conn, path, batch, args.chunk)
+            итог += await load_journal(conn, path, batch, args.chunk, t)
             await conn.execute(
                 "UPDATE load.batch SET loaded_rows = $2, failed_rows = $3 WHERE id = $1",
                 batch, итог["вставлено"],
@@ -492,8 +501,13 @@ async def run(args):
 # Пара — это проверка, которой не нужны ни данные, ни инструменты: если два числа
 # перестали складываться, одно из них неверно, и пересчитывать ничего не надо.
 КОНТРОЛЬНЫЕ = [
+    # Повторный заголовок вычитаем: загрузчик его прочитал и отбросил, поэтому он
+    # лежит в failed_rows, а опись выгрузки строкой данных его не считала. Без этой
+    # поправки сверка вечно показывала бы лишнюю единицу и приучала на неё не смотреть.
     ("строк журнала",            313_546_016,
-     "SELECT loaded_rows + failed_rows FROM load.batch ORDER BY id DESC LIMIT 1"),
+     "SELECT sum(loaded_rows + failed_rows)::bigint - coalesce("
+     "(SELECT sum((payload->>'строк')::bigint) FROM load.error "
+     "WHERE message = 'повторный заголовок'), 0) FROM load.batch"),
     ("каналов в журнале",             12_627,
      "SELECT count(*) FROM smvu.channel"),
     ("из них в справочнике",          11_485,
@@ -639,6 +653,9 @@ def main(argv):
                     help="не снимать вторичные индексы: для доливки поверх залитого")
     ap.add_argument("--tz", default="Europe/Moscow",
                     help="часовой пояс выгрузки; заказчик его не назвал, см. ОВ-48")
+    ap.add_argument("--slot", help="номер потока: своя промежуточная таблица")
+    ap.add_argument("--build-indexes", action="store_true",
+                    help="построить снятые вторичные индексы и выйти")
     ap.add_argument("--check", action="store_true",
                     help="сверить залитое с контрольными числами и выйти")
     ap.add_argument("--selfcheck", action="store_true")
