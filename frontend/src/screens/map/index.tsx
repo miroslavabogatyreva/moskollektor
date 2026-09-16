@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { route } from 'preact-router'
 import type { Section } from './types'
 
-/* Ось пикетов — первая половина задачи 5.3 (MOS-50): сам чертёж и клик по метке.
-   Цвет и форма метки по уровню риска — вторая половина, ждёт /api/risks (прогнозов
-   пока нет ни у кого, их пишет MOS-32). 3 173 участка одной лентой не показать
-   (dashboard/dashboard.md, разд. 9) — поэтому сначала выбор коллектора, потом ось.
-   Заголовок экрана отличается от подписи в меню: меню держится за формулировку
-   М-05 ("Карта объектов"), а здесь — про способ показа. */
+/* Ось пикетов — первая половина задачи 5.3 (MOS-50): сам чертёж и клик по метке
+   ведёт на /objects/:sectionId (ObjectCard, 5.5, MOS-52). Цвет и форма метки
+   по уровню риска — вторая половина, оставлена без изменений в этой правке.
+   3 173 участка одной лентой не показать (dashboard/dashboard.md, разд. 9) —
+   поэтому сначала выбор коллектора, потом ось. Заголовок экрана отличается
+   от подписи в меню: меню держится за формулировку М-05 ("Карта объектов"),
+   а здесь — про способ показа. */
 
 const AXIS_WIDTH = 1000
 const AXIS_HEIGHT = 120
@@ -16,7 +18,6 @@ export function MapScreen(_props: Record<string, unknown>) {
   const [sections, setSections] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
-  const [selected, setSelected] = useState<Section | null>(null)
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -65,10 +66,7 @@ export function MapScreen(_props: Record<string, unknown>) {
               class="text-sm px-2 py-1 rounded"
               style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
               value={collector ?? undefined}
-              onChange={(e) => {
-                setCollector(Number((e.target as HTMLSelectElement).value))
-                setSelected(null)
-              }}
+              onChange={(e) => setCollector(Number((e.target as HTMLSelectElement).value))}
             >
               {collectors.map(([c, n]) => (
                 <option key={c} value={c}>
@@ -104,34 +102,21 @@ export function MapScreen(_props: Record<string, unknown>) {
                 key={s.section_id}
                 cx={x(s.picket)}
                 cy={baselineY}
-                r={selected?.section_id === s.section_id ? 7 : 5}
+                r={5}
                 fill="var(--bg-table)"
-                stroke={selected?.section_id === s.section_id ? 'var(--brand)' : 'var(--border-strong)'}
-                stroke-width={selected?.section_id === s.section_id ? 2.5 : 1.5}
+                stroke="var(--border-strong)"
+                stroke-width={1.5}
                 style="cursor:pointer"
-                onClick={() => setSelected(s)}
+                onClick={() => route(`/objects/${s.section_id}`)}
               >
                 <title>{`${s.smvu_key} · участок ${s.section_id}`}</title>
               </circle>
             ))}
           </svg>
           <p class="text-xs" style="color:var(--text-muted)">
-            Цвет и форма метки по уровню риска появятся вместе с прогнозами (MOS-32) — пока каждая метка
+            Цвет и форма метки по уровню риска ещё не подключены к /api/risks — пока каждая метка
             нейтральная, это не значит «нет данных» в смысле молчащего датчика.
           </p>
-
-          {selected && (
-            <div class="text-sm p-3 rounded" style="background:var(--bg-surface); border-left:3px solid var(--brand)">
-              <div>
-                Участок <b class="num">{selected.section_id}</b>, ключ СМВУ{' '}
-                <code class="num">{selected.smvu_key}</code>
-              </div>
-              <div style="color:var(--text-secondary)">
-                Коллектор {selected.collector}, пикет {selected.picket} (≈{(selected.picket * 100).toLocaleString('ru-RU')} м
-                от начала)
-              </div>
-            </div>
-          )}
         </>
       )}
     </main>
