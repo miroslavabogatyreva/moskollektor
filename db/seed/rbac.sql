@@ -5,8 +5,8 @@
 -- Коды разрешений называются по методу, который они открывают: risks.read
 -- закрывает GET /api/risks (Q4.3), forecasts.read — GET /api/forecasts(/{id})
 -- (Q4.3), orders.read — GET /api/orders(/{id}) (Q4.6), audit.read — GET /api/audit
--- (Q4.10). Новый метод API добавляет свой permission_code сюда же — это правка
--- сида, а не схемы.
+-- (Q4.10), objects.read — GET /api/objects/{id}(/readings) (Q4.4). Новый метод
+-- API добавляет свой permission_code сюда же — это правка сида, а не схемы.
 --
 -- Кто что получает — НФ-44: диспетчер видит мониторинг и дашборды (риски,
 -- прогнозы, заявки), но не настройки и не журнал аудита; администратор видит
@@ -20,15 +20,19 @@ INSERT INTO ref.role_permission (role_code, permission_code) VALUES
     ('dispatcher', 'risks.read'),
     ('dispatcher', 'forecasts.read'),
     ('dispatcher', 'orders.read'),
+    ('dispatcher', 'objects.read'),
     ('analyst',    'risks.read'),
     ('analyst',    'forecasts.read'),
     ('analyst',    'orders.read'),
+    ('analyst',    'objects.read'),
     ('engineer',   'risks.read'),
     ('engineer',   'forecasts.read'),
     ('engineer',   'orders.read'),
+    ('engineer',   'objects.read'),
     ('admin',      'risks.read'),
     ('admin',      'forecasts.read'),
     ('admin',      'orders.read'),
+    ('admin',      'objects.read'),
     ('admin',      'audit.read')
 
 ON CONFLICT (role_code, permission_code) DO NOTHING;
