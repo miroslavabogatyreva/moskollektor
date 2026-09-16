@@ -41,6 +41,7 @@ interface ObjectDetail {
   section_id: number
   smvu_key: string
   inventory_no: string | null
+  last_reading_at: string | null
   channels: Channel[]
   current_risk: CurrentRisk | null
   recent_forecasts: RecentForecast[]
@@ -61,10 +62,17 @@ const API_LOGIN = 'dispatcher1'
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
-function daysAgo(n: number): Date {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d
+
+// Окно по умолчанию — 7 суток, оканчивающихся последней записью участка
+// (last_reading_at из GET /api/objects/{id}), а не сегодняшней датой: у 54,4%
+// участков за последние 7 суток выгрузки нет ни строки, данные могли замолчать
+// задолго до конца выгрузки. Без last_reading_at (участок совсем без записей —
+// сегодня таких нет) откатываемся на 7 суток от сегодня.
+function defaultWindow(lastReadingAt: string | null): [string, string] {
+  const end = lastReadingAt ? new Date(lastReadingAt) : new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - 6)
+  return [isoDate(start), isoDate(end)]
 }
 
 export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
@@ -72,12 +80,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Окно по умолчанию — последние 7 суток. У 54,4% участков за такое окно нет
-  // ни строки (данные могли замолчать задолго до конца выгрузки) — это честное
-  // "нет показаний за период", а не ошибка; даты можно подвинуть руками.
-  // Когда API отдаст last_reading_at, дефолт станет last_reading_at минус 7 суток.
-  const [readFrom, setReadFrom] = useState(isoDate(daysAgo(7)))
-  const [readTo, setReadTo] = useState(isoDate(new Date()))
+  // Пустая строка = "дефолт ещё не посчитан от last_reading_at". Даты можно
+  // подвинуть руками — тогда они больше не сбрасываются при смене участка.
+  const [readFrom, setReadFrom] = useState('')
+  const [readTo, setReadTo] = useState('')
   const [readings, setReadings] = useState<Reading[] | null>(null)
   const [readingsError, setReadingsError] = useState<string | null>(null)
 
@@ -86,6 +92,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     setData(null)
     setNotFound(false)
     setError(null)
+    setReadFrom('')
+    setReadTo('')
     fetch(`/api/objects/${sectionId}`, { headers: { 'X-User-Login': API_LOGIN } })
       .then((r) => {
         if (r.status === 404) {
@@ -100,7 +108,16 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   }, [sectionId])
 
   useEffect(() => {
-    if (!sectionId) return
+    // Зависимость только от section_id: пересчитать дефолт при смене участка,
+    // но не при каждом обновлении data (его тут больше не с чем сравнивать).
+    if (!data) return
+    const [from, to] = defaultWindow(data.last_reading_at)
+    setReadFrom(from)
+    setReadTo(to)
+  }, [data?.section_id])
+
+  useEffect(() => {
+    if (!sectionId || !readFrom || !readTo) return
     setReadings(null)
     setReadingsError(null)
     fetch(`/api/objects/${sectionId}/readings?from=${readFrom}&to=${readTo}`, {
@@ -251,9 +268,14 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
       </section>
 
       <section>
-        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
+        <h2 class="text-sm font-semibold mb-1" style="color:var(--text-muted)">
           Показания датчиков
         </h2>
+        <p class="text-sm mb-2" style="color:var(--text-secondary)">
+          {data.last_reading_at
+            ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
+            : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
+        </p>
         <div class="flex flex-wrap items-end gap-4 text-sm mb-3" style="color:var(--text-secondary)">
           <label class="flex flex-col gap-1">
             С даты
