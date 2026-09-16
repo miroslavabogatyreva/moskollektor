@@ -82,6 +82,16 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      # /health объявлен прямо на app, мимо роутера /api и мимо журнала действий
+      # (backend/app/api/main.py): живость сервера не должна зависеть ни от базы,
+      # ни от прав, ни от записи в audit.user_action. curl в образе нет, зовём
+      # питоном — он тут заведомо есть.
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   worker:
@@ -102,7 +112,24 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    restart: unless-stopped
+    # Перезапуска нет намеренно, и это не забытая строка.
+    #
+    # `python -m app.worker.run` — ОДИН прогон расчёта: он считает, пишет прогноз
+    # и выходит с кодом 0 (backend/app/worker/run.py, main). Планировщика у нас
+    # пока нет вовсе, это отдельная задача 3.4. С `restart: unless-stopped` докер
+    # видел штатный выход как повод поднять контейнер заново — 16.09.2026 стенд
+    # так насчитал 36 прогонов за 15 минут, по одному каждые 25 секунд, и держал
+    # базу под постоянной нагрузкой. Поймала это расчётная сессия по журналу
+    # pred.run, а не мы по симптомам: снаружи всё выглядело исправным.
+    #
+    # Пока планировщика нет, прогон запускают руками и обязательно со срезом
+    # внутри данных, иначе окна всех 22 признаков попадают в пустоту:
+    #   docker compose --profile app run --rm worker \
+    #     python -m app.worker.run --as-of 2026-06-30T23:59:59+03:00
+    # Без --as-of расчёт идёт на now(), выгрузка заказчика кончается 30.06.2026,
+    # и все 3 173 участка получают единственную фразу «Датчики этого участка
+    # молчат N суток» — прогноз, арифметически верный и пустой по смыслу.
+    restart: "no"
 
   ml:
     profiles: ["app"]
