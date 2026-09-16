@@ -24,8 +24,19 @@ async def get_object(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("objects.read")),
 ):
+    # last_reading_at — из smvu.reading, а не из feat.section_daily: свёртка
+    # покрывает только 2025-07-01…2026-06-30, а у семи участков (554, 559, 564,
+    # 567, 570, 574, 579) последнее показание — 03.03.2025, раньше этого окна.
+    # Свёртка отдала бы null при живых данных. NULL здесь остаётся возможным
+    # (участок без единой записи схема разрешает), сегодня таких нет ни одного.
     passport = await conn.fetchrow(
-        "SELECT section_id, smvu_key, inventory_no FROM ref.object_xref WHERE section_id = $1",
+        """
+        SELECT section_id, smvu_key, inventory_no,
+               (SELECT max(read_time) FROM smvu.reading r WHERE r.section_id = x.section_id)
+                   AS last_reading_at
+        FROM ref.object_xref x
+        WHERE section_id = $1
+        """,
         section_id,
     )
     if passport is None:

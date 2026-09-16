@@ -41,6 +41,22 @@ check() {
     fi
 }
 
+# check, но требует подстроку в теле, а не только код ответа. Завела это
+# 16.09.2026: на боевом стенде deploy/nginx/nginx.conf отдаёт SPA-заглушку
+# (try_files ... /index.html) на ЛЮБОЙ путь без /api/ впереди, включая
+# несуществующий, и код ответа у неё тоже 200 — check() на /health, /docs
+# и /openapi.json был бы зелёным, даже если запрос до API вообще не доехал.
+check_contains() {
+    label="$1"; needle="$2"; shift 2
+    body=$(curl -s "$@")
+    if echo "$body" | grep -qF "$needle"; then
+        echo "OK          $label -> содержит ${needle}"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> тело не содержит ${needle}, начало ответа: $(echo "$body" | head -c 120)"
+        mismatch=1
+    fi
+}
+
 # check, но сравнивает число элементов JSON-массива в теле, а не только код ответа —
 # 200 с пустым списком и 200 с данными неотличимы по коду. expected_count — точное
 # число или ">0" (для дат, чьё число строк растёт со временем, как today у прогнозов).
@@ -62,11 +78,12 @@ check_count() {
 }
 
 # Проверка живости — единственный метод без роли и без записи в audit.user_action.
-check "GET /health"                                         200 "$BASE_URL/health"
+# По телу, не только по коду: SPA-заглушка на стенде тоже отвечает 200 (см. выше).
+check_contains "GET /health" '"status":"ok"'                "$BASE_URL/health"
 
 # Описание API генерирует FastAPI сам, наша работа — только сверить (М-17).
-check "GET /docs"                                           200 "$BASE_URL/docs"
-check "GET /openapi.json"                                   200 "$BASE_URL/openapi.json"
+check_contains "GET /docs" "swagger-ui"                      "$BASE_URL/docs"
+check_contains "GET /openapi.json" '"openapi"'                "$BASE_URL/openapi.json"
 
 # Без заголовка — 401, а не 403: личность не опознана вовсе, а не в правах отказано.
 check "GET /api/risks без входа"                            401 "$BASE_URL/api/risks"
@@ -87,6 +104,10 @@ check_count "GET /api/forecasts?from=to=2020-01-01 (день до старта �
 
 # Карточка объекта — паспорт, каналы, текущий риск, последние прогнозы (М-08).
 check "GET /api/objects/1 (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1"
+# last_reading_at — из smvu.reading напрямую, не из feat.section_daily (окно
+# свёртки 2025-07-01…2026-06-30 обрезало бы семь участков со старыми показаниями).
+check_contains "GET /api/objects/1 содержит last_reading_at" '"last_reading_at"' \
+    -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1"
 check "GET /api/objects/999999999 (участка нет)"            404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/999999999"
 
 # Ряд показаний — from/to обязательны (иначе смахнём 109 партиций smvu.reading).
