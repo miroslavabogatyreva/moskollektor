@@ -74,6 +74,18 @@
   --row-selected-bar: #003882;
   --focus-ring: #0b6fcb;
   --focus-ring-offset: #ffffff;
+
+  /* графики: Okabe-Ito, без изменений (color-palette.md, разд. 6) */
+  --chart-1: #000000;
+  --chart-2: #e69f00;
+  --chart-3: #56b4e9;
+  --chart-4: #009e73;
+  --chart-5: #f0e442;
+  --chart-6: #0072b2;
+  --chart-7: #d55e00;
+  --chart-8: #cc79a7;
+  --chart-outline: #2b333d;
+  --chart-threshold: #7d8894;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -107,6 +119,17 @@
     --row-selected-bar: #6fc2ea;
     --focus-ring: #6fc2ea;
     --focus-ring-offset: #131a22;
+
+    --chart-1: #cfd6dd;
+    --chart-2: #e69f00;
+    --chart-3: #56b4e9;
+    --chart-4: #009e73;
+    --chart-5: #f0e442;
+    --chart-6: #0072b2;
+    --chart-7: #d55e00;
+    --chart-8: #cc79a7;
+    --chart-outline: #0d1319;
+    --chart-threshold: #6b7886;
   }
 }
 
@@ -140,6 +163,17 @@
   --row-selected-bar: #6fc2ea;
   --focus-ring: #6fc2ea;
   --focus-ring-offset: #131a22;
+
+  --chart-1: #cfd6dd;
+  --chart-2: #e69f00;
+  --chart-3: #56b4e9;
+  --chart-4: #009e73;
+  --chart-5: #f0e442;
+  --chart-6: #0072b2;
+  --chart-7: #d55e00;
+  --chart-8: #cc79a7;
+  --chart-outline: #0d1319;
+  --chart-threshold: #6b7886;
 }
 
 body {
