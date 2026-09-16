@@ -23,16 +23,22 @@
 #
 # Запуск (нужен живой процесс, например локально на туннеле к базе):
 #   BASE_URL=http://127.0.0.1:8000 bash contracts/examples/api/examples.sh
+#
+# Против стенда сертификат самоподписанный (docs/server.md) — curl без -k
+# рвёт соединение до запроса, и это код 000, а не ответ сервера. CURL_OPTS
+# пробрасывается во все вызовы curl, по умолчанию пуст:
+#   BASE_URL=https://135.106.216.101 CURL_OPTS=-k bash contracts/examples/api/examples.sh
 
 set -uo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
+CURL_OPTS="${CURL_OPTS:-}"
 # bash не даёт кириллицу в именах переменных (POSIX: только [a-zA-Z0-9_]) —
 # идентификаторы латиницей, текст в выводе по-прежнему по-русски.
 mismatch=0
 
 check() {
     label="$1"; expected="$2"; shift 2
-    actual=$(curl -s -o /dev/null -w '%{http_code}' "$@")
+    actual=$(curl -s $CURL_OPTS -o /dev/null -w '%{http_code}' "$@")
     if [ "$actual" = "$expected" ]; then
         echo "OK          $label -> $actual"
     else
@@ -48,7 +54,7 @@ check() {
 # и /openapi.json был бы зелёным, даже если запрос до API вообще не доехал.
 check_contains() {
     label="$1"; needle="$2"; shift 2
-    body=$(curl -s "$@")
+    body=$(curl -s $CURL_OPTS "$@")
     if echo "$body" | grep -qF "$needle"; then
         echo "OK          $label -> содержит ${needle}"
     else
@@ -62,7 +68,7 @@ check_contains() {
 # число или ">0" (для дат, чьё число строк растёт со временем, как today у прогнозов).
 check_count() {
     label="$1"; expected_count="$2"; shift 2
-    body=$(curl -s "$@")
+    body=$(curl -s $CURL_OPTS "$@")
     actual_count=$(echo "$body" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "-1")
     if [ "$expected_count" = ">0" ]; then
         ok=$([ "$actual_count" -gt 0 ] 2>/dev/null && echo yes || echo no)
@@ -129,7 +135,7 @@ check "GET /api/audit (admin1)"                             200 -H "X-User-Login
 
 echo
 echo "--- тело последнего успешного /api/audit (admin1), для примера формы ответа ---"
-curl -s -H "X-User-Login: admin1" "$BASE_URL/api/audit" | head -c 2000
+curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit" | head -c 2000
 echo
 
 exit "$mismatch"
