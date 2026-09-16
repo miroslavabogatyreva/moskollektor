@@ -108,6 +108,20 @@ systemctl is-active  docker -> active
 `shared_buffers = 3GB`, `maintenance_work_mem = 1GB`, `max_wal_size = 8GB`,
 `effective_cache_size = 8GB`. На маке под кэш было 128 МБ, и это половина тормозов.
 
+**Стенд достроен 16.09.2026 (MOS-90): работают три контейнера** — `db`, `nginx`
+и `ml`, все `healthy`. Заглушка модели собирается на месте
+(`docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .` из
+`/srv/moskollektor`), сертификат выпускается там же `sh deploy/make-cert.sh`.
+Протоколы TLS сняты на этом сервере, а не на маке: `docs/protocol-tls-ipv4.md`
+и `docs/protocol-tls-ipv6.md`.
+
+**Пароль базы на сервере свой, и это важно.** Сначала он приехал сюда копией
+с мака: `deploy/.env` стоит в `.gitignore`, но `rsync` идёт по файловой системе,
+а не по git, и утащил файл вместе с каталогом. 16.09.2026 пароль сменён
+`ALTER USER` плюс правкой `.env`; проверено уловом — со старым паролем база
+отвечает `password authentication failed`, с новым пускает. **Если будете
+копировать каталог `deploy/` на другую машину, проверяйте `.env` первым делом.**
+
 Подключиться к базе со стенда:
 
 ```
