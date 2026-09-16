@@ -10,4 +10,8 @@ COPY backend/app ./app
 # db/migrations/ требует пересборки, иначе migrate.py увидит внутри
 # контейнера старое содержимое и sha256 разойдётся с public.schema_migration.
 COPY db/migrations ./db/migrations
+# 22 признака в contracts/features.v1.yaml — их порядок сам является контрактом
+# (docs/plan.md, Q7.2), и backend/app/mlclient/client.py читает файл в рантайме,
+# а не только на этапе разработки.
+COPY contracts ./contracts
 CMD ["python", "-m", "app.api.main"]

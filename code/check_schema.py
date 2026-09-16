@@ -100,6 +100,9 @@ DANGLING_OK = {
         "заявка на правку НСИ ссылается на объект полиморфно (object_type + target_code)",
     "permit.permit_status_transition":
         "таблица правил для приложения; в журнале from_status бывает NULL, а такой ключ Postgres не проверяет",
+    "ref.role_permission":
+        "разрешения — данные (db/seed/rbac.sql), не связь: роли — фиксированный список "
+        "через CHECK на role_code, отдельного справочника ролей решением Q4.1 нет",
 }
 
 NAME = r'[a-z_]+(?:\.[a-z_]+)?'
