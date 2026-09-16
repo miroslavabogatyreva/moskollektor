@@ -306,6 +306,35 @@ async def load_objects(conn, path):
     return len(recs)
 
 
+async def записать_чужие_типы(conn, path, чужие, каналов):
+    """Типы вне справочника — в отчёт о качестве, по строке на тип.
+
+    Строка приёмки Ф-78 требует четырёх вещей разом: канал с незнакомым типом
+    загружен, помечен, назван в отчёте, и заливка при этом не прервалась.
+    Пакет заводим только когда есть что записать: чистый справочник не должен
+    плодить пустые строки отчёта.
+    """
+    if not чужие:
+        print("    типы датчика и системы: все нашлись в справочниках")
+        return 0
+    пакет = await conn.fetchval(
+        "INSERT INTO load.batch (object_name, source_file, tool, planned_rows, "
+        "loaded_rows, failed_rows, stage, finished_at) "
+        "VALUES ('Справочник каналов СМВУ', $1, 'smvu_csv', $2, $3, $4, "
+        "'production', now()) RETURNING id",
+        path, каналов, каналов, sum(len(v) for v in чужие.values()))
+    for (что, значение), каналы in sorted(чужие.items()):
+        await conn.execute(
+            "INSERT INTO load.error (batch_id, source_key, rule_code, severity, "
+            "message, payload) VALUES ($1, $2, 'FK_MISSING', 'warning', $3, "
+            "jsonb_build_object('каналов', $4::int, 'ид_каналов', $5::jsonb))",
+            пакет, значение, f"{что} вне справочника", len(каналы),
+            "[" + ",".join(str(c) for c in sorted(каналы)[:100]) + "]")
+        print(f"    {что} вне справочника: «{значение}», каналов {len(каналы)}, "
+              f"тип у них снят в NULL — load.batch.id = {пакет}")
+    return len(чужие)
+
+
 async def load_channels(conn, path):
     """Справочник каналов плюс участки, собранные из тега и названия.
 
@@ -329,12 +358,35 @@ async def load_channels(conn, path):
     xref = dict(await conn.fetch(
         "SELECT smvu_key, section_id FROM ref.object_xref WHERE smvu_key IS NOT NULL"))
 
+    # Типы датчика и системы сверяем ДО вставки, и вот почему. На smvu.channel
+    # висят два внешних ключа — channel_sensor_kind_fkey и channel_system_kind_fkey,
+    # они смотрят в smvu.sensor_kind (19 строк) и smvu.system_kind (6 строк).
+    # Замер 16.09.2026: канал с типом «Выдуманная подсистема» база отвергает
+    # целиком, ForeignKeyViolationError. А строка приёмки Ф-78 требует обратного —
+    # такой канал обязан ЗАГРУЗИТЬСЯ, попасть в отчёт о качестве и не прервать
+    # заливку. Поэтому незнакомый тип мы снимаем в NULL, а сам факт пишем
+    # в load.error: ключ остаётся на месте (опечатка не создаст седьмую систему),
+    # канал остаётся в базе, отчёт называет и тип, и номера каналов.
+    датчики = {r["sensor_kind"] for r in
+               await conn.fetch("SELECT sensor_kind FROM smvu.sensor_kind")}
+    системы = {r["system_kind"] for r in
+               await conn.fetch("SELECT system_kind FROM smvu.system_kind")}
+    чужие = {}
+
     recs = []
     for r in rows:
         cid = int(r["ид_канала_данных"])
         pair = keys[cid]
         smvu_key = f"{pair[0]}:{pair[1]}" if pair else None
-        recs.append((cid, r["тип_инж_системы"], r["тип_датчика"],
+        тип_системы = r["тип_инж_системы"]
+        тип_датчика = r["тип_датчика"]
+        if тип_системы and тип_системы not in системы:
+            чужие.setdefault(("тип инженерной системы", тип_системы), []).append(cid)
+            тип_системы = None
+        if тип_датчика and тип_датчика not in датчики:
+            чужие.setdefault(("тип датчика", тип_датчика), []).append(cid)
+            тип_датчика = None
+        recs.append((cid, тип_системы, тип_датчика,
                      r["тег_инженерной_системы"], r["название_датчика"],
                      pair[0] if pair else None, pair[1] if pair else None,
                      xref.get(smvu_key), False, True))
@@ -345,6 +397,7 @@ async def load_channels(conn, path):
     без_участка = sum(1 for pair in keys.values() if not pair)
     print(f"каналы: {len(recs)} строк, участков {len(uniq)}, "
           f"без участка {без_участка} (датчики в диспетчерских пунктах)")
+    await записать_чужие_типы(conn, path, чужие, len(recs))
     return len(recs)
 
 
