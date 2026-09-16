@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { route } from 'preact-router'
 import { fetchRisks } from './api'
 import type { RiskRow } from './types'
 
@@ -7,13 +8,12 @@ import type { RiskRow } from './types'
    сюда не легла: порог для probability нигде не зафиксирован, а числа сегодня —
    от заглушки модели и решают, по словам расчётной сессии, "не подгонять под
    сегодняшнее". Список сортирую по risk_rank — это готовый порядок от API,
-   а не догадка. Строка кликабельна и открывает инлайн-панель, как в MapScreen:
-   ObjectCard (5.5) ждёт GET /api/objects/{id} (MOS-41), его ещё нет. */
+   а не догадка. Строка кликабельна и ведёт на /objects/:sectionId (ObjectCard,
+   5.5, MOS-52). */
 
 export function DashboardScreen(_props: Record<string, unknown>) {
   const [rows, setRows] = useState<RiskRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<RiskRow | null>(null)
 
   useEffect(() => {
     fetchRisks().then(setRows).catch((e) => setError(String(e)))
@@ -77,10 +77,8 @@ export function DashboardScreen(_props: Record<string, unknown>) {
             {sorted.map((r) => (
               <tr
                 key={r.section_id}
-                onClick={() => setSelected(r)}
-                style={`border-bottom:1px solid var(--border-subtle); cursor:pointer; ${
-                  selected?.section_id === r.section_id ? 'background:var(--row-selected)' : ''
-                }`}
+                onClick={() => route(`/objects/${r.section_id}`)}
+                style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
               >
                 <td class="px-2 py-2 num">{r.risk_rank}</td>
                 <td class="px-2 py-2 num">{r.section_id}</td>
@@ -94,19 +92,6 @@ export function DashboardScreen(_props: Record<string, unknown>) {
             ))}
           </tbody>
         </table>
-      )}
-
-      {selected && (
-        <div class="text-sm p-3 rounded" style="background:var(--bg-surface); border-left:3px solid var(--brand)">
-          <div>
-            Участок <b class="num">{selected.section_id}</b>, ранг риска <b class="num">{selected.risk_rank}</b> из{' '}
-            {rows?.length}
-          </div>
-          <div style="color:var(--text-secondary)">
-            Вероятность {selected.probability.toFixed(4)}, горизонт {selected.horizon_h} ч,{' '}
-            {selected.is_stale ? 'расчёт устарел' : 'расчёт свежий'}
-          </div>
-        </div>
       )}
     </main>
   )

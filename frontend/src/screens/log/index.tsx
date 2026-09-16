@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { route } from 'preact-router'
 import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
 
@@ -8,9 +9,8 @@ import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
    а не девятиколоночная таблица из Ф-33/Ф-34/Ф-35 — та часть III, у нас её нет
    в согласовании, и под вердикт с причиной в схеме пока нет таблицы.
    Объект показан как section_id: подтягивать smvu_key из sections.json
-   незачем для журнала, довесить можно в 5.5 разом с картой. Клик по строке
-   открывает инлайн-панель, как в MapScreen и DashboardScreen — ObjectCard (5.5)
-   ждёт GET /api/objects/{id} (MOS-41). */
+   незачем для журнала. Клик по строке ведёт на /objects/:sectionId
+   (ObjectCard, 5.5, MOS-52). */
 
 type SortKey = 'computed_at' | 'section_id' | 'direction' | 'probability' | 'horizon_h'
 
@@ -29,7 +29,6 @@ export function LogScreen(_props: Record<string, unknown>) {
   const [dateTo, setDateTo] = useState('')
   const [objectQuery, setObjectQuery] = useState('')
   const [direction, setDirection] = useState<Direction | ''>('')
-  const [selected, setSelected] = useState<ForecastRow | null>(null)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'computed_at',
     dir: 'desc',
@@ -137,10 +136,8 @@ export function LogScreen(_props: Record<string, unknown>) {
           {filtered.map((r) => (
             <tr
               key={r.forecast_id}
-              onClick={() => setSelected(r)}
-              style={`border-bottom:1px solid var(--border-subtle); cursor:pointer; ${
-                selected?.forecast_id === r.forecast_id ? 'background:var(--row-selected)' : ''
-              }`}
+              onClick={() => route(`/objects/${r.section_id}`)}
+              style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
               <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>
               <td class="px-2 py-2 num">{r.section_id}</td>
@@ -155,18 +152,6 @@ export function LogScreen(_props: Record<string, unknown>) {
       {rows === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {rows !== null && filtered.length === 0 && (
         <p style="color:var(--text-muted)">Прогнозов за период нет.</p>
-      )}
-
-      {selected && (
-        <div class="text-sm p-3 rounded" style="background:var(--bg-surface); border-left:3px solid var(--brand)">
-          <div>
-            Прогноз <b class="num">{selected.forecast_id}</b>, участок <b class="num">{selected.section_id}</b>
-          </div>
-          <div style="color:var(--text-secondary)">
-            {DIRECTION_LABEL[selected.direction]}, вероятность {selected.probability.toFixed(4)}, горизонт{' '}
-            {selected.horizon_h} ч, {new Date(selected.computed_at).toLocaleString('ru-RU')}
-          </div>
-        </div>
       )}
     </main>
   )
