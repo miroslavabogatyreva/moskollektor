@@ -1,0 +1,407 @@
+"""Сборка вектора признаков по contracts/features.v1.yaml. Задача Q3.3 (MOS-33).
+
+Двадцать два числа на участок, в порядке контракта. Порядок сам является контрактом:
+переставленные колонки дают уверенный неверный ответ без единой ошибки.
+
+**Это самая дорогая стадия расчёта** — 20 секунд из 41 целевых (docs/HLD.md разд. 6.1).
+Оптимизируем чтение, а не модель: сам инференс занимает 1,2 мс.
+
+УСТРОЙСТВО. Четыре запроса к базе вместо одного большого, и свёртка в Python:
+
+  1. feat.section_daily за 365 суток   → девять признаков по участку
+  2. smvu.channel                      → сколько каналов числится за участком
+  3. smvu.reading за 7 и за 365 суток  → счётчики и фоны по каналу
+  4. smvu.reading за 30 суток          → интервалы между записями по каналу
+
+Замер стадии целиком на всех 3 173 участках, стенд 135.106.216.101, 16.09.2026:
+56,9 с четырьмя запросами, из них 26,1 с — счётчики по каналу за год. Норматив
+приёмки 300 с закрыт, целевые по HLD 20 с — нет; ускорение это задача Q3.5.
+
+Почему свёртка в Python, а не в SQL. Девять признаков считаются ПО КАНАЛУ
+(docs/HLD.md разд. 6.3-трис: «все четыре считаются внутри канала, относительно
+его собственного поведения»), а строка для модели одна на участок. Свести
+10 720 каналов в 3 173 участка — это один проход по списку, в SQL он стоил бы
+ещё одного уровня группировки поверх оконных функций.
+
+**Как сворачиваем канал в участок: берём худший канал.** Участок с одним умирающим
+каналом из четырёх должен выглядеть как участок с проблемой, а не как средний
+по больнице: среднее размажет обрыв темпа у одного канала по трём здоровым.
+Поэтому по «плохо, когда много» берём максимум (дребезг, доля «Неопределен»,
+паузы), по «плохо, когда мало» — минимум (темп записей к своему фону).
+**В contracts/features.v1.yaml этого правила нет** — там у признака стоит
+scope: channel и не сказано, как он попадает в строку участка. Это дыра
+в контракте, а не наше право решать: правка контракта — PR к Николаю.
+
+ЧТО ЗНАЧИТ NULL. Правило контракта rules.null_means_missing: null — «признака нет»,
+а не ноль. Ноль у days_since_last_reading означает «писал сегодня», null — «не писал
+ни разу за 365 суток». Границы, на которых мы отдаём null, взяты из замеров
+в самом контракте: у 104 каналов из 11 483 медианный интервал равен нулю
+(silence_normalized и gap_to_median не считаются), доля интервалов длиннее p95
+требует хотя бы 20 интервалов за неделю (набирают 640 каналов).
+
+ЧЕГО МЫ НЕ СЧИТАЕМ И ПОЧЕМУ. Признаки fault_30d и neighbor_fault_7d читаются
+из smvu.fault_episode, а эта таблица ПУСТА: её никто не строит, скрипта нет
+ни одного (проверено 16.09.2026 поиском по репозиторию — только DDL в 004 и 005).
+Пустая таблица не отличает «отказа не было» от «эпизоды не считались», поэтому
+оба признака едут null, а не false. False был бы утверждением, что мы проверили.
+
+ЗАПУСК САМОПРОВЕРКИ (нужна база, туннель на стенд):
+    DATABASE_URL=postgresql://... .venv/bin/python backend/app/worker/features.py
+"""
+
+import asyncio
+import math
+import os
+from datetime import datetime, timedelta
+
+from app.mlclient.client import FEATURE_NAMES
+
+# ponytail: медиана и p95 интервалов канала считаются по окну в 30 суток, а не по всей
+# истории. Перцентиль по 313 млн строк — это отдельная таблица с предрасчётом и своя
+# миграция; 30 суток характеризуют собственный ритм канала и стоят одного прохода
+# по 4,6 млн строк. Упрётся точность — заводить feat.channel_daily и считать по году.
+ОКНО_ИНТЕРВАЛОВ_СУТОК = 30
+
+# Меньше этого числа интервалов за неделю — доля длинных интервалов не считается.
+# Число из contracts/features.v1.yaml: при недельном окне 20 интервалов набирают
+# 640 каналов из 11 483, у остальных приедет null, и это правильное значение.
+МИНИМУМ_ИНТЕРВАЛОВ = 20
+
+
+# ---------------------------------------------------------------------------
+# Запросы
+# ---------------------------------------------------------------------------
+
+# Девять признаков по участку одним сканом суточной свёртки. 3 173 × 365 = 1,16 млн
+# строк вместо 55 млн строк журнала за тот же год — выигрыш в 47 раз.
+ПО_УЧАСТКУ = """
+SELECT section_id,
+       sum(readings_total) FILTER (WHERE day >  $1::date - 1)   AS readings_1d,
+       sum(readings_total) FILTER (WHERE day >  $1::date - 7)   AS readings_7d,
+       sum(readings_total) FILTER (WHERE day >  $1::date - 30)  AS readings_30d,
+       sum(readings_total)                                      AS readings_365d,
+       sum(alarms_total)   FILTER (WHERE day >  $1::date - 7)   AS alarms_7d,
+       sum(alarms_total)                                        AS alarms_365d,
+       max(day) FILTER (WHERE readings_total > 0)               AS last_day
+  FROM feat.section_daily
+ WHERE day > $1::date - 365 AND day <= $1::date
+   AND ($2::int[] IS NULL OR section_id = ANY($2))
+ GROUP BY section_id
+"""
+
+# Сколько каналов числится за участком. Заглушки сюда не попадают: у канала,
+# которого нет в справочнике заказчика, section_id остаётся NULL.
+КАНАЛОВ_НА_УЧАСТКЕ = """
+SELECT section_id, count(*) AS каналов
+  FROM smvu.channel
+ WHERE section_id IS NOT NULL
+   AND ($1::int[] IS NULL OR section_id = ANY($1))
+ GROUP BY section_id
+"""
+
+# Счётчики по каналу за неделю плюс два фона. Фон за 8 недель берётся ДО недельного
+# окна, иначе неделя посчиталась бы сама против себя и отношение всегда было бы около 1.
+ПО_КАНАЛУ = """
+SELECT c.channel_id,
+       c.section_id,
+       c.collector,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days')                    AS n7,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '30 days')                   AS n30,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
+                          AND r.value_text = 'Неисправен')                             AS chatter7,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
+                          AND r.value_text = 'Неопределен')                            AS undefined7,
+       count(*) FILTER (WHERE r.read_time <= $1::timestamptz - interval '7 days'
+                          AND r.read_time >  $1::timestamptz - interval '63 days')                  AS n8w,
+       count(*)                                                                        AS n365,
+       max(r.read_time)                                                                AS last_read
+  FROM smvu.reading r
+  JOIN smvu.channel c ON c.channel_id = r.channel_id
+ WHERE r.read_time > $1::timestamptz - interval '365 days' AND r.read_time <= $1::timestamptz
+   AND c.section_id IS NOT NULL
+   AND ($2::int[] IS NULL OR c.section_id = ANY($2))
+ GROUP BY c.channel_id, c.section_id, c.collector
+"""
+
+# Интервалы между записями канала: медиана, p95, доля длинных, залипание значения.
+# Сортировка по (read_time, journal_id), а не по одному времени: за 2025 год
+# 1 305 295 строк делят канал и метку времени, и без тай-брейка соседние записи
+# встают в произвольном порядке — число эпизодов «Неисправен» меняется на 7,2 %
+# (contracts/features.v1.yaml, data_caveats).
+#
+# Всё одним запросом, хотя порог p95 известен только после первой группировки.
+# Разными запросами это стоило 14,9 с + 15,4 с на полном парке (замер 16.09.2026):
+# оба читали одно и то же окно в 30 суток, то есть 4,6 млн строк журнала дважды.
+# AS MATERIALIZED здесь не украшение: без него планировщик вправе подставить
+# тело CTE в оба места и вернуть тот же двойной проход.
+ИНТЕРВАЛЫ = """
+WITH подряд AS MATERIALIZED (
+    SELECT r.channel_id,
+           r.read_time,
+           r.value_text,
+           extract(epoch FROM r.read_time - lag(r.read_time)
+                   OVER (PARTITION BY r.channel_id ORDER BY r.read_time, r.journal_id))::float8 AS дельта,
+           lag(r.value_text)    OVER (PARTITION BY r.channel_id ORDER BY r.read_time, r.journal_id) AS пред1,
+           lag(r.value_text, 2) OVER (PARTITION BY r.channel_id ORDER BY r.read_time, r.journal_id) AS пред2
+      FROM smvu.reading r
+      JOIN smvu.channel c ON c.channel_id = r.channel_id
+     WHERE r.read_time > $1::timestamptz - ($3::int * interval '1 day') AND r.read_time <= $1::timestamptz
+       AND c.section_id IS NOT NULL
+       AND ($2::int[] IS NULL OR c.section_id = ANY($2))
+), порог AS (
+    SELECT channel_id,
+           percentile_cont(0.5)  WITHIN GROUP (ORDER BY дельта) AS медиана,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY дельта) AS p95,
+           count(дельта)                                        AS интервалов,
+           count(дельта) FILTER (WHERE read_time > $1::timestamptz - interval '7 days') AS интервалов_7d,
+           max(дельта)   FILTER (WHERE read_time > $1::timestamptz - interval '7 days') AS макс_дельта_7d,
+           bool_or(read_time > $1::timestamptz - interval '7 days'
+                   AND value_text IS NOT NULL
+                   AND value_text = пред1 AND value_text = пред2)          AS freeze3
+      FROM подряд GROUP BY channel_id
+)
+SELECT п.channel_id, п.медиана, п.p95, п.интервалов, п.интервалов_7d,
+       п.макс_дельта_7d, п.freeze3,
+       count(*) FILTER (WHERE д.read_time > $1::timestamptz - interval '7 days'
+                          AND д.дельта IS NOT NULL)                        AS всего_7d,
+       count(*) FILTER (WHERE д.read_time > $1::timestamptz - interval '7 days'
+                          AND д.дельта > п.p95)                            AS длинных_7d
+  FROM порог п JOIN подряд д USING (channel_id)
+ GROUP BY п.channel_id, п.медиана, п.p95, п.интервалов, п.интервалов_7d,
+          п.макс_дельта_7d, п.freeze3
+"""
+
+# Отказы. Таблица пуста и её никто не строит — запрос оставлен рабочим,
+# чтобы признаки ожили в тот день, когда эпизоды появятся.
+ОТКАЗЫ_ПО_УЧАСТКУ = """
+SELECT section_id, count(*) AS отказов
+  FROM smvu.fault_episode
+ WHERE started_at > $1::timestamptz - interval '30 days' AND started_at <= $1::timestamptz
+   AND section_id IS NOT NULL
+   AND ($2::int[] IS NULL OR section_id = ANY($2))
+ GROUP BY section_id
+"""
+
+ОТКАЗЫ_ПО_КОЛЛЕКТОРУ = """
+SELECT c.collector, count(*) AS отказов
+  FROM smvu.fault_episode e
+  JOIN smvu.channel c ON c.channel_id = e.channel_id
+ WHERE e.started_at > $1::timestamptz - interval '7 days' AND e.started_at <= $1::timestamptz
+   AND c.collector IS NOT NULL
+ GROUP BY c.collector
+"""
+
+
+# ---------------------------------------------------------------------------
+# Свёртки
+# ---------------------------------------------------------------------------
+
+def _худший(значения, как="max"):
+    """Худший канал участка. None среди значений не считается за ответ."""
+    живые = [з for з in значения if з is not None]
+    if not живые:
+        return None
+    return max(живые) if как == "max" else min(живые)
+
+
+def _доля(часть, всего):
+    """Доля с честным null: от нуля записей доля не определена, а не равна нулю."""
+    return None if not всего else часть / всего
+
+
+async def покрытие_свёртки(conn, as_of, section_ids=None):
+    """Сколько суток из 365 покрыто суточной свёрткой.
+
+    Проверка не украшение. feat.section_daily заполняет отдельная стадия расчёта,
+    и если она не отработала, все девять признаков по участку выйдут НУЛЯМИ —
+    без ошибки и без предупреждения. Ноль показаний за год и «свёртку не считали»
+    для модели выглядят одинаково, а значат противоположное.
+    """
+    return await conn.fetchval(
+        """SELECT count(DISTINCT day) FROM feat.section_daily
+            WHERE day > $1::date - 365 AND day <= $1::date
+              AND ($2::int[] IS NULL OR section_id = ANY($2))""",
+        as_of, section_ids)
+
+
+async def собрать(conn, as_of: datetime, section_ids: list[int] | None = None):
+    """Матрица признаков: (участки, значения, диагностика).
+
+    Значения идут строго в порядке FEATURE_NAMES — это контракт, а не удобство.
+    """
+    суток = await покрытие_свёртки(conn, as_of, section_ids)
+    if суток == 0:
+        raise RuntimeError(
+            f"feat.section_daily не покрывает ни одних суток до {as_of:%d.%m.%Y}. "
+            f"Девять признаков по участку вышли бы нулями, а ноль означал бы "
+            f"«датчики молчали весь год». Сначала догнать свёртку: "
+            f"SELECT feat.refresh_section_daily(...)")
+
+    участок = {r["section_id"]: dict(r) for r in await conn.fetch(ПО_УЧАСТКУ, as_of, section_ids)}
+    каналов = {r["section_id"]: r["каналов"] for r in await conn.fetch(КАНАЛОВ_НА_УЧАСТКЕ, section_ids)}
+    каналы = [dict(r) for r in await conn.fetch(ПО_КАНАЛУ, as_of, section_ids)]
+    интервалы = {r["channel_id"]: dict(r) for r in
+                 await conn.fetch(ИНТЕРВАЛЫ, as_of, section_ids, ОКНО_ИНТЕРВАЛОВ_СУТОК)}
+
+    эпизодов = await conn.fetchval("SELECT count(*) FROM smvu.fault_episode")
+    отказы_участка = ({r["section_id"]: r["отказов"] for r in
+                       await conn.fetch(ОТКАЗЫ_ПО_УЧАСТКУ, as_of, section_ids)} if эпизодов else {})
+    отказы_коллектора = ({r["collector"]: r["отказов"] for r in
+                          await conn.fetch(ОТКАЗЫ_ПО_КОЛЛЕКТОРУ, as_of)} if эпизодов else {})
+
+    # Канальные признаки складываем по участку, коллекторные — по коллектору.
+    по_участку_каналы, по_коллектору, коллектор_участка, писало_30 = {}, {}, {}, {}
+    for к in каналы:
+        sid, соб = к["section_id"], к["collector"]
+        коллектор_участка.setdefault(sid, соб)
+        и = интервалы.get(к["channel_id"], {})
+        медиана = и.get("медиана")
+        медиана = медиана if медиана else None          # 0 секунд — не делитель
+        фон_8н = (к["n8w"] / 8) if к["n8w"] else None   # фона нет — отношения нет
+        фон_год = (к["n365"] / 52) if к["n365"] else None
+        пауза = (as_of - к["last_read"]).total_seconds() if к["last_read"] else None
+        всего_инт = и.get("всего_7d") or 0
+
+        if к["n30"]:
+            писало_30[sid] = писало_30.get(sid, 0) + 1
+        по_участку_каналы.setdefault(sid, []).append({
+            "chatter_7d": к["chatter7"],
+            "undefined_share_7d": _доля(к["undefined7"], к["n7"]),
+            "rate_ratio_7d": (к["n7"] / фон_8н) if фон_8н else None,
+            "rate_ratio_year": (к["n7"] / фон_год) if фон_год else None,
+            "gap_to_median": (и["макс_дельта_7d"] / медиана)
+                             if медиана and и.get("макс_дельта_7d") is not None else None,
+            "long_gap_share_7d": (и["длинных_7d"] / всего_инт)
+                                 if всего_инт >= МИНИМУМ_ИНТЕРВАЛОВ else None,
+            "silence_normalized": (пауза / медиана) if медиана and пауза is not None else None,
+            # Три записи подряд с одинаковым значением. None — записей меньше трёх,
+            # то есть проверять было не на чем.
+            "freeze_3": и.get("freeze3") if и.get("интервалов_7d", 0) >= 2 else None,
+        })
+        if соб:
+            по_коллектору[соб] = по_коллектору.get(соб, 0) + к["chatter7"]
+
+    участки = sorted(section_ids) if section_ids else sorted(
+        set(участок) | set(каналов) | set(по_участку_каналы))
+
+    доля_года = math.tau * as_of.timetuple().tm_yday / 365.25
+    season_sin, season_cos = math.sin(доля_года), math.cos(доля_года)
+
+    значения = []
+    for sid in участки:
+        у = участок.get(sid, {})
+        к = по_участку_каналы.get(sid, [])
+        всего_каналов = каналов.get(sid)
+        писавших = писало_30.get(sid, 0)
+        соб = коллектор_участка.get(sid)
+        последний = у.get("last_day")
+
+        значения.append([
+            float(у.get("readings_1d") or 0),
+            float(у.get("readings_7d") or 0),
+            float(у.get("readings_30d") or 0),
+            float(у.get("readings_365d") or 0),
+            float(у.get("alarms_7d") or 0),
+            float(у.get("alarms_365d") or 0),
+            # null — за 365 суток не писал ни разу; за окном мы не знаем, когда писал.
+            float((as_of.date() - последний).days) if последний else None,
+            float(всего_каналов) if всего_каналов else None,
+            # Доля каналов участка, не писавших за 30 суток. Знаменатель — каналы,
+            # числящиеся за участком в справочнике; числитель — те из них, от кого
+            # за тридцать суток не пришло ни строки. Считать писавших за ГОД здесь
+            # нельзя: участок, замолчавший месяц назад, показал бы долю 0.
+            _доля(max(0, (всего_каналов or 0) - писавших), всего_каналов),
+            _худший([х["chatter_7d"] for х in к], "max"),
+            # Пустая smvu.fault_episode — не «отказов не было», а «не считали».
+            (1.0 if отказы_участка.get(sid) else 0.0) if эпизодов else None,
+            _бул(_худший([х["freeze_3"] for х in к], "max")),
+            _худший([х["undefined_share_7d"] for х in к], "max"),
+            # Темп: плохо, когда МАЛО. Берём самый упавший канал участка.
+            _худший([х["rate_ratio_7d"] for х in к], "min"),
+            _худший([х["rate_ratio_year"] for х in к], "min"),
+            _худший([х["gap_to_median"] for х in к], "max"),
+            _худший([х["long_gap_share_7d"] for х in к], "max"),
+            _худший([х["silence_normalized"] for х in к], "max"),
+            (1.0 if отказы_коллектора.get(соб) else 0.0) if эпизодов else None,
+            float(по_коллектору.get(соб, 0)) if соб else None,
+            season_sin,
+            season_cos,
+        ])
+
+    диагностика = {
+        "суток_свёртки": суток,
+        "участков": len(участки),
+        "каналов_писавших": len(каналы),
+        "эпизодов_отказа": эпизодов,
+        "as_of": as_of.isoformat(),
+    }
+    return участки, значения, диагностика
+
+
+def _бул(значение):
+    """bool → 1.0/0.0, None остаётся None: контракт возит числа и пропуски."""
+    return None if значение is None else float(bool(значение))
+
+
+# ---------------------------------------------------------------------------
+# Самопроверка
+# ---------------------------------------------------------------------------
+
+async def _selfcheck():
+    """Считаем по настоящей базе на нескольких участках и проверяем форму и смысл."""
+    import asyncpg
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=900)
+    try:
+        as_of = await conn.fetchval("SELECT max(read_time) FROM smvu.reading_2026_06")
+        образцы = [r["section_id"] for r in await conn.fetch(
+            "SELECT section_id FROM ref.object_xref ORDER BY section_id LIMIT 20")]
+
+        участки, значения, диаг = await собрать(conn, as_of, образцы)
+
+        assert len(значения) == len(участки) == len(образцы), (len(значения), len(участки))
+        assert all(len(строка) == 22 for строка in значения), "в строке обязано быть 22 числа"
+        assert len(FEATURE_NAMES) == 22
+        # Порядок: имя и число обязаны совпадать по позиции.
+        имена = dict(zip(FEATURE_NAMES, значения[0]))
+        assert set(имена) == set(FEATURE_NAMES)
+
+        # Окна вложены: за неделю не может быть больше показаний, чем за месяц.
+        for s, строка in zip(участки, значения):
+            r1, r7, r30, r365 = строка[:4]
+            assert r1 <= r7 <= r30 <= r365, (s, строка[:4])
+            assert строка[4] <= строка[5], (s, "тревог за неделю больше, чем за год")
+            if строка[8] is not None:
+                assert 0.0 <= строка[8] <= 1.0, (s, "доля молчащих вне 0..1")
+                # Ни одного показания за 30 суток — молчат все каналы участка.
+                # Эта проверка поймала настоящую ошибку 16.09.2026: доля считалась
+                # по каналам, писавшим за ГОД, и участок с последней записью
+                # 19 суток назад выглядел как участок без единого молчащего канала.
+                assert (строка[2] > 0) or строка[8] == 1.0, \
+                    (s, "показаний за 30 суток нет, а доля молчащих не единица", строка[8])
+            if строка[12] is not None:
+                assert 0.0 <= строка[12] <= 1.0, (s, "доля «Неопределен» вне 0..1")
+            if строка[16] is not None:
+                assert 0.0 <= строка[16] <= 1.0, (s, "доля длинных интервалов вне 0..1")
+            assert -1.0 <= строка[20] <= 1.0 and -1.0 <= строка[21] <= 1.0
+
+        # Пустая таблица эпизодов обязана давать null, а не false.
+        if диаг["эпизодов_отказа"] == 0:
+            assert all(строка[10] is None and строка[18] is None for строка in значения), \
+                "fault_30d и neighbor_fault_7d при пустой smvu.fault_episode обязаны быть null"
+
+        # Признаки обязаны различать участки: одинаковые строки означают, что
+        # мы посчитали календарь и ничего больше.
+        различий = len({tuple(с[:20]) for с in значения})
+        assert различий > 1, "все участки получили одинаковые признаки — это не признаки"
+
+        print(f"selfcheck ok: {len(участки)} участков × 22 признака, "
+              f"суток свёртки {диаг['суток_свёртки']}, различных строк {различий}")
+        for имя, число in zip(FEATURE_NAMES, значения[0]):
+            print(f"   {имя:24} {число}")
+        return 0
+    finally:
+        await conn.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(_selfcheck()))
