@@ -4,7 +4,7 @@
 расчёт пишет соседняя сессия, до первого прогона строк в pred.forecast
 и pred.forecast_current нет вовсе, и это не повод отвечать ошибкой.
 """
-from datetime import datetime
+from datetime import date, timedelta
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -33,23 +33,31 @@ async def list_risks(
 
 @router.get("/forecasts")
 async def list_forecasts(
-    from_: datetime | None = Query(None, alias="from"),
-    to: datetime | None = Query(None),
+    from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
+    to: date | None = Query(None, description="дата конца периода, включительно — весь день целиком"),
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("forecasts.read")),
 ):
-    """Прогнозы за период, время расчёта берётся из pred.run.started_at (М-16)."""
+    """Прогнозы за период, время расчёта берётся из pred.run.started_at (М-16).
+
+    from/to — даты, а не моменты времени, и обе границы включительны. Раньше
+    to сравнивался как timestamptz <= 'ГГГГ-ММ-ДД 00:00' и вырезал весь день,
+    который назвали: запрос «сегодня с сегодня» при полной базе отвечал пустым
+    списком — нашла фронт-сессия 16.09.2026 на боевом контуре. Здесь верхняя
+    граница — начало СЛЕДУЮЩЕГО дня, сравнение строгое: включает весь to целиком.
+    """
+    to_exclusive = to + timedelta(days=1) if to else None
     rows = await conn.fetch(
         """
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
                f.probability, f.risk_rank, r.started_at AS computed_at
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
-        WHERE ($1::timestamptz IS NULL OR r.started_at >= $1)
-          AND ($2::timestamptz IS NULL OR r.started_at <= $2)
+        WHERE ($1::date IS NULL OR r.started_at >= $1)
+          AND ($2::timestamptz IS NULL OR r.started_at < $2)
         ORDER BY r.started_at DESC, f.risk_rank
         """,
-        from_, to,
+        from_, to_exclusive,
     )
     return [dict(r) for r in rows]
 
