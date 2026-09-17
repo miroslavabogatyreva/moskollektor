@@ -7,4 +7,5 @@ export const ROUTES = [
   { path: '/dashboard', label: 'Дашборд рисков' },
   { path: '/map', label: 'Карта объектов' },
   { path: '/log', label: 'Журнал прогнозов' },
+  { path: '/orders', label: 'Заявки' },
 ] as const

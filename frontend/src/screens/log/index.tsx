@@ -9,8 +9,8 @@ import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
    а не девятиколоночная таблица из Ф-33/Ф-34/Ф-35 — та часть III, у нас её нет
    в согласовании, и под вердикт с причиной в схеме пока нет таблицы.
    Объект показан как section_id: подтягивать smvu_key из sections.json
-   незачем для журнала. Клик по строке ведёт на /objects/:sectionId
-   (ObjectCard, 5.5, MOS-52). */
+   незачем для журнала. Клик по строке ведёт на /forecasts/:forecastId
+   (ForecastCard, 6.6, MOS-61) — строка это один прогноз, а не участок. */
 
 type SortKey = 'computed_at' | 'section_id' | 'direction' | 'probability' | 'horizon_h'
 
@@ -141,7 +141,7 @@ export function LogScreen(_props: Record<string, unknown>) {
           {filtered.map((r) => (
             <tr
               key={r.forecast_id}
-              onClick={() => route(`/objects/${r.section_id}`)}
+              onClick={() => route(`/forecasts/${r.forecast_id}`)}
               style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
               <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>

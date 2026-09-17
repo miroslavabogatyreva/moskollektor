@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
+import { route } from 'preact-router'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
@@ -259,7 +260,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </thead>
           <tbody>
             {data.recent_forecasts.map((f) => (
-              <tr key={f.forecast_id} style="border-bottom:1px solid var(--border-subtle)">
+              <tr
+                key={f.forecast_id}
+                onClick={() => route(`/forecasts/${f.forecast_id}`)}
+                style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
+              >
                 <td class="px-2 py-2 num">{new Date(f.computed_at).toLocaleString('ru-RU')}</td>
                 <td class="px-2 py-2">{DIRECTION_LABEL[f.direction]}</td>
                 <td class="px-2 py-2 num">{f.probability.toFixed(4)}</td>
