@@ -67,6 +67,27 @@ TLS 1.2 и выше. Плюс отдельная строка НФ-72: инфе�
 расписывает сам. У нас это не поза, а необходимость: хакатон, два человека, слабый
 сервер заказчика и жёсткий бюджет образа.
 
+## Скиллы проекта
+
+Шесть скиллов поставили 17.09.2026 в `.agents/skills/`, их состав зафиксирован
+в `skills-lock.json`: `supabase-postgres-best-practices` (правила Postgres — индексы,
+схема, EXPLAIN), `tailwind-design-system` (Tailwind v4), `verification-before-completion`
+(«готово» говорим только после свежей команды проверки), `query` (DuckDB поверх Parquet),
+`typescript-advanced-types`, `vercel-react-best-practices`.
+
+**Оговорка к React-скиллу.** Он написан под React и Next.js, а у нас Preact через
+`preact/compat`. Правила категорий `server-*` (React Server Components, server actions,
+`React.cache`), `hydration-*` и `rendering-activity` не применять: у нас SPA без
+серверного рендера, такого кода в проекте нет. Остальные 50 с лишним правил — про хуки,
+сборку бандла и чистый JavaScript — к Preact подходят.
+
+**Оговорки к трём скиллам.** `git-commit` формат сообщений не меняет: коммит
+пишем по-русски по правилам выше, коммитим только по явному «да». `tailwind-design-system`
+и `typescript-advanced-types` берём по потребности — токены Tailwind и типы ответов
+API да, полную дизайн-систему с class-variance-authority и библиотеку generic-типов
+нет, у нас три экрана и ponytail. У `supabase-postgres-best-practices` правила про RLS,
+`pg_cron` и `pgvector` пропускаем — у нас обычный Postgres 18 без Supabase.
+
 ## Решения, которые уже приняты — не переигрывать
 
 Всё обосновано числами в `docs/HLD.md`. Кажется, что решение неверное — сначала
