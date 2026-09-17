@@ -96,6 +96,7 @@ run "—"            "выбор факторов"          env PYTHONPATH=backe
 # должно проверяться в каждом прогоне, а не только на стенде.
 run "М-10, М-13"   "правило заявки"          env PYTHONPATH=backend "$PY" -m app.domain.order_rules
 run "М-18, М-19"   "строгость порогов"       python3 code/predictive_metrics.py
+run "М-21, НФ-72"  "арифметика норматива"    python3 code/check_runtime.py --demo
 run "М-18, М-20"   "строки качества"         python3 code/check_metrics.py --selfcheck
 if [ -n "${DATABASE_URL:-}" ]; then
   run "М-18, М-21"  "методика метрик"        python3 code/check_metrics.py
@@ -111,6 +112,18 @@ if [ -n "${DATABASE_URL:-}" ]; then
   run "М-09…М-11, М-13, М-12 наполовину" "заявки на стенде" python3 code/check_orders.py
 else
   skip_msg "М-09…М-13" "заявки на стенде — задайте DATABASE_URL"
+fi
+
+# Эта проверка читает журнал pred.run, а не запускает расчёт: прогон пишет
+# в базу прогнозы и заявки, а проверка, меняющая данные, — плохая проверка.
+# Значит она доказывает «расчёт укладывался», а не «уложится сейчас». Чтобы
+# улов был настоящим, скрипт требует трёх прогонов по ВСЕМУ парку с заполненными
+# шестью стадиями: прогон с пустой ms_features даёт 8,3 с вместо 32,7 и прошёл бы
+# норматив, не замерив самую дорогую стадию.
+if [ -n "${DATABASE_URL:-}" ]; then
+  run "М-21, НФ-72" "время расчёта"          python3 code/check_runtime.py
+else
+  skip_msg "М-21, НФ-72" "время расчёта — задайте DATABASE_URL"
 fi
 run "—"            "шаблоны объяснений"      python3 code/check_explain_templates.py
 
