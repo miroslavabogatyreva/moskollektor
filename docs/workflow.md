@@ -6,11 +6,13 @@
 
 ## Скиллы: три оговорки к чужим правилам
 
-Шесть скиллов мы поставили 17.09.2026 в `.agents/skills/`, состав зафиксирован
-в `skills-lock.json`: `supabase-postgres-best-practices` (индексы, схема, EXPLAIN),
+Восемь скиллов мы поставили 17.09.2026 в `.agents/skills/`, состав зафиксирован
+в `skills-lock.json` — счёт смотреть там, а не запоминать:
+`supabase-postgres-best-practices` (индексы, схема, EXPLAIN),
 `tailwind-design-system` (Tailwind v4), `verification-before-completion` («готово»
 говорим только после свежей команды проверки), `query` (DuckDB поверх Parquet),
-`typescript-advanced-types`, `vercel-react-best-practices`.
+`typescript-advanced-types`, `vercel-react-best-practices`, `git-commit`
+и `requesting-code-review`.
 
 **React-скилл написан под React и Next.js, а у нас Preact через `preact/compat`.**
 Правила категорий `server-*` (React Server Components, server actions, `React.cache`),

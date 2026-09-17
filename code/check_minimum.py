@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Сводка по части 0 приёмки — 21 строка М-01…М-21 из docs/acceptance-test.md.
+
+Запуск:
+    python3 code/check_minimum.py
+    BASE_URL=https://135.106.216.101 CURL_OPTS=-k python3 code/check_minimum.py
+
+Скрипт сам ничего не проверяет. Он запускает четыре чужие проверки, собирает
+их строки и печатает вердикт по каждой из 21 строки части 0 плюс таблицу
+блоков, как в разделе 0.6. Код возврата 1, если хоть одна строка не в OK.
+
+Почему это отдельный файл, а не пункт в README: приёмочную сводку читает
+комиссия, и она не должна зависеть от того, вспомнил ли человек про четвёртый
+скрипт. Ненаписанная проверка обязана гореть красным, а не выпадать из списка —
+молчаливый пропуск выглядит как зелень, и именно так приёмка и обманывается.
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Все 21 строка части 0 известны заранее и держатся здесь списком: только так
+# можно поймать строку, которую не напечатал ни один скрипт. Разбивка на блоки
+# повторяет разделы 0.1…0.5 и даёт таблицу раздела 0.6.
+BLOCKS = [
+    ("ML-модель", ["М-01", "М-02"]),
+    ("Веб-интерфейс: три экрана", ["М-03", "М-04", "М-05", "М-06", "М-07", "М-08"]),
+    ("Модуль заявок", ["М-09", "М-10", "М-11", "М-12", "М-13"]),
+    ("REST API", ["М-14", "М-15", "М-16", "М-17"]),
+    ("Метрики", ["М-18", "М-19", "М-20", "М-21"]),
+]
+ROWS = [row for _, rows in BLOCKS for row in rows]
+
+# Кто какие строки обязан закрыть. Для examples.sh список держим здесь, потому
+# что скрипт написан на bash до этой сводки и печатает по-своему («OK <метка>»),
+# без номеров приёмки, — его вердикт мы берём по коду возврата.
+CHECKERS = [
+    (
+        ["bash", "contracts/examples/api/examples.sh"],
+        [
+            "М-03",
+            "М-04",
+            "М-06",
+            "М-07",
+            "М-08",
+            "М-12",
+            "М-14",
+            "М-15",
+            "М-16",
+            "М-17",
+        ],
+        "по коду возврата",
+    ),
+    (
+        ["python3", "code/check_orders.py"],
+        ["М-09", "М-10", "М-11", "М-12", "М-13"],
+        "по строкам",
+    ),
+    (
+        ["python3", "code/check_metrics.py"],
+        ["М-18", "М-19", "М-20", "М-21"],
+        "по строкам",
+    ),
+    (
+        ["python3", "code/check_model_and_objects.py"],
+        ["М-01", "М-02", "М-05"],
+        "по строкам",
+    ),
+]
+
+# Строка вида «М-09 СБОЙ заявок в базе нет». Хвост — доказательство с числами.
+LINE_RE = re.compile(r"^(М-\d{2})\s+(OK|СБОЙ|РУЧНАЯ)\b[ \t]*(.*)$")
+
+# Чем хуже вердикт, тем больше вес. Одну строку могут закрывать два скрипта
+# (М-12 проверяют и examples.sh, и check_orders.py) — берём худший из двух,
+# иначе зелёный HTTP-код перекроет настоящую поломку связи заявка ↔ прогноз.
+WEIGHT = {"OK": 0, "РУЧНАЯ": 1, "СБОЙ": 2}
+
+
+def parse_rows(text):
+    """Достать из вывода чужого скрипта вердикты по строкам приёмки."""
+    found = {}
+    for line in text.splitlines():
+        m = LINE_RE.match(line.strip())
+        if m:
+            found[m.group(1)] = (m.group(2), m.group(3).strip())
+    return found
+
+
+def last_line(text, prefer=None):
+    """Последняя непустая строка — то, чем закончился упавший скрипт.
+
+    С prefer сначала ищем последнюю строку с этим началом: examples.sh всегда
+    допечатывает в конце тело /api/audit, и без prefer доказательством стала бы
+    подпись «--- тело последнего успешного ... ---», которая ни о чём не говорит.
+    """
+    lines = [s.strip() for s in text.splitlines() if s.strip()]
+    if prefer:
+        hits = [s for s in lines if s.startswith(prefer)]
+        if hits:
+            return hits[-1]
+    return lines[-1] if lines else "(вывода нет)"
+
+
+def run(cmd):
+    """Запустить чужой скрипт. Переменные окружения (BASE_URL, CURL_OPTS)
+    уходят насквозь: subprocess по умолчанию отдаёт потомку os.environ."""
+    try:
+        p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=900)
+        return p.returncode, p.stdout + p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "проверка не уложилась в 900 секунд"
+    except OSError as e:  # нет bash, нет python3 — тоже отказ, а не падение сводки
+        return 127, "не удалось запустить: %s" % e
+
+
+def collect():
+    """Собрать вердикты со всех четырёх скриптов.
+
+    Возвращает (verdicts, printed) — вердикты по строкам и множество строк,
+    которые скрипты напечатали сами. Разница между 21 и len(printed) — это
+    вторая половина пары чисел в сводке.
+    """
+    verdicts = {}
+    printed = set()
+
+    def put(row, status, note):
+        old = verdicts.get(row)
+        if old is None or WEIGHT[status] > WEIGHT[old[0]]:
+            verdicts[row] = (status, note)
+
+    for cmd, rows, mode in CHECKERS:
+        path = cmd[-1]
+        name = os.path.basename(path)
+        if not os.path.exists(os.path.join(ROOT, path)):
+            # Отсутствие файла — это СБОЙ его строк, а не повод их пропустить.
+            for row in rows:
+                put(row, "СБОЙ", "проверка не написана: нет файла %s" % path)
+            continue
+
+        code, out = run(cmd)
+        found = parse_rows(out)
+        printed.update(found)
+
+        if mode == "по коду возврата":
+            ok_n = len(re.findall(r"^OK\b", out, re.M))
+            bad_n = len(re.findall(r"^РАСХОЖДЕНИЕ\b", out, re.M))
+            if code == 0:
+                note = "%s: %d проверок, расхождений нет, код возврата 0" % (name, ok_n)
+                for row in rows:
+                    put(row, "OK", note)
+            else:
+                note = (
+                    "%s: код возврата %d, расхождений %d из %d проверок; последнее: %s"
+                    % (
+                        name,
+                        code,
+                        bad_n,
+                        ok_n + bad_n,
+                        last_line(out, prefer="РАСХОЖДЕНИЕ"),
+                    )
+                )
+                for row in rows:
+                    put(row, "СБОЙ", note)
+            continue
+
+        if not found:
+            # Скрипт есть, но не напечатал ни одной строки приёмки: упал
+            # с трассировкой или напечатал что-то своё. Падение чужого скрипта
+            # не имеет права ронять сводку — печатаем его последнюю строку.
+            for row in rows:
+                put(
+                    row,
+                    "СБОЙ",
+                    "проверка упала, код возврата %d; последняя строка: %s"
+                    % (code, last_line(out)),
+                )
+            continue
+
+        for row in rows:
+            if row in found:
+                status, note = found[row]
+                put(row, status, "%s: %s" % (name, note or "(без доказательства)"))
+            else:
+                put(
+                    row,
+                    "СБОЙ",
+                    "%s отработал (код %d), но строку не напечатал" % (name, code),
+                )
+
+    return verdicts, printed
+
+
+def main():
+    verdicts, printed = collect()
+
+    base_url = os.environ.get("BASE_URL", "http://127.0.0.1:8000 (по умолчанию)")
+    print("Часть 0, программа минимум: 21 строка М-01…М-21 (docs/acceptance-test.md)")
+    print(
+        "BASE_URL = %s, CURL_OPTS = %s"
+        % (base_url, os.environ.get("CURL_OPTS", "(пусто)"))
+    )
+    print()
+
+    for row in ROWS:
+        status, note = verdicts.get(
+            row, ("СБОЙ", "строку не напечатал ни один скрипт, и ни один её не заявил")
+        )
+        print("%s %-6s %s" % (row, status, note))
+
+    print()
+    print("| Блок | Строк | Закрыто |")
+    print("|---|---|---|")
+    total_ok = 0
+    for name, rows in BLOCKS:
+        n_ok = sum(1 for r in rows if verdicts.get(r, ("СБОЙ", ""))[0] == "OK")
+        total_ok += n_ok
+        print("| %s | %d | %d |" % (name, len(rows), n_ok))
+    print("| **Всего** | **%d** | **%d** |" % (len(ROWS), total_ok))
+
+    print()
+    # Пара чисел, а не один счётчик: сколько строк ждали и сколько из них
+    # скрипты действительно напечатали. Расхождение указывает на ненаписанную
+    # или молчащую проверку раньше, чем это заметит комиссия.
+    print("Ждали 21 строку, скрипты напечатали %d." % len(printed))
+    failed = [r for r in ROWS if verdicts.get(r, ("СБОЙ", ""))[0] != "OK"]
+    if failed:
+        print("Не в OK: %d из %d — %s" % (len(failed), len(ROWS), ", ".join(failed)))
+        print("ВЕРДИКТ: программа минимум НЕ пройдена.")
+        return 1
+    print("ВЕРДИКТ: все 21 строка в OK.")
+    return 0
+
+
+def demo():
+    """Самопроверка разбора: одна OK, одна СБОЙ, одна пропущенная строка."""
+    text = (
+        "запускаю проверку заявок\n"
+        "М-09 OK раздел заявок есть, 14 заявок в maint.notification\n"
+        "М-10 СБОЙ ни одной заявки с source_system='forecast'\n"
+        "М-11 РУЧНАЯ глазами открыть карточку заявки на стенде\n"
+        "Traceback (most recent call last):\n"
+        "ValueError: что-то пошло не так\n"
+    )
+    found = parse_rows(text)
+    assert found["М-09"] == (
+        "OK",
+        "раздел заявок есть, 14 заявок в maint.notification",
+    ), found
+    assert found["М-10"][0] == "СБОЙ", found
+    assert found["М-11"][0] == "РУЧНАЯ", found
+    assert "М-12" not in found, "пропущенная строка не должна появиться из ниоткуда"
+    assert len(found) == 3, found
+    assert last_line(text) == "ValueError: что-то пошло не так"
+    # prefer вытаскивает нужную строку из хвоста, а не последнюю подряд.
+    assert last_line(
+        "РАСХОЖДЕНИЕ GET /docs -> 200 вместо 404\nхвост", prefer="РАСХОЖДЕНИЕ"
+    ).startswith("РАСХОЖДЕНИЕ GET /docs")
+    # Худший вердикт побеждает: OK от examples.sh не перекрывает СБОЙ по М-12.
+    assert WEIGHT["СБОЙ"] > WEIGHT["РУЧНАЯ"] > WEIGHT["OK"]
+    # Все 21 строка на месте и без дублей.
+    assert len(ROWS) == 21 and len(set(ROWS)) == 21
+    print("самопроверка разбора пройдена")
+
+
+if __name__ == "__main__":
+    if "--self-check" in sys.argv:
+        demo()
+        sys.exit(0)
+    sys.exit(main())
