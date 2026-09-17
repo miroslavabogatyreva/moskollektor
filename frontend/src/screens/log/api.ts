@@ -18,7 +18,9 @@ export async function fetchForecasts(query: ForecastQuery): Promise<ForecastRow[
   if (query.from) params.set('from', query.from)
   if (query.to) params.set('to', query.to)
   const qs = params.toString()
-  const r = await fetch(`/api/forecasts${qs ? `?${qs}` : ''}`, { headers: { 'X-User-Login': API_LOGIN } })
+  const r = await fetch(`/api/forecasts${qs ? `?${qs}` : ''}`, {
+    headers: { 'X-User-Login': API_LOGIN },
+  })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   return r.json()
 }

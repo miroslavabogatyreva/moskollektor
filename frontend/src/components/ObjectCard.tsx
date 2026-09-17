@@ -210,18 +210,22 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </h2>
           <div class="text-sm flex flex-col gap-1">
             <div>
-              {DIRECTION_LABEL[risk.direction]}: вероятность <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
+              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
+              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
               <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
               {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
             </div>
             <div style="color:var(--text-secondary)">
-              Данные по состоянию на {new Date(risk.computed_at).toLocaleDateString('ru-RU')} — момент среза
-              выгрузки заказчика, не время расчёта
+              Данные по состоянию на {new Date(risk.computed_at).toLocaleDateString('ru-RU')} —
+              момент среза выгрузки заказчика, не время расчёта
             </div>
           </div>
 
           {explanationLines.length > 0 && (
-            <div class="text-sm p-3 mt-2 rounded" style="background:var(--bg-surface); border-left:3px solid var(--brand)">
+            <div
+              class="text-sm p-3 mt-2 rounded"
+              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
+            >
               <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
                 Почему такой риск
               </div>
@@ -264,7 +268,9 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             ))}
           </tbody>
         </table>
-        {data.recent_forecasts.length === 0 && <p style="color:var(--text-muted)">Прогнозов по участку нет.</p>}
+        {data.recent_forecasts.length === 0 && (
+          <p style="color:var(--text-muted)">Прогнозов по участку нет.</p>
+        )}
       </section>
 
       <section>
@@ -276,7 +282,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
             : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
         </p>
-        <div class="flex flex-wrap items-end gap-4 text-sm mb-3" style="color:var(--text-secondary)">
+        <div
+          class="flex flex-wrap items-end gap-4 text-sm mb-3"
+          style="color:var(--text-secondary)"
+        >
           <label class="flex flex-col gap-1">
             С даты
             <input
@@ -369,8 +378,18 @@ function NumericLine({ readings }: { readings: Reading[] }) {
   })
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} class="w-full" style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px">
-      <path d={d} fill="none" stroke="var(--chart-outline)" stroke-width="4" stroke-linecap="round" />
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      class="w-full"
+      style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
+    >
+      <path
+        d={d}
+        fill="none"
+        stroke="var(--chart-outline)"
+        stroke-width="4"
+        stroke-linecap="round"
+      />
       <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
     </svg>
   )
@@ -387,7 +406,11 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
   const x = (t: number) => ((t - winStart) / (winEnd - winStart || 1)) * W
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} class="w-full" style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      class="w-full"
+      style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
+    >
       {readings.map((r, i) => {
         const t0 = new Date(r.read_time).getTime()
         const t1 = i + 1 < readings.length ? new Date(readings[i + 1].read_time).getTime() : winEnd

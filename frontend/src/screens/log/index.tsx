@@ -48,13 +48,18 @@ export function LogScreen(_props: Record<string, unknown>) {
       .filter((r) => !direction || r.direction === direction)
       .sort((a, b) => {
         const [x, y] = [a[sort.key], b[sort.key]]
-        const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))
+        const cmp =
+          typeof x === 'number' && typeof y === 'number'
+            ? x - y
+            : String(x).localeCompare(String(y))
         return sort.dir === 'asc' ? cmp : -cmp
       })
   }, [rows, objectQuery, direction, sort])
 
   function toggleSort(key: SortKey) {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
+    setSort((s) =>
+      s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' },
+    )
   }
 
   return (
