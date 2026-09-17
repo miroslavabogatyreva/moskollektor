@@ -125,17 +125,42 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-13" 34 \
 check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний день)" 0 \
     -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1/readings?from=2025-10-12&to=2025-10-12"
 
-# Q6 ещё не сделан — MOS-43 требует 200 и [] буквально, для списка и для карточки.
+# Q6.5 (MOS-60) сделан — тело списка теперь объект {schema_version, total,
+# items}, а не голый массив: check_count тут не годится, он умеет len() только
+# на массиве верхнего уровня. Настоящий id берём из списка, а не выдумываем
+# число — 64 заявки из двух прогонов не гарантируют, что id 42 существует.
 check "GET /api/orders (dispatcher1)"                       200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
-check "GET /api/orders/42 (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/42"
+check "GET /api/orders/999999999 (заявки нет)"               404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/999999999"
 
 # М-16 требует не «метод отвечает», а «метод отдаёт данные»: код 200 на пустом
-# списке и код 200 на списке заявок ничем не отличаются, и проверка выше зелёная
-# ровно потому, что заявок нет. Считаем строки. Пока Q6 не написал модуль заявок,
-# эта строка ОБЯЗАНА быть красной — так приёмка и должна выглядеть на незакрытом
-# требовании. Чинить её ожиданием 0 нельзя: тогда она снова докажет пустоту.
-check_count "GET /api/orders (dispatcher1), М-16 — заявки есть" ">0" \
-    -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
+# списке и код 200 на списке заявок ничем не отличаются. Считаем total из тела,
+# не длину JSON верхнего уровня — он теперь объект на четыре поля, len() дал бы
+# зелёный результат независимо от того, есть ли хоть одна заявка.
+check_orders_total() {
+    label="GET /api/orders (dispatcher1), М-16 — заявки есть"
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders")
+    total=$(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
+    if [ "$total" -gt 0 ] 2>/dev/null; then
+        echo "OK          $label -> $total заявок"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> ждали total > 0, получили $total"
+        mismatch=1
+    fi
+}
+check_orders_total
+
+# Настоящая заявка по id из списка — 200 и то же id внутри тела.
+check_order_detail() {
+    label="GET /api/orders/{id} (dispatcher1), карточка по первой заявке списка"
+    order_id=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders" \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); items=d.get('items',[]); print(items[0]['id'] if items else '')" 2>/dev/null)
+    if [ -z "$order_id" ]; then
+        echo "РАСХОЖДЕНИЕ $label -> в списке нет ни одной заявки, карточку проверять нечем"
+        mismatch=1; return
+    fi
+    check "GET /api/orders/$order_id (dispatcher1)" 200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/$order_id"
+}
+check_order_detail
 
 # М-12: из заявки открывается прогноз, который её породил, и обратно. Проверка
 # связывает два числа — id заявки, с которого начали, и id внутри order_ids
@@ -146,15 +171,16 @@ check_order_forecast_link() {
     label="М-12 круговая сверка заявка -> прогноз -> заявка"
     hdr="X-User-Login: dispatcher1"
     order_id=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/orders" \
-        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('id','') if isinstance(d,list) and d else '')" 2>/dev/null)
+        | python3 -c "import json,sys; d=json.load(sys.stdin); items=d.get('items',[]); print(items[0]['id'] if items else '')" 2>/dev/null)
     if [ -z "$order_id" ]; then
-        echo "РАСХОЖДЕНИЕ $label -> GET /api/orders не отдал ни одной заявки с полем id, сверять нечего"
+        echo "РАСХОЖДЕНИЕ $label -> GET /api/orders не отдал ни одной заявки в items, сверять нечего"
         mismatch=1; return
     fi
+    # forecast_id теперь вложен в объект forecast карточки заявки (order.json), а не лежит плоским полем.
     forecast_id=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/orders/$order_id" \
-        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('forecast_id','') if isinstance(d,dict) else '')" 2>/dev/null)
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('forecast',{}).get('forecast_id','') if isinstance(d,dict) else '')" 2>/dev/null)
     if [ -z "$forecast_id" ]; then
-        echo "РАСХОЖДЕНИЕ $label -> в теле заявки $order_id нет поля forecast_id, прогноз из заявки не открыть"
+        echo "РАСХОЖДЕНИЕ $label -> в теле заявки $order_id нет forecast.forecast_id, прогноз из заявки не открыть"
         mismatch=1; return
     fi
     back=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/forecasts/$forecast_id" \
@@ -171,6 +197,59 @@ check_order_forecast_link
 # Журнал аудита — только администратору (НФ-43, НФ-44).
 check "GET /api/audit (dispatcher1, должен отказать)"       403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/audit"
 check "GET /api/audit (admin1)"                             200 -H "X-User-Login: admin1"      "$BASE_URL/api/audit"
+
+# Пороги и горизонт (MOS-110, Q4.12) — НФ-44 держит их на том же уровне, что
+# журнал аудита: диспетчеру оба метода отвечают 403, а не только PUT.
+check "GET /api/settings (dispatcher1, должен отказать)"    403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/settings"
+check "GET /api/settings (admin1)"                          200 -H "X-User-Login: admin1"      "$BASE_URL/api/settings"
+# Отказ у диспетчера падает на require(), тело запроса не читается — в базу
+# ничего не уходит, откатывать здесь нечего.
+check "PUT /api/settings/forecast_horizon_h (dispatcher1)"  403 -X PUT -H "X-User-Login: dispatcher1" \
+    -H "Content-Type: application/json" -d '{"value": 30}' "$BASE_URL/api/settings/forecast_horizon_h"
+
+# Проверка по улову, не по счётчику (нашла 58): audit.user_action пишет КАЖДЫЙ
+# запрос, включая GET-запросы этого же прогона, — разница длины «до/после»
+# не изолирует именно наш PUT. Печатаем оба числа для картины, но ассерт ищет
+# конкретную строку: метод, путь, код 200 и details.old/new словами «24»/«30».
+check_settings_audit_trail() {
+    label="PUT /api/settings/forecast_horizon_h (admin1) со следом old/new в audit"
+    before=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit" \
+        | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+
+    curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
+        -H "Content-Type: application/json" -d '{"value": 30}' \
+        "$BASE_URL/api/settings/forecast_horizon_h"
+    audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
+    after=$(echo "$audit_body" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+
+    # Вернуть горизонт как было — до печати результата, чтобы откат случился
+    # даже если сама проверка ниже упадёт.
+    curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
+        -H "Content-Type: application/json" -d '{"value": 24}' \
+        "$BASE_URL/api/settings/forecast_horizon_h"
+
+    found=$(echo "$audit_body" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+for r in rows:
+    d = r.get('details') or {}
+    if (r.get('method') == 'PUT' and r.get('path') == '/api/settings/forecast_horizon_h'
+            and r.get('status_code') == 200 and d.get('old') == '24' and d.get('new') == '30'):
+        print('да')
+        break
+else:
+    print('нет')
+" 2>/dev/null)
+
+    echo "строк в audit.user_action: до $before, после $after"
+    if [ "$found" = "да" ]; then
+        echo "OK          $label"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> строка PUT .../forecast_horizon_h, код 200, old=24/new=30 не найдена"
+        mismatch=1
+    fi
+}
+check_settings_audit_trail
 
 echo
 echo "--- тело последнего успешного /api/audit (admin1), для примера формы ответа ---"
