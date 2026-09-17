@@ -181,9 +181,16 @@ def verdict(metrics, min_precision=0.7, min_recall=0.5, min_lead_hours=24,
         share = metrics.get("lead_under_24h_share")
         share_ok = share is not None and share <= max_under_share
         lead_ok = median_ok and share_ok
+    # Precision и recall считаем заново из tp/fp/fn, а не берём округлённые
+    # metrics["precision"]/["recall"]: evaluate_alerts округляет их до трёх знаков,
+    # и настоящие 0,7004 приехали бы как 0,700 и провалили бы строгое «больше 0,7»
+    # на ровном месте. Сравнение строгое: ровно 0,700 постановку не закрывает.
+    tp, fp, fn = metrics["tp"], metrics["fp"], metrics["fn"]
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
     checks = {
-        "precision": metrics["precision"] >= min_precision,
-        "recall": metrics["recall"] >= min_recall,
+        "precision": precision > min_precision,
+        "recall": recall > min_recall,
         "lead_time": lead_ok,
     }
     passed = all(v for v in checks.values() if v is not None)
@@ -258,6 +265,25 @@ def _demo():
 
     ok, checks = verdict(m)
     assert ok is False and checks["precision"] is False
+
+    # Строгое неравенство и ловушка округления (MOS-105): verdict не смотрит
+    # в округлённое metrics["precision"], а считает из tp/fp/fn заново.
+    # 7000/10000 в double совпадает с литералом 0.7 — граница ровная, без эпсилон.
+    assert 7000 / 10000 == 0.7
+    ровно_07 = {"tp": 7000, "fp": 3000, "fn": 3000, "horizon_hours": 24}
+    assert verdict(ровно_07)[1]["precision"] is False, verdict(ровно_07)
+    чуть_выше = {"tp": 7001, "fp": 2999, "fn": 3000, "horizon_hours": 24}
+    assert verdict(чуть_выше)[1]["precision"] is True, verdict(чуть_выше)
+
+    # Сама ловушка округления: 7004/10000 — это 0,7004, постановку закрывает,
+    # но evaluate_alerts кладёт в metrics["precision"] округлённые 0,7, а строгое
+    # «больше 0,7» на них отвечает «нет». Кладу округлённое поле в словарь нарочно:
+    # если verdict когда-нибудь снова начнёт читать его вместо tp/fp, этот assert
+    # покажет False и рабочая модель провалит М-18 на пустом месте.
+    округление = {"tp": 7004, "fp": 2996, "fn": 3000, "horizon_hours": 24,
+                  "precision": round(7004 / 10000, 3), "recall": 0.7}
+    assert округление["precision"] == 0.7, округление
+    assert verdict(округление)[1]["precision"] is True, verdict(округление)
 
     good = evaluate_alerts(
         [("A", d("2026-01-01 00:00")), ("B", d("2026-01-01 00:00"))],
