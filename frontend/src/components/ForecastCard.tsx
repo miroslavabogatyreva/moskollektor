@@ -6,10 +6,11 @@ import { formatDateTime } from '../lib/format'
 /* Карточка прогноза — задача 6.6 (MOS-61). До этой задачи адресуемого экрана
    на forecast_id не было вовсе: прогнозы жили только внутри карточки объекта
    (ObjectCard, таблица «Последние прогнозы») и строкой журнала. GET /api/forecasts/{id}
-   существует (backend/app/api/routes.py), но order_ids в ответе пока нет —
-   это задача 6.5, ещё не сделана. Блок ниже читает order_ids защищённо:
-   нет поля или пусто — показывает «заявок нет», не падает; когда 6.5 добавит
-   поле, блок заработает без правок фронта. */
+   существует (backend/app/api/routes.py, задача 6.5, MOS-60). Блок ниже
+   различает три состояния order_ids: поля нет вовсе (undefined) — метод ещё
+   не переписан, честная надпись про это; пустой массив — заявок действительно
+   нет; непустой — список ссылок. Первые два выглядят одинаково для человека,
+   но означают разное, и подменять одно другим нельзя (нашла 58, 17.09.2026). */
 
 interface ForecastDetail {
   forecast_id: number
@@ -103,7 +104,11 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
           Заявки по этому прогнозу
         </h2>
-        {orderIds.length === 0 ? (
+        {data.order_ids === undefined ? (
+          <p class="text-sm" style="color:var(--text-muted)">
+            Метод GET /api/forecasts/{'{id}'} пока не отдаёт связанные заявки — ждём задачу 6.5.
+          </p>
+        ) : orderIds.length === 0 ? (
           <p class="text-sm" style="color:var(--text-muted)">
             Заявок по этому прогнозу нет.
           </p>
