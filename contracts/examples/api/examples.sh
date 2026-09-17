@@ -129,6 +129,45 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний д
 check "GET /api/orders (dispatcher1)"                       200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
 check "GET /api/orders/42 (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/42"
 
+# М-16 требует не «метод отвечает», а «метод отдаёт данные»: код 200 на пустом
+# списке и код 200 на списке заявок ничем не отличаются, и проверка выше зелёная
+# ровно потому, что заявок нет. Считаем строки. Пока Q6 не написал модуль заявок,
+# эта строка ОБЯЗАНА быть красной — так приёмка и должна выглядеть на незакрытом
+# требовании. Чинить её ожиданием 0 нельзя: тогда она снова докажет пустоту.
+check_count "GET /api/orders (dispatcher1), М-16 — заявки есть" ">0" \
+    -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
+
+# М-12: из заявки открывается прогноз, который её породил, и обратно. Проверка
+# связывает два числа — id заявки, с которого начали, и id внутри order_ids
+# прогноза, — а не сторожит одно поле. Одного forecast_id мало: он может указывать
+# на прогноз, который про эту заявку не знает, и на экране переход «обратно»
+# приведёт в пустоту, хотя ссылка «туда» работает.
+check_order_forecast_link() {
+    label="М-12 круговая сверка заявка -> прогноз -> заявка"
+    hdr="X-User-Login: dispatcher1"
+    order_id=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/orders" \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0].get('id','') if isinstance(d,list) and d else '')" 2>/dev/null)
+    if [ -z "$order_id" ]; then
+        echo "РАСХОЖДЕНИЕ $label -> GET /api/orders не отдал ни одной заявки с полем id, сверять нечего"
+        mismatch=1; return
+    fi
+    forecast_id=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/orders/$order_id" \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('forecast_id','') if isinstance(d,dict) else '')" 2>/dev/null)
+    if [ -z "$forecast_id" ]; then
+        echo "РАСХОЖДЕНИЕ $label -> в теле заявки $order_id нет поля forecast_id, прогноз из заявки не открыть"
+        mismatch=1; return
+    fi
+    back=$(curl -s $CURL_OPTS -H "$hdr" "$BASE_URL/api/forecasts/$forecast_id" \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(str(x) for x in d.get('order_ids',[])) if isinstance(d,dict) else '')" 2>/dev/null)
+    if echo " $back " | grep -qF " $order_id "; then
+        echo "OK          $label -> заявка $order_id -> прогноз $forecast_id -> order_ids [$back]"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> заявка $order_id ссылается на прогноз $forecast_id, а его order_ids [$back] эту заявку не содержат"
+        mismatch=1
+    fi
+}
+check_order_forecast_link
+
 # Журнал аудита — только администратору (НФ-43, НФ-44).
 check "GET /api/audit (dispatcher1, должен отказать)"       403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/audit"
 check "GET /api/audit (admin1)"                             200 -H "X-User-Login: admin1"      "$BASE_URL/api/audit"

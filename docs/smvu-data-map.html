@@ -486,10 +486,10 @@
           <text x="688" y="107" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" opacity="0.62">30 коллекторов</text>
 
           <!-- дерево объектов -->
-          <rect x="344" y="300" width="192" height="80" fill="none" stroke="#9A2A20" stroke-width="1.5" stroke-dasharray="5 4"></rect>
-          <text x="360" y="328" font-family="Golos Text, sans-serif" font-size="14" font-weight="600" fill="#9A2A20">дерево объектов</text>
-          <text x="360" y="349" font-family="IBM Plex Mono, monospace" font-size="12" fill="#9A2A20" opacity="0.8">95 строк</text>
-          <text x="360" y="367" font-family="IBM Plex Mono, monospace" font-size="12" fill="#9A2A20" opacity="0.8">ни к чему не прицеплено</text>
+          <rect x="344" y="300" width="192" height="80" fill="none" stroke="currentColor" stroke-width="2.5"></rect>
+          <text x="360" y="328" font-family="Golos Text, sans-serif" font-size="14" font-weight="600" fill="currentColor">дерево объектов</text>
+          <text x="360" y="349" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" opacity="0.8">95 строк, 78 с каналами</text>
+          <text x="360" y="367" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" opacity="0.8">channel.object_id</text>
 
           <!-- эпизоды отказа -->
           <rect x="16" y="300" width="192" height="80" fill="none" stroke="currentColor" stroke-width="2.5"></rect>
@@ -546,9 +546,9 @@
       <div class="link bad">
         <div class="step">✕</div>
         <div>
-          <h3>Канал → дерево объектов: связи нет</h3>
+          <h3>Канал → дерево объектов: связь пришла 16.09.2026</h3>
           <p>У объектов ключ <code>ид_объект</code> в диапазоне от 5 до 5966, у каналов — тег. Общей колонки нет ни одной. Проверка гипотезы «число до дефиса это ид_объект»: из 32 префиксов совпал один, и тот похож на совпадение.</p>
-          <p class="what">Пока связь не названа, справочник объектов на 95 строк не участвует ни в расчёте, ни в карте. <span class="tag t-block">блокирующий вопрос</span></p>
+          <p class="what">Так было до 16.09.2026. Заказчик прислал справочник каналов с колонкой <code>ид_объект</code>, заполненной у всех 11 485 каналов, и связь легла в <code>smvu.channel.object_id</code>: 78 узлов третьего уровня, над ними 16 коллекторов. Гипотеза «префикс тега = объект» факт не выдержала — 26 каналов получили бы чужой объект.</p>
         </div>
       </div>
 
@@ -658,14 +658,14 @@
 
   <section>
     <h2>Что ещё надо спросить у заказчика</h2>
-    <p class="sect-note">Два вопроса держат работу, остальные уточняют. Вопрос про карту снят: решили рисовать схему по оси пикетов.</p>
+    <p class="sect-note">Один вопрос держит работу, остальные уточняют. Вопрос про карту снят: решили рисовать схему по оси пикетов. Вопрос про связь канала с объектом снят 16.09.2026: заказчик прислал колонку.</p>
 
     <div class="col">
 
-      <div class="q blocking">
+      <div class="q">
         <span class="qid">ОВ-46</span>
-        <h3>Чем канал связан с деревом объектов?</h3>
-        <p>Нужна таблица соответствия «префикс тега → ид_объект», тридцать две строки. Без неё справочник объектов бесполезен, а диспетчер не увидит на экране привычных ему имён. <span class="tag t-block">блокирующий</span></p>
+        <h3>Чем канал связан с деревом объектов? — закрыт 16.09.2026</h3>
+        <p>Спрашивать не пришлось: заказчик прислал справочник каналов заново, и в нём появилась шестая колонка «ид_объект», заполненная у всех 11 485 каналов. Связь лежит в <code>smvu.channel.object_id</code>. Наша таблица из 32 строк не понадобилась и оказалась бы неверной: объектов-коллекторов 16, а не 32, и два префикса ведут к разным коллекторам.</p>
       </div>
 
       <div class="q blocking">
