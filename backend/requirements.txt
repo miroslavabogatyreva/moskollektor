@@ -6,3 +6,5 @@ fastapi==0.141.1
 pydantic==2.13.5
 # app.api.main (Q4.3) — сервер, которым CMD в backend/Dockerfile поднимает api.
 uvicorn==0.52.4
+# app.worker.scheduler (Q3.4) — ветка 3.x, а не 4.x: обоснование в HLD разд. 7.1.2.
+apscheduler==3.11.3

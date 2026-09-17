@@ -99,11 +99,17 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
-    command: ["python", "-m", "app.worker.run"]
+    # -u: без него print буферизуется, и `docker logs` не увидит строку
+    # «пропущено: блокировка занята», пока буфер не заполнится или процесс
+    # не упадёт — для постоянного процесса (не для одного прогона run.py)
+    # это значит «почти никогда».
+    command: ["python", "-u", "-m", "app.worker.scheduler"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       ML_URL: ${ML_URL}
       TZ: ${TZ}
+      SCHEDULER_INTERVAL_MIN: ${SCHEDULER_INTERVAL_MIN:-60}
+      SCHEDULER_REFRESH_INTERVAL_MIN: ${SCHEDULER_REFRESH_INTERVAL_MIN:-5}
     volumes:
       - parquet:/srv/parquet
       - uploads:/srv/uploads
@@ -112,24 +118,26 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    # Перезапуска нет намеренно, и это не забытая строка.
+    # Задача Q3.4 (MOS-34): точка входа теперь планировщик, а не один прогон.
     #
-    # `python -m app.worker.run` — ОДИН прогон расчёта: он считает, пишет прогноз
-    # и выходит с кодом 0 (backend/app/worker/run.py, main). Планировщика у нас
-    # пока нет вовсе, это отдельная задача 3.4. С `restart: unless-stopped` докер
-    # видел штатный выход как повод поднять контейнер заново — 16.09.2026 стенд
-    # так насчитал 36 прогонов за 15 минут, по одному каждые 25 секунд, и держал
-    # базу под постоянной нагрузкой. Поймала это расчётная сессия по журналу
-    # pred.run, а не мы по симптомам: снаружи всё выглядело исправным.
+    # `python -m app.worker.scheduler` — процесс живёт постоянно и сам зовёт
+    # расчёт каждые SCHEDULER_INTERVAL_MIN минут (backend/app/worker/scheduler.py).
+    # Поэтому `restart: unless-stopped` здесь корректен: штатный выход означает
+    # падение процесса, а не завершённый прогон, как было раньше с `app.worker.run`.
     #
-    # Пока планировщика нет, прогон запускают руками и обязательно со срезом
-    # внутри данных, иначе окна всех 22 признаков попадают в пустоту:
+    # Старая ловушка 16.09.2026 (стенд насчитал 36 прогонов за 15 минут, по одному
+    # каждые 25 секунд) была именно в этом: `app.worker.run` — ОДИН прогон, он
+    # считает и выходит кодом 0, и `restart: unless-stopped` поднимал контейнер
+    # заново на каждый штатный выход. Сейчас тот же риск не возникает, потому что
+    # процесс, который перезапускает docker, — планировщик, а не сам расчёт.
+    #
+    # Ручной прогон на конкретный срез остаётся отдельной командой, мимо службы:
     #   docker compose --profile app run --rm worker \
     #     python -m app.worker.run --as-of 2026-06-30T23:59:59+03:00
     # Без --as-of расчёт идёт на now(), выгрузка заказчика кончается 30.06.2026,
     # и все 3 173 участка получают единственную фразу «Датчики этого участка
     # молчат N суток» — прогноз, арифметически верный и пустой по смыслу.
-    restart: "no"
+    restart: unless-stopped
 
   ml:
     profiles: ["app"]
