@@ -71,7 +71,15 @@ async def get_forecast(
     row = await conn.fetchrow(
         """
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
-               f.probability, f.risk_rank, f.factors, r.started_at AS computed_at
+               f.probability, f.risk_rank, f.factors, r.started_at AS computed_at,
+               -- М-12: заявки, которых породил этот прогноз (Q6.5, MOS-60).
+               -- Массив, не null: заявок может не быть, метода — не бывает.
+               COALESCE(
+                   (SELECT array_agg(n.id ORDER BY n.id)
+                      FROM maint.notification n
+                     WHERE n.forecast_id = f.forecast_id),
+                   ARRAY[]::bigint[]
+               ) AS order_ids
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
         WHERE f.forecast_id = $1
