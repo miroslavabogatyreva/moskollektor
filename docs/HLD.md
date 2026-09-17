@@ -643,7 +643,16 @@ CREATE TABLE pred.feedback (
 **Дыра 2: у заявки нет происхождения.** Автозаявку не отличить от заведённой руками,
 а плитка «заявки на ТО: 9, принято 7» считается именно по автозаявкам.
 
+**Закрыта, но не теми колонками, что написаны ниже.** В схему легли `source_system`
+и `forecast_id` (`db/migrations/001_assets.sql`, строки 632 и 639), внешний ключ на
+`pred.forecast` стоит в `005_xref.sql`. Отдельной колонки `origin` мы не завели:
+`source_system` уже отличает `'manual'` от `'forecast'`, и второе поле про то же самое
+разошлось бы с первым в первый же день. Блок ниже оставлен как след замысла —
+читать его как действующую схему нельзя.
+
 ```sql
+-- НЕ НАКАТЫВАЛОСЬ. Действующая схема — maint.notification.source_system
+-- и maint.notification.forecast_id, см. 001_assets.sql:632 и 639.
 ALTER TABLE maint.notification
     ADD COLUMN origin text NOT NULL DEFAULT 'manual'
         CHECK (origin IN ('manual','predictive','schedule','import')),
@@ -651,8 +660,21 @@ ALTER TABLE maint.notification
 CREATE INDEX ix_notif_origin ON maint.notification (origin, created_at DESC);
 ```
 
-`source_forecast_id` заодно закрывает М-12: из заявки открывается породивший
+`forecast_id` заодно закрывает М-12: из заявки открывается породивший
 её прогноз и обратно.
+
+**Автозаявку заводит седьмая стадия расчёта,** `backend/app/domain/order_rules.py`
+из `backend/app/worker/run.py`. Правило — при каком риске, какой вид работ и на какой
+срок — описано в `docs/order-rules.md` с разбором на одном участке. Повторы за одни
+московские сутки отсекает уникальный индекс `uq_notif_forecast_daily`
+(`db/migrations/010_orders.sql`), вставка идёт с `ON CONFLICT DO NOTHING`.
+
+**Реестр объектов ТОиР синтетический.** Заявка не встаёт без объекта — у
+`maint.notification` стоит `CHECK (func_location_id IS NOT NULL OR equipment_id IS NOT
+NULL)`, — а своего реестра заказчик не даёт (`Ф-84`, ответ 17.09.2026: «для синтетических
+макетов достаточно симуляции»). Поэтому `010_orders.sql` строит `asset.func_location`
+из `ref.object_xref.smvu_key`: 1 предприятие, 1 район, 30 коллекторов и 3 173 участка
+по 10 метров, всего 3 205 строк, и проставляет `ref.object_xref.func_location_id`.
 
 **Дыра 3: у прогноза нет ни идентификатора, ни направления.** PK сейчас
 `(run_id, section_id)`. Но постановка требует четыре направления, и они уже есть
@@ -735,6 +757,10 @@ CREATE TABLE ref.object_xref (
                             (обоснование — в шапке самого файла)
 006_explain_templates.sql   ref.explain_template — шаблоны фраз объяснения
                             прогноза (задача `Q7.6`)
+010_orders.sql              справочники ТОиР, синтетический реестр объектов
+                            (3 205 техместа из ref.object_xref) и уникальный
+                            индекс «объект + московские сутки» для автозаявок
+                            (задачи `Q2.19`, `Q6.3`)
 012_partitions_ahead.sql    партиции smvu.reading до конца 2027 и функция
                             smvu.ensure_partitions() (задача `Q2.10`)
 013_setpoints.sql           ref.setpoint и ref.norm_period — уставки среды
