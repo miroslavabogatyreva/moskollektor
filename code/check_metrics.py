@@ -27,7 +27,9 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from predictive_metrics import evaluate_alerts, group_incidents, verdict  # noqa: E402
+from predictive_metrics import (  # noqa: E402
+    evaluate_alerts, group_incidents, precision_recall, verdict,
+)
 
 # Пороги из постановки, дословно. Строго больше, а не «не ниже»: 0,700 постановку
 # не закрывает (docs/acceptance-test.md, пояснение «Про строгое неравенство»).
@@ -123,12 +125,13 @@ def строки_качества(
     if отказ:
         return [("М-18", False, отказ), ("М-19", False, отказ), ("М-20", False, отказ)]
 
-    # Precision и recall считаем из tp/fp/fn самой evaluate_alerts, а не из её же
-    # округлённых полей: она округляет до трёх знаков, и настоящие 0,7004 приехали бы
-    # как 0,700 и провалили бы строгое «больше 0,7» на ровном месте.
+    # Precision и recall — через precision_recall() (MOS-116), не заново: та же
+    # формула стояла здесь отдельной копией и могла разойтись с verdict() молча.
+    # Считаем из tp/fp/fn самой evaluate_alerts, а не из её же округлённых полей:
+    # она округляет до трёх знаков, и настоящие 0,7004 приехали бы как 0,700
+    # и провалили бы строгое «больше 0,7» на ровном месте.
     tp, fp, fn = m24["tp"], m24["fp"], m24["fn"]
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    precision, recall = precision_recall(tp, fp, fn)
     хвост = (
         f" | эпизодов без тега канала {ч(без_тега)}, "
         f"участков без коллектора {ч(участков_без_коллектора)}"

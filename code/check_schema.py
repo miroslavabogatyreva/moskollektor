@@ -8,21 +8,23 @@
 
   1. У каждой таблицы, представления и функции есть схема? Объект без префикса
      свалится в public и разъедется с тем, что обещает docs/HLD.md разд. 5.1.
-  2. Каждая схема объявлена через CREATE SCHEMA до первого её использования?
-  3. Каждый внешний ключ указывает на существующую таблицу?
-  4. Нет ли двух таблиц с одинаковым полным именем?
-  5. Каждая схема, которой пользуется файл, объявлена этим файлом или более
-     ранней миграцией — по номеру, то есть по порядку накатывания?
-  6. Порядок накатывания: файлы идут по возрастанию номера, и ни один REFERENCES
+  2. Каждый внешний ключ указывает на существующую таблицу?
+  3. Нет ли двух таблиц с одинаковым полным именем?
+  4. Каждая схема, которой пользуется файл, объявлена этим файлом или более
+     ранней миграцией — по номеру, то есть по порядку накатывания? (Проверка
+     «схема использована, но не объявлена нигде» была отдельным пунктом до
+     17.09.2026 — MOS-116 убрал её: это частный случай той же проверки при
+     declared_so_far пустом с самого начала, вторая находка на одном месте.)
+  5. Порядок накатывания: файлы идут по возрастанию номера, и ни один REFERENCES
      или ALTER TABLE не смотрит на таблицу, которой к этому месту ещё нет.
-  7. Типы совпадают: колонка ключа и колонка, на которую он смотрит, одного
+  6. Типы совпадают: колонка ключа и колонка, на которую он смотрит, одного
      семейства (bigint против integer, text против uuid — это поломка).
-  8. Колонки, похожие на внешний ключ (*_id, а также *_code/*_no/*_key, если
+  7. Колонки, похожие на внешний ключ (*_id, а также *_code/*_no/*_key, если
      есть таблица с таким именем), но без REFERENCES — либо в списке
      INTENTIONAL с причиной, либо это находка.
-  9. Висячие таблицы, у которых нет ни одной связи ни в одну сторону, — либо
+  8. Висячие таблицы, у которых нет ни одной связи ни в одну сторону, — либо
      в списке DANGLING_OK с причиной, либо находка.
- 10. Партиционированные таблицы: ключ партиционирования входит в первичный ключ,
+  9. Партиционированные таблицы: ключ партиционирования входит в первичный ключ,
      иначе Postgres откажется создавать таблицу.
 
 Это не замена накатыванию на настоящую базу. Это дешёвая проверка, которая
@@ -51,8 +53,24 @@
 Была развилка: дописать CREATE SCHEMA в 017 (самодостаточность файла, как это
 уже сделано в 005, 008, 009, 012, 013) или ослабить проверку до «схема объявлена
 этим файлом или любым более ранним». Первый путь сломал бы sha256 у уже
-накатанного на стенде файла. Выбран второй: проверка 5 теперь смотрит
+накатанного на стенде файла. Выбран второй: проверка 5 (теперь 4) смотрит
 на схемы, накопленные по всем миграциям до текущей включительно.
+
+РЕШЕНИЕ MOS-116 (17.09.2026). Три находки приёмки MOS-114/MOS-105.
+Первая: RE_TABLE искал закрывающую скобку таблицы литералом «)» в начале
+строки — однострочный CREATE TABLE был невидим целиком, а не просто хуже
+разобран. Разбор таблиц переписан на поиск открывающей скобки регулярным
+выражением и подсчёт скобок посимвольно (с учётом кавычек) до парной
+закрывающей — это не зависит от переносов строк в принципе, а не только
+для одного случая. По той же причине колонки внутри тела таблицы теперь
+режутся по запятым верхнего уровня (split_clauses), а не по переносам строк:
+однострочная и многострочная запись дают одинаковый разбор. Вторая: проверка
+«схема использована, но не объявлена нигде» была подмножеством проверки
+«схема объявлена этим файлом или более ранним» — при пустом declared_so_far
+это одно и то же условие, проверка снята, номера пунктов ниже сдвинуты.
+Третья: precision/recall из tp/fp/fn считались трижды (evaluate_alerts,
+verdict, code/check_metrics.py) — вынесены в precision_recall() в
+predictive_metrics.py, остальные два места её зовут.
 """
 
 import re
@@ -123,18 +141,22 @@ DANGLING_OK = {
 }
 
 NAME = r'[a-z_]+(?:\.[a-z_]+)?'
-RE_TABLE = re.compile(r'^CREATE TABLE (?:IF NOT EXISTS )?(' + NAME + r')\s*\((.*?)^\)([^;]*);',
-                      re.M | re.S)
-RE_SCHEMA = re.compile(r'^CREATE SCHEMA (?:IF NOT EXISTS )?([a-z_]+)', re.M)
+# Только начало CREATE TABLE: где заканчивается тело, ищет find_tables()
+# посимвольным подсчётом скобок — регулярка для парной скобки не годится,
+# ей нужен якорь вроде «)» в начале строки, а якоря на переносы строк
+# зависеть не должны (MOS-116).
+RE_TABLE_START = re.compile(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(' + NAME + r')\s*\(', re.M)
+RE_SCHEMA = re.compile(r'CREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)', re.M)
 RE_REF = re.compile(r'REFERENCES\s+(' + NAME + r')\s*(?:\(\s*([a-z_]+)\s*\))?')
-RE_VIEW = re.compile(r'^CREATE (?:OR REPLACE )?(?:RECURSIVE )?(?:MATERIALIZED )?VIEW (' + NAME + ')',
-                     re.M)
-RE_FUNC = re.compile(r'^CREATE (?:OR REPLACE )?FUNCTION (' + NAME + r')\s*\(', re.M)
+RE_VIEW = re.compile(
+    r'CREATE\s+(?:OR\s+REPLACE\s+)?(?:RECURSIVE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(' + NAME + ')',
+    re.M)
+RE_FUNC = re.compile(r'CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(' + NAME + r')\s*\(', re.M)
 RE_ALTER_FK = re.compile(
-    r'ALTER TABLE (' + NAME + r')\s+ADD (?:CONSTRAINT [a-z_]+ )?FOREIGN KEY \(([a-z_]+)\)\s*'
-    r'REFERENCES\s+(' + NAME + r')\s*\(\s*([a-z_]+)\s*\)', re.S)
+    r'ALTER\s+TABLE\s+(' + NAME + r')\s+ADD\s+(?:CONSTRAINT\s+[a-z_]+\s+)?FOREIGN\s+KEY\s*'
+    r'\(([a-z_]+)\)\s*REFERENCES\s+(' + NAME + r')\s*\(\s*([a-z_]+)\s*\)', re.S)
 RE_COL = re.compile(r'^([a-z_]+)\s+((?:character varying|double precision|[a-z_]+)(?:\s*\([^)]*\))?)')
-RE_PARTITION = re.compile(r'PARTITION BY (?:RANGE|LIST|HASH)\s*\(\s*([a-z_]+)\s*\)')
+RE_PARTITION = re.compile(r'PARTITION\s+BY\s+(?:RANGE|LIST|HASH)\s*\(\s*([a-z_]+)\s*\)')
 
 CONSTRAINT_WORDS = ("PRIMARY KEY", "UNIQUE", "CHECK", "EXCLUDE", "CONSTRAINT", "FOREIGN")
 
@@ -174,13 +196,72 @@ def family(typ):
     return FAMILY.get(base, base)
 
 
+def _matching_paren(sql, open_idx):
+    """Индекс ')', парной '(' на open_idx. Кавычки учтены, вложенность тоже.
+
+    Заменяет старый якорь «закрывающая скобка стоит в начале строки»: тот
+    требовал определённой раскладки по строкам и не видел однострочный
+    CREATE TABLE вовсе (MOS-116). Подсчёт скобок работает при любой раскладке.
+    """
+    depth = 0
+    in_quotes = False
+    i = open_idx
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'":
+            in_quotes = not in_quotes
+        elif not in_quotes:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    raise ValueError(f"незакрытая скобка, открыта на позиции {open_idx}")
+
+
+def find_tables(sql):
+    """Все CREATE TABLE в sql: (имя, тело, хвост после ')', позиция начала).
+
+    Хвост — то, что стоит между ')' и ';' (например, PARTITION BY ...).
+    """
+    out = []
+    for m in RE_TABLE_START.finditer(sql):
+        open_idx = m.end() - 1
+        close_idx = _matching_paren(sql, open_idx)
+        semi = sql.index(";", close_idx)
+        out.append((m.group(1), sql[m.end():close_idx], sql[close_idx + 1:semi], m.start()))
+    return out
+
+
+def split_clauses(body):
+    """Тело CREATE TABLE на колонки и ограничения по запятым верхнего уровня.
+
+    Не по переносам строк (MOS-116): однострочная и многострочная запись
+    обязаны разбираться одинаково. Скобки (numeric(10,2)) и кавычки
+    (CHECK (a IN ('x,y'))) учтены, чтобы запятая внутри них клаузу не резала.
+    """
+    clauses, depth, in_quotes, start = [], 0, False, 0
+    for i, ch in enumerate(body):
+        if ch == "'":
+            in_quotes = not in_quotes
+        elif not in_quotes:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                clauses.append(body[start:i])
+                start = i + 1
+    clauses.append(body[start:])
+    return [c.strip() for c in clauses if c.strip()]
+
+
 def parse_body(body):
     """Колонки таблицы: {имя: тип}, колонки PK и одиночные UNIQUE, ссылки колонок."""
     cols, pk, uniq, refs = {}, [], set(), []
-    for line in body.split("\n"):
-        line = line.strip().rstrip(",")
-        if not line:
-            continue
+    for line in split_clauses(body):
         up = line.upper()
         if up.startswith(CONSTRAINT_WORDS):
             m = re.search(r'PRIMARY KEY\s*\(([^)]*)\)', line)
@@ -218,17 +299,16 @@ def scan(root):
         # События файла по смещению: CREATE TABLE добавляет таблицу,
         # REFERENCES и ALTER TABLE требуют, чтобы цель уже была.
         events = []
-        for m in RE_TABLE.finditer(sql):
-            t, body, tail = m.group(1), m.group(2), m.group(3)
+        for t, body, tail, pos in find_tables(sql):
             cols, pk, uniq, refs = parse_body(body)
             part = RE_PARTITION.search(tail)
             tables.setdefault(t, []).append(
                 dict(file=name, cols=cols, pk=pk, uniq=uniq,
                      partition_key=part.group(1) if part else None))
-            events.append((m.start(), "create", t))
+            events.append((pos, "create", t))
             for col, tgt, tcol in refs:
                 links.append((t, col, tgt, tcol, name))
-                events.append((m.start() + 1, "ref", (t, tgt)))
+                events.append((pos + 1, "ref", (t, tgt)))
         for m in RE_ALTER_FK.finditer(sql):
             t, col, tgt, tcol = m.groups()
             links.append((t, col, tgt, tcol, name))
@@ -255,38 +335,36 @@ def check(root=MIGRATIONS):
         for t in sorted(n for n in names if "." not in n):
             problems.append(f"{kind} без схемы: {t}")
 
-    # 2. схемы использованы, но не объявлены
-    used = {t.split(".")[0] for t in tables if "." in t}
-    for s in sorted(used - schemas):
-        problems.append(f"схема {s} используется, но нет CREATE SCHEMA {s}")
-
-    # 3. внешние ключи в никуда
+    # 2. внешние ключи в никуда
     for t, col, tgt, tcol, where in links:
         if tgt not in tables:
             problems.append(f"внешний ключ в никуда: {t}.{col} REFERENCES {tgt} (в {where})")
 
-    # 4. дубликаты имён
+    # 3. дубликаты имён
     for t, defs in tables.items():
         if len(defs) > 1:
             problems.append(f"таблица {t} объявлена дважды: "
                             f"{', '.join(d['file'] for d in defs)}")
 
-    # 5. каждая схема, которой пользуется файл, объявлена им самим или более
+    # 4. каждая схема, которой пользуется файл, объявлена им самим или более
     #    ранней миграцией. Миграции накатываются по одной и по порядку: файл,
     #    который кладёт таблицу в схему, не объявленную нигде до него включительно,
     #    упадёт при накатывании. Схема, объявленная раньше (004_events.sql —
     #    smvu, например), к моменту более позднего файла (017) уже есть в базе —
-    #    решение MOS-114 в шапке файла.
+    #    решение MOS-114 в шапке файла. Схема, не объявленная нигде вообще, —
+    #    частный случай (declared_so_far пустое даже в конце) и отдельной
+    #    проверки не требует — MOS-116 снял старую проверку 2, которая делала
+    #    ровно это же вторым способом.
     declared_so_far = set()
     for name in migrations(root):
         sql = strip_comments((root / name).read_text())
         declared_so_far |= set(RE_SCHEMA.findall(sql))
-        used_here = {x.split(".")[0] for x, _, _ in RE_TABLE.findall(sql) if "." in x}
+        used_here = {t.split(".")[0] for t, _, _, _ in find_tables(sql) if "." in t}
         for s in sorted(used_here - declared_so_far):
             problems.append(f"{name}: кладёт таблицы в схему {s}, но не объявляет "
                             f"её ни сам, ни более ранняя миграция")
 
-    # 7. типы по обе стороны ключа — одного семейства
+    # 6. типы по обе стороны ключа — одного семейства
     for t, col, tgt, tcol, where in links:
         if t not in tables or tgt not in tables:
             continue
@@ -302,7 +380,7 @@ def check(root=MIGRATIONS):
         if a != b:
             problems.append(f"типы не совпадают: {t}.{col} {a} -> {tgt}.{tcol} {b}")
 
-    # 8. колонки, похожие на ключ, без ключа
+    # 7. колонки, похожие на ключ, без ключа
     linked = {(t, col) for t, col, _, _, _ in links}
     basenames = {t.split(".")[-1] for t in tables}
     for t, defs in tables.items():
@@ -319,7 +397,7 @@ def check(root=MIGRATIONS):
         if t not in tables or col not in tables[t][0]["cols"]:
             problems.append(f"INTENTIONAL ссылается на несуществующую колонку {key}")
 
-    # 9. висячие таблицы
+    # 8. висячие таблицы
     connected = {t for t, _, tgt, _, _ in links for t in (t, tgt)}
     for t in sorted(set(tables) - connected):
         if t not in DANGLING_OK:
@@ -328,7 +406,7 @@ def check(root=MIGRATIONS):
         if t in connected:
             problems.append(f"DANGLING_OK устарел: {t} уже связана, убрать из списка")
 
-    # 10. ключ партиционирования входит в первичный ключ
+    # 9. ключ партиционирования входит в первичный ключ
     for t, defs in tables.items():
         d = defs[0]
         if d["partition_key"] and d["partition_key"] not in d["pk"]:
@@ -350,7 +428,21 @@ def _selfcheck():
     assert family("bigserial") == "bigint" and family("varchar(30)") == "text" != family("char(2)")
     m = RE_ALTER_FK.search("ALTER TABLE a.b\n    ADD CONSTRAINT x FOREIGN KEY (c) REFERENCES d.e(f);")
     assert m and m.groups() == ("a.b", "c", "d.e", "f")
+    # MOS-116: та же ALTER FK в одну строку — раньше литеральные пробелы между
+    # ключевыми словами требовали ровно одной раскладки, теперь \s+ везде.
+    one_line_fk = RE_ALTER_FK.search(
+        "ALTER TABLE a.b ADD CONSTRAINT x FOREIGN KEY (c) REFERENCES d.e(f);")
+    assert one_line_fk and one_line_fk.groups() == m.groups()
     assert RE_PARTITION.search(" PARTITION BY RANGE (read_time)").group(1) == "read_time"
+
+    # MOS-116: find_tables()/split_clauses не должны зависеть от переносов строк.
+    assert find_tables("CREATE TABLE a.b (id integer PRIMARY KEY);")[0][:2] == (
+        "a.b", "id integer PRIMARY KEY")
+    assert find_tables("CREATE TABLE a.b (\n    id integer PRIMARY KEY\n);")[0][:2] == (
+        "a.b", "\n    id integer PRIMARY KEY\n")
+    # numeric(10,2) внутри клаузы — запятая не режет колонку пополам.
+    assert split_clauses("price numeric(10,2) NOT NULL, id integer") == (
+        ["price numeric(10,2) NOT NULL", "id integer"])
 
     # Комментарий режется, а литерал с двумя дефисами внутри кавычек — нет.
     # Без этого определение таблицы обрубилось бы молча, а проверка осталась зелёной.
@@ -374,6 +466,28 @@ def _selfcheck():
         (root / "003_c.sql").write_text("CREATE TABLE baz.qux (\n    id integer PRIMARY KEY\n);\n")
         _, _, broken_problems = check(root)
         assert any("baz" in p and "не объявляет" in p for p in broken_problems), broken_problems
+
+    # MOS-116: битый образец в двух написаниях — однострочном и многострочном —
+    # обязан давать одну и ту же находку и один и тот же счётчик таблиц. Раньше
+    # RE_TABLE требовал ')' в начале строки и однострочный CREATE TABLE не видел
+    # вовсе: 98 таблиц вместо 99, находок 0 вместо 3.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "900_bad.sql").write_text("CREATE TABLE nowhere.t (id integer PRIMARY KEY);\n")
+        tables_one, _, problems_one = check(root)
+
+        (root / "900_bad.sql").write_text(
+            "CREATE TABLE nowhere.t (\n    id integer PRIMARY KEY\n);\n")
+        tables_multi, _, problems_multi = check(root)
+
+        assert len(tables_one) == len(tables_multi) == 1, (tables_one, tables_multi)
+        assert problems_one == problems_multi, (problems_one, problems_multi)
+        # Проверка 2 снята: старое сообщение проверка 4 не повторяет — она уже
+        # нашла то же самое своим текстом («не объявляет её ни сам, ни более
+        # ранняя миграция»), а не старым «используется, но нет CREATE SCHEMA».
+        assert not any("используется, но нет CREATE SCHEMA" in p for p in problems_one), \
+            problems_one
+        assert any("nowhere" in p and "не объявляет" in p for p in problems_one), problems_one
 
 
 def main():

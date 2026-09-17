@@ -81,6 +81,19 @@ def group_incidents(failures, window_minutes=10, group_key=None):
     return out
 
 
+def precision_recall(tp, fp, fn):
+    """Precision и recall из сырых счётчиков, без округления.
+
+    Единственное место с этой формулой (MOS-116): её звали трижды —
+    evaluate_alerts() для отчётных округлённых полей, verdict() для приёмочного
+    решения и code/check_metrics.py для строк М-18/М-19 — и три копии могли
+    разойтись молча, как уже было с числом инцидентов (166 вместо 176).
+    """
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    return precision, recall
+
+
 # ------------------------------------------------------------ оценка алертов
 
 
@@ -129,8 +142,7 @@ def evaluate_alerts(alerts, failures, horizon_hours=24, max_lead_hours=None,
 
     fp = sum(1 for i in range(len(alerts)) if not matched_to_failure[i])
 
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    precision, recall = precision_recall(tp, fp, fn)
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
     out = {
@@ -181,13 +193,13 @@ def verdict(metrics, min_precision=0.7, min_recall=0.5, min_lead_hours=24,
         share = metrics.get("lead_under_24h_share")
         share_ok = share is not None and share <= max_under_share
         lead_ok = median_ok and share_ok
-    # Precision и recall считаем заново из tp/fp/fn, а не берём округлённые
-    # metrics["precision"]/["recall"]: evaluate_alerts округляет их до трёх знаков,
-    # и настоящие 0,7004 приехали бы как 0,700 и провалили бы строгое «больше 0,7»
-    # на ровном месте. Сравнение строгое: ровно 0,700 постановку не закрывает.
+    # Precision и recall считаем заново из tp/fp/fn через precision_recall(),
+    # а не берём округлённые metrics["precision"]/["recall"]: evaluate_alerts
+    # округляет их до трёх знаков, и настоящие 0,7004 приехали бы как 0,700
+    # и провалили бы строгое «больше 0,7» на ровном месте. Сравнение строгое:
+    # ровно 0,700 постановку не закрывает.
     tp, fp, fn = metrics["tp"], metrics["fp"], metrics["fn"]
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    precision, recall = precision_recall(tp, fp, fn)
     checks = {
         "precision": precision > min_precision,
         "recall": recall > min_recall,
