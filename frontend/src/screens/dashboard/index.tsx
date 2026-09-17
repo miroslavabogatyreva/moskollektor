@@ -16,17 +16,28 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchRisks().then(setRows).catch((e) => setError(String(e)))
+    fetchRisks()
+      .then(setRows)
+      .catch((e) => setError(String(e)))
   }, [])
 
-  const sorted = useMemo(() => (rows ? [...rows].sort((a, b) => a.risk_rank - b.risk_rank) : []), [rows])
+  const sorted = useMemo(
+    () => (rows ? [...rows].sort((a, b) => a.risk_rank - b.risk_rank) : []),
+    [rows],
+  )
 
   const stats = useMemo(() => {
     if (!rows || rows.length === 0) return null
     const stale = rows.filter((r) => r.is_stale).length
-    const computedAtMax = rows.reduce((max, r) => (r.computed_at > max ? r.computed_at : max), rows[0].computed_at)
+    const computedAtMax = rows.reduce(
+      (max, r) => (r.computed_at > max ? r.computed_at : max),
+      rows[0].computed_at,
+    )
     const horizons = new Set(rows.map((r) => r.horizon_h))
-    const horizonLabel = horizons.size === 1 ? `${[...horizons][0]} ч` : `${Math.min(...horizons)}–${Math.max(...horizons)} ч`
+    const horizonLabel =
+      horizons.size === 1
+        ? `${[...horizons][0]} ч`
+        : `${Math.min(...horizons)}–${Math.max(...horizons)} ч`
     return { total: rows.length, stale, computedAtMax, horizonLabel }
   }, [rows])
 
@@ -45,7 +56,11 @@ export function DashboardScreen(_props: Record<string, unknown>) {
           <Tile
             label="Устаревших расчётов"
             value={String(stats.stale)}
-            sub={stats.stale > 0 ? 'расчёт по объекту не прошёл, показан прошлый результат' : 'все свежие'}
+            sub={
+              stats.stale > 0
+                ? 'расчёт по объекту не прошёл, показан прошлый результат'
+                : 'все свежие'
+            }
           />
           <Tile
             label="Данные по состоянию на"
@@ -99,7 +114,10 @@ export function DashboardScreen(_props: Record<string, unknown>) {
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <article class="p-3 rounded flex flex-col gap-1" style="background:var(--bg-surface); border:1px solid var(--border-subtle)">
+    <article
+      class="p-3 rounded flex flex-col gap-1"
+      style="background:var(--bg-surface); border:1px solid var(--border-subtle)"
+    >
       <h3 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
         {label}
       </h3>

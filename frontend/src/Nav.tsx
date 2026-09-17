@@ -2,7 +2,10 @@ import { ROUTES } from './routes'
 
 export function Nav({ currentPath }: { currentPath: string }) {
   return (
-    <header class="flex items-center gap-5 px-5 py-2.5 min-h-16 text-white" style="background:var(--brand-header-bg)">
+    <header
+      class="flex items-center gap-5 px-5 py-2.5 min-h-16 text-white"
+      style="background:var(--brand-header-bg)"
+    >
       <div class="flex items-baseline gap-2.5 mr-auto">
         <b style="font-family:var(--font-display)" class="text-[17px] font-semibold tracking-tight">
           Москоллектор

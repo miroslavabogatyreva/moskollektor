@@ -94,7 +94,13 @@ export function MapScreen(_props: Record<string, unknown>) {
             <text x={PADDING} y={baselineY + 28} font-size="11" fill="var(--text-muted)">
               ПК0
             </text>
-            <text x={AXIS_WIDTH - PADDING} y={baselineY + 28} font-size="11" fill="var(--text-muted)" text-anchor="end">
+            <text
+              x={AXIS_WIDTH - PADDING}
+              y={baselineY + 28}
+              font-size="11"
+              fill="var(--text-muted)"
+              text-anchor="end"
+            >
               ПК{maxPicket}
             </text>
             {onAxis.map((s) => (
