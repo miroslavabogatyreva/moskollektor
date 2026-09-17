@@ -57,6 +57,13 @@ run "НФ-43"        "роли и доступ"           env PYTHONPATH=backend
 run "—"            "запись прогноза"         env PYTHONPATH=backend "$PY" -m app.worker.publish
 run "—"            "клиент модели"           env PYTHONPATH=backend "$PY" -m app.mlclient.client
 run "—"            "выбор факторов"          env PYTHONPATH=backend "$PY" -m app.worker.run --selfcheck
+# Методику порогов считают ДВА модуля: verdict() в predictive_metrics.py и
+# строки_качества() в check_metrics.py. Формула в них одна и та же, написана
+# дважды, и разойтись они могут молча. Обе самопроверки базы не требуют, поэтому
+# стоят здесь, а не в блоке, который ждёт DATABASE_URL: строгое «больше 0,7»
+# должно проверяться в каждом прогоне, а не только на стенде.
+run "М-18, М-19"   "строгость порогов"       python3 code/predictive_metrics.py
+run "М-18, М-20"   "строки качества"         python3 code/check_metrics.py --selfcheck
 if [ -n "${DATABASE_URL:-}" ]; then
   run "М-18, М-21"  "методика метрик"        python3 code/check_metrics.py
 else
