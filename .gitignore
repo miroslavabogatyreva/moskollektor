@@ -31,3 +31,6 @@ inventory_scan/
 # Фронт: зависимости и сборка, пересоздаются npm install / npm run build
 frontend/node_modules/
 frontend/dist/
+
+# Локальные разрешения Claude Code, у каждого свои.
+.claude/settings.local.json
