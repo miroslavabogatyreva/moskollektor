@@ -62,12 +62,23 @@ run "—"            "выбор факторов"          env PYTHONPATH=backe
 # дважды, и разойтись они могут молча. Обе самопроверки базы не требуют, поэтому
 # стоят здесь, а не в блоке, который ждёт DATABASE_URL: строгое «больше 0,7»
 # должно проверяться в каждом прогоне, а не только на стенде.
+run "М-10, М-13"   "правило заявки"          env PYTHONPATH=backend "$PY" -m app.domain.order_rules
 run "М-18, М-19"   "строгость порогов"       python3 code/predictive_metrics.py
 run "М-18, М-20"   "строки качества"         python3 code/check_metrics.py --selfcheck
 if [ -n "${DATABASE_URL:-}" ]; then
   run "М-18, М-21"  "методика метрик"        python3 code/check_metrics.py
 else
   skip_msg "М-18, М-21" "методика метрик — задайте DATABASE_URL"
+fi
+
+# М-12 здесь помечена половиной строки нарочно: check_orders.py спрашивает базу
+# и видит внешний ключ, а строка приёмки требует ещё и перехода заявка → прогноз
+# → заявка через API и на экране. Пока Q6.5 не сдана, GET /api/orders отдаёт
+# пустой список, и зелёная строка отсюда означает «связь лежит в данных».
+if [ -n "${DATABASE_URL:-}" ]; then
+  run "М-09…М-11, М-13, М-12 наполовину" "заявки на стенде" python3 code/check_orders.py
+else
+  skip_msg "М-09…М-13" "заявки на стенде — задайте DATABASE_URL"
 fi
 run "—"            "шаблоны объяснений"      python3 code/check_explain_templates.py
 
