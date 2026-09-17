@@ -108,7 +108,7 @@ backend/app/
   domain/           правила заявок, объяснение прогноза
 frontend/src/screens/{dashboard, map, log, orders}
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
-delivery/           презентация и страница сдачи
+delivery/           check-all.sh — один прогон всех проверок; презентация и страница сдачи
 ```
 
 ## Четыре правила, которые легко нарушить
