@@ -198,6 +198,59 @@ check_order_forecast_link
 check "GET /api/audit (dispatcher1, должен отказать)"       403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/audit"
 check "GET /api/audit (admin1)"                             200 -H "X-User-Login: admin1"      "$BASE_URL/api/audit"
 
+# Пороги и горизонт (MOS-110, Q4.12) — НФ-44 держит их на том же уровне, что
+# журнал аудита: диспетчеру оба метода отвечают 403, а не только PUT.
+check "GET /api/settings (dispatcher1, должен отказать)"    403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/settings"
+check "GET /api/settings (admin1)"                          200 -H "X-User-Login: admin1"      "$BASE_URL/api/settings"
+# Отказ у диспетчера падает на require(), тело запроса не читается — в базу
+# ничего не уходит, откатывать здесь нечего.
+check "PUT /api/settings/forecast_horizon_h (dispatcher1)"  403 -X PUT -H "X-User-Login: dispatcher1" \
+    -H "Content-Type: application/json" -d '{"value": 30}' "$BASE_URL/api/settings/forecast_horizon_h"
+
+# Проверка по улову, не по счётчику (нашла 58): audit.user_action пишет КАЖДЫЙ
+# запрос, включая GET-запросы этого же прогона, — разница длины «до/после»
+# не изолирует именно наш PUT. Печатаем оба числа для картины, но ассерт ищет
+# конкретную строку: метод, путь, код 200 и details.old/new словами «24»/«30».
+check_settings_audit_trail() {
+    label="PUT /api/settings/forecast_horizon_h (admin1) со следом old/new в audit"
+    before=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit" \
+        | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+
+    curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
+        -H "Content-Type: application/json" -d '{"value": 30}' \
+        "$BASE_URL/api/settings/forecast_horizon_h"
+    audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
+    after=$(echo "$audit_body" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+
+    # Вернуть горизонт как было — до печати результата, чтобы откат случился
+    # даже если сама проверка ниже упадёт.
+    curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
+        -H "Content-Type: application/json" -d '{"value": 24}' \
+        "$BASE_URL/api/settings/forecast_horizon_h"
+
+    found=$(echo "$audit_body" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+for r in rows:
+    d = r.get('details') or {}
+    if (r.get('method') == 'PUT' and r.get('path') == '/api/settings/forecast_horizon_h'
+            and r.get('status_code') == 200 and d.get('old') == '24' and d.get('new') == '30'):
+        print('да')
+        break
+else:
+    print('нет')
+" 2>/dev/null)
+
+    echo "строк в audit.user_action: до $before, после $after"
+    if [ "$found" = "да" ]; then
+        echo "OK          $label"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> строка PUT .../forecast_horizon_h, код 200, old=24/new=30 не найдена"
+        mismatch=1
+    fi
+}
+check_settings_audit_trail
+
 echo
 echo "--- тело последнего успешного /api/audit (admin1), для примера формы ответа ---"
 curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit" | head -c 2000

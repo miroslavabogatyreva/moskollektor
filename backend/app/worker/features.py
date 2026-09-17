@@ -3,22 +3,19 @@
 Двадцать два числа на участок, в порядке контракта. Порядок сам является контрактом:
 переставленные колонки дают уверенный неверный ответ без единой ошибки.
 
-**Это самая дорогая стадия расчёта** — 24,3 секунды из 32 на весь расчёт.
+**Это самая дорогая стадия расчёта** — 20 секунд из 41 целевых (docs/HLD.md разд. 6.1).
 Оптимизируем чтение, а не модель: сам инференс занимает 1,2 мс.
 
 УСТРОЙСТВО. Четыре запроса к базе вместо одного большого, и свёртка в Python:
 
   1. feat.section_daily за 365 суток   → девять признаков по участку
   2. smvu.channel                      → сколько каналов числится за участком
-  3. feat.channel_daily за 365 суток   → счётчики и фоны по каналу
+  3. smvu.reading за 7 и за 365 суток  → счётчики и фоны по каналу
   4. smvu.reading за 30 суток          → интервалы между записями по каналу
 
-Замеры стадии целиком на всех 3 173 участках, стенд 135.106.216.101, срез
-30.06.2026 23:59:59. Было 17.09.2026 до правки — 48,5 с, из них 25,7 с счётчики
-по каналу и 22,4 с интервалы. Стало 24,3 с: счётчики читают суточную свёртку
-feat.channel_daily (миграция 022) и стоят 4,2 с, интервалы обходятся одной
-группировкой вместо двух и стоят 19,0 с. Вектор признаков при этом не изменился
-ни в одной из 69 806 клеток — 3 173 участка × 22 признака, сверка попарная.
+Замер стадии целиком на всех 3 173 участках, стенд 135.106.216.101, 16.09.2026:
+56,9 с четырьмя запросами, из них 26,1 с — счётчики по каналу за год. Норматив
+приёмки 300 с закрыт, целевые по HLD 20 с — нет; ускорение это задача Q3.5.
 
 Почему свёртка в Python, а не в SQL. Девять признаков считаются ПО КАНАЛУ
 (docs/HLD.md разд. 6.3-трис: «все четыре считаются внутри канала, относительно
@@ -55,7 +52,6 @@ scope: channel и не сказано, как он попадает в стро�
 import asyncio
 import math
 import os
-import time
 from datetime import datetime, timedelta
 
 from app.mlclient.client import FEATURE_NAMES
@@ -124,90 +120,26 @@ SELECT section_id, count(*) AS каналов
 
 # Счётчики по каналу за неделю плюс два фона. Фон за 8 недель берётся ДО недельного
 # окна, иначе неделя посчиталась бы сама против себя и отношение всегда было бы около 1.
-#
-# ЧИТАЕМ СУТОЧНУЮ СВЁРТКУ feat.channel_daily, А НЕ ЖУРНАЛ (задача Q3.8, MOS-99).
-# Замер 17.09.2026 на стенде: этот запрос по журналу стоил 25,7 с из 48,5 с всей
-# стадии и читал 60 096 602 строки smvu.reading. Та же свёртка по суткам — 662 596
-# строк, в девяносто один раз меньше.
-#
-# ПОЧЕМУ ЗАПРОС НЕ СВЁЛСЯ К ОДНОМУ СКАНУ СВЁРТКИ. Окна считаются от МОМЕНТА среза,
-# а свёртка сложена по СУТКАМ, и границы окон почти никогда не приходятся на полночь.
-# При срезе 30.06.2026 23:59:59 недельное окно начинается 23.06 в 23:59:59 — это
-# значит, что сутки 23.06 попадают в окно не целиком, а последней своей секундой.
-# Округлить такие сутки в любую сторону значит соврать: выбросить их целиком —
-# потерять запись, взять целиком — прибавить чужие сутки.
-#
-# Поэтому запрос сложен из двух частей. Часть «сут» берёт из свёртки ЦЕЛЫЕ сутки,
-# исключая пять граничных дат. Часть «край» читает журнал ровно за эти пять суток
-# и применяет к ним ТЕ ЖЕ условия по времени, что стояли в прежнем запросе, —
-# текст условий переписан дословно, поэтому смысл окон не поменялся ни на секунду.
-# Пять суток журнала — это около 825 тысяч строк вместо шестидесяти миллионов.
-#
-# Граничных дат ровно пять: начало недельного окна, начало месячного, начало окна
-# восьми недель, начало годового и сами сутки среза. Последние нужны потому, что
-# при боевом расчёте срез приходится на середину дня, и без них в счётчики попали
-# бы записи, сделанные ПОСЛЕ момента расчёта.
 ПО_КАНАЛУ = """
-WITH границы AS (
-    SELECT ARRAY[($1::timestamptz - interval '365 days')::date,
-                 ($1::timestamptz - interval '63 days')::date,
-                 ($1::timestamptz - interval '30 days')::date,
-                 ($1::timestamptz - interval '7 days')::date,
-                 $1::date] AS дни
-), сут AS (
-    SELECT d.channel_id,
-           sum(d.readings_total)  FILTER (WHERE d.day > ($1::timestamptz - interval '7 days')::date)   AS n7,
-           sum(d.readings_total)  FILTER (WHERE d.day > ($1::timestamptz - interval '30 days')::date)  AS n30,
-           sum(d.fault_total)     FILTER (WHERE d.day > ($1::timestamptz - interval '7 days')::date)   AS chatter7,
-           sum(d.undefined_total) FILTER (WHERE d.day > ($1::timestamptz - interval '7 days')::date)   AS undefined7,
-           sum(d.readings_total)  FILTER (WHERE d.day <= ($1::timestamptz - interval '7 days')::date
-                                            AND d.day >  ($1::timestamptz - interval '63 days')::date) AS n8w,
-           sum(d.readings_total)                                                                       AS n365,
-           max(d.last_read)                                                                            AS last_read
-      FROM feat.channel_daily d, границы г
-     WHERE d.day > ($1::timestamptz - interval '365 days')::date
-       AND d.day <= $1::date
-       AND NOT (d.day = ANY(г.дни))
-     GROUP BY d.channel_id
-), край AS (
-    SELECT r.channel_id,
-           count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days')                    AS n7,
-           count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '30 days')                   AS n30,
-           count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
-                              AND r.value_text = 'Неисправен')                             AS chatter7,
-           count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
-                              AND r.value_text = 'Неопределен')                            AS undefined7,
-           count(*) FILTER (WHERE r.read_time <= $1::timestamptz - interval '7 days'
-                              AND r.read_time >  $1::timestamptz - interval '63 days')                  AS n8w,
-           count(*)                                                                        AS n365,
-           max(r.read_time)                                                                AS last_read
-      FROM границы г
-      CROSS JOIN LATERAL unnest(г.дни) AS g(день)
-      JOIN smvu.reading r ON r.read_time >= g.день::timestamptz
-                         AND r.read_time <  (g.день + 1)::timestamptz
-     WHERE r.read_time > $1::timestamptz - interval '365 days'
-       AND r.read_time <= $1::timestamptz
-     GROUP BY r.channel_id
-)
 SELECT c.channel_id,
        c.section_id,
        c.collector,
-       coalesce(s.n7, 0)         + coalesce(k.n7, 0)         AS n7,
-       coalesce(s.n30, 0)        + coalesce(k.n30, 0)        AS n30,
-       coalesce(s.chatter7, 0)   + coalesce(k.chatter7, 0)   AS chatter7,
-       coalesce(s.undefined7, 0) + coalesce(k.undefined7, 0) AS undefined7,
-       coalesce(s.n8w, 0)        + coalesce(k.n8w, 0)        AS n8w,
-       coalesce(s.n365, 0)       + coalesce(k.n365, 0)       AS n365,
-       greatest(s.last_read, k.last_read)                    AS last_read
-  FROM smvu.channel c
-  LEFT JOIN сут  s ON s.channel_id = c.channel_id
-  LEFT JOIN край k ON k.channel_id = c.channel_id
- WHERE c.section_id IS NOT NULL
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days')                    AS n7,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '30 days')                   AS n30,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
+                          AND r.value_text = 'Неисправен')                             AS chatter7,
+       count(*) FILTER (WHERE r.read_time > $1::timestamptz - interval '7 days'
+                          AND r.value_text = 'Неопределен')                            AS undefined7,
+       count(*) FILTER (WHERE r.read_time <= $1::timestamptz - interval '7 days'
+                          AND r.read_time >  $1::timestamptz - interval '63 days')                  AS n8w,
+       count(*)                                                                        AS n365,
+       max(r.read_time)                                                                AS last_read
+  FROM smvu.reading r
+  JOIN smvu.channel c ON c.channel_id = r.channel_id
+ WHERE r.read_time > $1::timestamptz - interval '365 days' AND r.read_time <= $1::timestamptz
+   AND c.section_id IS NOT NULL
    AND ($2::int[] IS NULL OR c.section_id = ANY($2))
-   -- Прежний запрос соединял канал с журналом внутренним JOIN, то есть канал
-   -- без единой записи за год в выдачу не попадал вовсе. Условие повторяет это:
-   -- канал, которого нет ни в свёртке, ни на краю, не писал за год ни разу.
-   AND (s.channel_id IS NOT NULL OR k.channel_id IS NOT NULL)
+ GROUP BY c.channel_id, c.section_id, c.collector
 """
 
 # Интервалы между записями канала: медиана, p95, доля длинных, залипание значения.
@@ -219,28 +151,8 @@ SELECT c.channel_id,
 # Всё одним запросом, хотя порог p95 известен только после первой группировки.
 # Разными запросами это стоило 14,9 с + 15,4 с на полном парке (замер 16.09.2026):
 # оба читали одно и то же окно в 30 суток, то есть 4,6 млн строк журнала дважды.
-#
-# ОДНА ГРУППИРОВКА ВМЕСТО ДВУХ (задача Q3.5, 17.09.2026). Раньше запрос группировал
-# 4,6 млн строк по каналу, а потом соединял результат ОБРАТНО с тем же CTE и
-# группировал второй раз — только затем, чтобы сосчитать интервалы длиннее p95.
-# Второй проход стоил половины запроса. Теперь недельные интервалы канала едут
-# из первой же группировки массивом, и длинные считаются по этому массиву:
-# массив короткий, в нём интервалы канала за неделю, а не за месяц и не по парку.
-#
-# AS MATERIALIZED оставлено: без него планировщик вправе подставить тело CTE
-# в оба места и вернуть тот же двойной проход по журналу.
-#
-# ponytail: 19 секунд этого запроса — потолок без нового индекса. Уходят они
-# не на сортировку, а на сам проход: 4 649 941 строка журнала за 30 суток, три
-# оконные функции поверх. Это проверено, а не предположено — 17.09.2026 я поднял
-# work_mem с 64 МБ до 512 МБ, сортировка перестала уходить на диск
-# («external merge Disk: 183 888 kB» сменилось на «quicksort Memory: 395 762 kB»),
-# а время не изменилось вовсе: 15,81 с против 15,77 с. Настройки сервера трогать
-# не нужно. Убрать проход можно только индексом
-# (channel_id, read_time, journal_id) на smvu.reading — третья колонка нужна
-# из-за тай-брейка, — но это индекс по 313 млн строк, и строить его ради
-# 19 секунд при нормативе 300 незачем. Упрёмся в норматив на железе заказчика —
-# вот тогда.
+# AS MATERIALIZED здесь не украшение: без него планировщик вправе подставить
+# тело CTE в оба места и вернуть тот же двойной проход.
 ИНТЕРВАЛЫ = """
 WITH подряд AS MATERIALIZED (
     SELECT r.channel_id,
@@ -264,16 +176,18 @@ WITH подряд AS MATERIALIZED (
            max(дельта)   FILTER (WHERE read_time > $1::timestamptz - interval '7 days') AS макс_дельта_7d,
            bool_or(read_time > $1::timestamptz - interval '7 days'
                    AND value_text IS NOT NULL
-                   AND value_text = пред1 AND value_text = пред2)          AS freeze3,
-           array_agg(дельта) FILTER (WHERE read_time > $1::timestamptz - interval '7 days'
-                                      AND дельта IS NOT NULL)              AS дельты_7d
+                   AND value_text = пред1 AND value_text = пред2)          AS freeze3
       FROM подряд GROUP BY channel_id
 )
 SELECT п.channel_id, п.медиана, п.p95, п.интервалов, п.интервалов_7d,
        п.макс_дельта_7d, п.freeze3,
-       coalesce(cardinality(п.дельты_7d), 0)                               AS всего_7d,
-       (SELECT count(*) FROM unnest(п.дельты_7d) д WHERE д > п.p95)        AS длинных_7d
-  FROM порог п
+       count(*) FILTER (WHERE д.read_time > $1::timestamptz - interval '7 days'
+                          AND д.дельта IS NOT NULL)                        AS всего_7d,
+       count(*) FILTER (WHERE д.read_time > $1::timestamptz - interval '7 days'
+                          AND д.дельта > п.p95)                            AS длинных_7d
+  FROM порог п JOIN подряд д USING (channel_id)
+ GROUP BY п.channel_id, п.медиана, п.p95, п.интервалов, п.интервалов_7d,
+          п.макс_дельта_7d, п.freeze3
 """
 
 # Отказы. Таблица пуста и её никто не строит — запрос оставлен рабочим,
@@ -300,25 +214,6 @@ SELECT c.collector, count(*) AS отказов
 # ---------------------------------------------------------------------------
 # Свёртки
 # ---------------------------------------------------------------------------
-
-class Хронометр:
-    """Сколько миллисекунд занял каждый запрос стадии.
-
-    Один общий счёт «сборка признаков 48 секунд» не говорит, что чинить.
-    Разбивка по запросам показывает это прямо: 16.09.2026 из 56,9 секунды
-    26,1 приходилось на один запрос ПО_КАНАЛУ, и оптимизировать надо было его,
-    а не стадию вообще.
-    """
-
-    def __init__(self):
-        self.мс = {}
-
-    async def запрос(self, имя, корутина):
-        t = time.perf_counter()
-        итог = await корутина
-        self.мс[имя] = round((time.perf_counter() - t) * 1000)
-        return итог
-
 
 def _худший(значения, как="max"):
     """Худший канал участка. None среди значений не считается за ответ."""
@@ -348,45 +243,12 @@ async def покрытие_свёртки(conn, as_of, section_ids=None):
         as_of, section_ids)
 
 
-async def освежить_канальную_свёртку(conn, as_of):
-    """Догнать feat.channel_daily до среза. Возвращает (суток, обновлено, догоняли_год).
-
-    **Свежесть входа — забота самой стадии, а не того, кто её зовёт.** Суточную
-    свёртку по участку догоняет отдельная стадия расчёта, и это уже однажды вышло
-    боком: пока функция не заполняла silent_channels, признак silent_sensor_share
-    выходил ровно нулём у всех участков без единой ошибки. Свёртку по каналу
-    я догоняю здесь, в том же коде, который её читает, — тогда «забыли позвать»
-    становится невозможным состоянием.
-
-    **Проверка связывает два числа, а не сторожит одно.** Сколько суток года
-    покрыто свёрткой по каналу и сколько — свёрткой по участку. Они обязаны
-    сойтись: обе строятся из одного журнала за одно и то же окно. Один счётчик
-    здесь обманул бы — «в таблице 662 596 строк» верно и тогда, когда последние
-    полгода в ней отсутствуют.
-    """
-    суток_канала, суток_участка = await conn.fetchrow(
-        """SELECT (SELECT count(DISTINCT day) FROM feat.channel_daily
-                    WHERE day > $1::date - 365 AND day <= $1::date),
-                  (SELECT count(DISTINCT day) FROM feat.section_daily
-                    WHERE day > $1::date - 365 AND day <= $1::date)""", as_of)
-
-    # Первый прогон после миграции 022: таблица пуста или отстала. Догоняем год
-    # целиком — на стенде это 41 секунда и 662 596 строк, один раз. Дальше
-    # хватает двух суток, как и свёртке по участку.
-    догоняли_год = суток_канала < суток_участка
-    начало = 365 if догоняли_год else 1
-    обновлено = await conn.fetchval(
-        "SELECT feat.refresh_channel_daily($1::date - $2::int, $1::date)", as_of, начало)
-    return суток_канала, обновлено, догоняли_год
-
-
 async def собрать(conn, as_of: datetime, section_ids: list[int] | None = None):
     """Матрица признаков: (участки, значения, диагностика).
 
     Значения идут строго в порядке FEATURE_NAMES — это контракт, а не удобство.
     """
-    часы = Хронометр()
-    суток = await часы.запрос("покрытие_свёртки", покрытие_свёртки(conn, as_of, section_ids))
+    суток = await покрытие_свёртки(conn, as_of, section_ids)
     if суток == 0:
         raise RuntimeError(
             f"feat.section_daily не покрывает ни одних суток до {as_of:%d.%m.%Y}. "
@@ -394,13 +256,8 @@ async def собрать(conn, as_of: datetime, section_ids: list[int] | None = 
             f"«датчики молчали весь год». Сначала догнать свёртку: "
             f"SELECT feat.refresh_section_daily(...)")
 
-    суток_канала, свёрнуто_каналов, догоняли_год = await часы.запрос(
-        "освежить_канальную_свёртку", освежить_канальную_свёртку(conn, as_of))
-
-    участок = {r["section_id"]: dict(r) for r in
-               await часы.запрос("по_участку", conn.fetch(ПО_УЧАСТКУ, as_of, section_ids))}
-    каналов = {r["section_id"]: r["каналов"] for r in
-               await часы.запрос("каналов_на_участке", conn.fetch(КАНАЛОВ_НА_УЧАСТКЕ, section_ids))}
+    участок = {r["section_id"]: dict(r) for r in await conn.fetch(ПО_УЧАСТКУ, as_of, section_ids)}
+    каналов = {r["section_id"]: r["каналов"] for r in await conn.fetch(КАНАЛОВ_НА_УЧАСТКЕ, section_ids)}
     # Участки, которых свёртка не знает: молчат дольше года. Досчитываем им
     # last_day по журналу, иначе days_since_last_reading выйдет null и участок
     # останется без объяснения ровно там, где оно очевиднее всего.
@@ -408,27 +265,18 @@ async def собрать(conn, as_of: datetime, section_ids: list[int] | None = 
     досчитано = 0
     if нет_свёртки and len(нет_свёртки) <= ПРЕДЕЛ_ДОСЧЁТА:
         участок.update({r["section_id"]: {"last_day": r["last_day"]}
-                        for r in await часы.запрос(
-                            "последняя_запись_без_окна",
-                            conn.fetch(ПОСЛЕДНЯЯ_ЗАПИСЬ_БЕЗ_ОКНА, нет_свёртки))})
+                        for r in await conn.fetch(ПОСЛЕДНЯЯ_ЗАПИСЬ_БЕЗ_ОКНА, нет_свёртки)})
         досчитано = len(нет_свёртки)
 
-    каналы = [dict(r) for r in
-              await часы.запрос("по_каналу", conn.fetch(ПО_КАНАЛУ, as_of, section_ids))]
+    каналы = [dict(r) for r in await conn.fetch(ПО_КАНАЛУ, as_of, section_ids)]
     интервалы = {r["channel_id"]: dict(r) for r in
-                 await часы.запрос("интервалы", conn.fetch(
-                     ИНТЕРВАЛЫ, as_of, section_ids, ОКНО_ИНТЕРВАЛОВ_СУТОК))}
+                 await conn.fetch(ИНТЕРВАЛЫ, as_of, section_ids, ОКНО_ИНТЕРВАЛОВ_СУТОК)}
 
-    эпизодов = await часы.запрос(
-        "эпизодов", conn.fetchval("SELECT count(*) FROM smvu.fault_episode"))
+    эпизодов = await conn.fetchval("SELECT count(*) FROM smvu.fault_episode")
     отказы_участка = ({r["section_id"]: r["отказов"] for r in
-                       await часы.запрос("отказы_участка",
-                                         conn.fetch(ОТКАЗЫ_ПО_УЧАСТКУ, as_of, section_ids))}
-                      if эпизодов else {})
+                       await conn.fetch(ОТКАЗЫ_ПО_УЧАСТКУ, as_of, section_ids)} if эпизодов else {})
     отказы_коллектора = ({r["collector"]: r["отказов"] for r in
-                          await часы.запрос("отказы_коллектора",
-                                            conn.fetch(ОТКАЗЫ_ПО_КОЛЛЕКТОРУ, as_of))}
-                         if эпизодов else {})
+                          await conn.fetch(ОТКАЗЫ_ПО_КОЛЛЕКТОРУ, as_of)} if эпизодов else {})
 
     # Канальные признаки складываем по участку, коллекторные — по коллектору.
     по_участку_каналы, по_коллектору, коллектор_участка, писало_30 = {}, {}, {}, {}
@@ -511,19 +359,12 @@ async def собрать(conn, as_of: datetime, section_ids: list[int] | None = 
 
     диагностика = {
         "суток_свёртки": суток,
-        "суток_канальной_свёртки": суток_канала,
-        "строк_канальной_свёртки_обновлено": свёрнуто_каналов,
-        "догоняли_канальную_свёртку_за_год": догоняли_год,
         "участков": len(участки),
         "каналов_писавших": len(каналы),
         "эпизодов_отказа": эпизодов,
         "участков_без_свёртки": len(нет_свёртки),
         "досчитано_по_журналу": досчитано,
         "as_of": as_of.isoformat(),
-        # Разбивка по запросам. Без неё «стадия 3 тормозит» — это жалоба,
-        # а не находка: чинить нечего, пока не названо, какой именно запрос.
-        "мс_запросов": dict(sorted(часы.мс.items(), key=lambda п: -п[1])),
-        "мс_запросов_всего": sum(часы.мс.values()),
     }
     return участки, значения, диагностика
 
