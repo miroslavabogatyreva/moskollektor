@@ -109,7 +109,12 @@ backend/app/
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026
   archive/          DuckDB поверх Parquet
   mlclient/         вызов модели по контракту
-  domain/           правила заявок, объяснение прогноза
+  domain/           правила заявок (order_rules.py, state_machine.py — переходы
+                    maint.notification.status и maint.work_order.status по CHECK
+                    в db/migrations/001_assets.sql; смысл переходов брали из SAP-
+                    прототипа code/toir_state_machine.py, но значения статусов — из
+                    базы, там они другие),
+                    объяснение прогноза (explain.py)
 frontend/src/screens/{dashboard, map, log, orders}
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
 delivery/           check-all.sh — один прогон всех проверок; презентация и страница сдачи
