@@ -156,7 +156,7 @@ def факторы(значения: list[list[float | None]], имена: list[
     return итог
 
 
-async def прогон(conn, as_of: datetime | None = None, horizon_h: int = ГОРИЗОНТ_Ч,
+async def прогон(conn, as_of: datetime | None = None, horizon_h: int | None = None,
                  предел: int | None = None) -> dict:
     """Один расчёт. Возвращает итог прогона — то же, что легло в pred.run."""
     часы = Секундомер()
@@ -167,10 +167,23 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int = Г�
     as_of = as_of or datetime.now().astimezone()
     run_id = await conn.fetchval(
         "INSERT INTO pred.run (status, as_of) VALUES ('running', $1) RETURNING run_id", as_of)
-    print(f"прогон {run_id}, срез {as_of:%d.%m.%Y %H:%M}, горизонт {horizon_h} ч")
 
     итог, ошибка, участков, посчитано = "failed", None, None, None
     try:
+        # MOS-110 (Q4.12): горизонт правит администратор, не пересборка образа.
+        # Чтение — ПОСЛЕ INSERT INTO pred.run и внутри try (нашла 58): если его
+        # поднять выше блокировки, как было сначала, упавший тик (например, до
+        # наката 020_app_setting.sql) не оставляет в pred.run ни строки, и со
+        # стороны это выглядит не как «расчёт упал», а как «расчёт перестал
+        # запускаться» — здесь тот же тик падает и остаётся в журнале как failed.
+        if horizon_h is None:
+            значение = await conn.fetchval(
+                "SELECT value FROM ref.app_setting WHERE key = 'forecast_horizon_h'")
+            # is None, не or: пустая таблица — это None, а явный 0 — это 0, и это
+            # разные случаи (нашла 44) — or молча подменил бы настоящий 0 на 24.
+            horizon_h = int(значение) if значение is not None else ГОРИЗОНТ_Ч
+        print(f"прогон {run_id}, срез {as_of:%d.%m.%Y %H:%M}, горизонт {horizon_h} ч")
+
         # --- 0-бис. Кто отвечает и на тех ли признаках обучен -------------------
         модель = await asyncio.to_thread(client.get_model)
         client.проверить_контракт(модель)
@@ -327,7 +340,11 @@ def _selfcheck():
 async def main():
     р = argparse.ArgumentParser(description="Прогон расчёта прогноза")
     р.add_argument("--as-of", help="момент среза, например 2026-06-30T23:59:59+03:00")
-    р.add_argument("--horizon", type=int, default=ГОРИЗОНТ_Ч)
+    # Без default: не заданный флаг обязан дойти до прогон() как None и попасть
+    # в ту же ветку чтения из ref.app_setting, что и вызов планировщика без
+    # горизонта, а не тихо подменяться на ГОРИЗОНТ_Ч раньше, чем таблица
+    # успеет сказать своё слово (нашла 44).
+    р.add_argument("--horizon", type=int, help="без флага — из ref.app_setting")
     р.add_argument("--limit", type=int, help="считать только первые N участков")
     р.add_argument("--rollback", action="store_true", help="откатить всё, что записали")
     р.add_argument("--selfcheck", action="store_true", help="проверка без базы и без модели")

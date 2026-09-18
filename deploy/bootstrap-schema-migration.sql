@@ -10,7 +10,11 @@
 --
 -- sha256 посчитаны тем же способом, что в migrate.py (sha256 текста файла
 -- в кодировке utf-8), 15.09.2026 по содержимому файлов как они лежат
--- в этом коммите.
+-- в этом коммите. Строка 020_app_setting.sql добавлена 18.09.2026 (MOS-110,
+-- Q4.12) по тому же поводу: файл накатан на стенде руками через psql раньше,
+-- чем появился в git, — 58 проверила уловом (повтор в транзакции с откатом
+-- дал DuplicateTableError), без этой строки следующий migrate попробует
+-- накатить его второй раз и уронит api и worker целиком.
 CREATE TABLE IF NOT EXISTS public.schema_migration (
     filename   text PRIMARY KEY,
     sha256     text NOT NULL,
@@ -24,5 +28,6 @@ INSERT INTO public.schema_migration (filename, sha256) VALUES
     ('004_events.sql', 'e0152dd91649d250544acd9fd4308f47c4f044763b417715f0ed446255321ab9'),
     ('005_xref.sql', '55bbf4ba833666157eee1211ad0ac4d3c6ae8abd8b8ebead60455d88acff4b85'),
     ('006_explain_templates.sql', '5bb6e20191b41442c6d4be6e841dc8520adf18ebb741c40c2dce0c0cfaa8c8a9'),
-    ('013_setpoints.sql', '7510005622f792daa914cf2a037653ed1198e42e04a1a718d7b3bc07dc181d1c')
+    ('013_setpoints.sql', '7510005622f792daa914cf2a037653ed1198e42e04a1a718d7b3bc07dc181d1c'),
+    ('020_app_setting.sql', '23e8a3254110e2a2f138cf41a4752fd9009f2f04990fbe1ed729ecf150d7be66')
 ON CONFLICT (filename) DO NOTHING;
