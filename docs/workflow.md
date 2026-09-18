@@ -174,7 +174,15 @@ git update-ref refs/heads/master $COMMIT $(git rev-parse HEAD)
    а срез всех.
 2. **Образ — только после «принято» и только из закоммиченного.** Контекст сборки
    на сервере получают не из дерева, а из origin:
-   `git archive origin/master backend deploy db contracts | ssh root@стенд "tar -x -C /srv/moskollektor"`.
+   `git archive origin/master backend db contracts deploy/docker-compose.yml deploy/nginx/nginx.conf | ssh root@стенд "tar -x -C /srv/moskollektor"`.
+   Каталог `deploy/` целиком в архив не кладут: `deploy/nginx/html/index.html` в git —
+   заглушка «Стенд поднят» из блока Q1, а nginx монтирует ровно этот каталог, куда
+   `rsync` кладёт собранный фронт. 17.09.2026 оркестратор написал в команде `deploy`
+   целиком, и заглушка перезаписала приложение на стенде — пропали все экраны разом,
+   а код ответа остался 200, потому что `try_files` отдаёт заглушку на любой маршрут.
+   Поймала проверяющая сессия содержимым, не кодом. Фронт выкладывают отдельно и только
+   из origin: `git archive origin/master frontend` во временный каталог, `npm ci && npm
+   run build`, `rsync -a --delete dist/` в `deploy/nginx/html/`.
    Перед сборкой — одна строка всем, кто в бэкенде: «собираю api и worker».
 3. **После сборки — три хеша, а не один.** `docker exec <контейнер> sha256sum <файл>` —
    живой контейнер; `docker run --rm --entrypoint sha256sum <образ> <файл>` — образ;
