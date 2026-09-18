@@ -5,3 +5,11 @@ export function formatDateTime(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+// String(new Error('401 Unauthorized')) даёт "Error: 401 Unauthorized" — лишнее
+// слово перед текстом, который и так понятен диспетчеру. .catch у нас всегда
+// ловит либо Error (из throw new Error(...)), либо что-то нетипичное — тогда
+// показываем как есть.
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
