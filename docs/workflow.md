@@ -183,7 +183,11 @@ git update-ref refs/heads/master $COMMIT $(git rev-parse HEAD)
    Поймала проверяющая сессия содержимым, не кодом. Фронт выкладывают отдельно и только
    из origin: `git archive origin/master frontend` во временный каталог, `npm ci && npm
    run build`, `rsync -a --delete dist/` в `deploy/nginx/html/`.
-   Перед сборкой — одна строка всем, кто в бэкенде: «собираю api и worker».
+   Собирают все три образа одной командой — `docker compose build api worker migrate`:
+   18.09.2026 58 нашла, что `migrate` на стенде отстал на два дня от `api`, потому что
+   сборка накануне назвала только два сервиса; первая полная пересборка накатила бы
+   миграцию, которую уже положили руками, и уронила бы стенд.
+   Перед сборкой — одна строка всем, кто в бэкенде: «собираю api, worker и migrate».
 3. **После сборки — три хеша, а не один.** `docker exec <контейнер> sha256sum <файл>` —
    живой контейнер; `docker run --rm --entrypoint sha256sum <образ> <файл>` — образ;
    `git show origin/master:<файл> | sha256sum` — источник. Разошлись контейнер и образ —
