@@ -22,7 +22,7 @@ async def list_audit(
     rows = await conn.fetch(
         """
         SELECT a.action_id, a.occurred_at, a.method, a.path, a.status_code,
-               u.login, u.full_name
+               a.details, u.login, u.full_name
         FROM audit.user_action a
         LEFT JOIN ref.app_user u ON u.user_id = a.user_id
         ORDER BY a.occurred_at DESC

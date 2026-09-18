@@ -5,13 +5,15 @@
 -- Коды разрешений называются по методу, который они открывают: risks.read
 -- закрывает GET /api/risks (Q4.3), forecasts.read — GET /api/forecasts(/{id})
 -- (Q4.3), orders.read — GET /api/orders(/{id}) (Q4.6), audit.read — GET /api/audit
--- (Q4.10), objects.read — GET /api/objects/{id}(/readings) (Q4.4). Новый метод
--- API добавляет свой permission_code сюда же — это правка сида, а не схемы.
+-- (Q4.10), objects.read — GET /api/objects/{id}(/readings) (Q4.4), settings.read
+-- и settings.write — GET и PUT /api/settings(/{key}) (Q4.12). Новый метод API
+-- добавляет свой permission_code сюда же — это правка сида, а не схемы.
 --
 -- Кто что получает — НФ-44: диспетчер видит мониторинг и дашборды (риски,
 -- прогнозы, заявки), но не настройки и не журнал аудита; администратор видит
--- всё, включая audit.read. Аналитик и инженер по ТЗ разд. 12 тоже читают
--- мониторинг — им обоим нужна та же тройка, что диспетчеру.
+-- всё, включая audit.read, settings.read и settings.write. Аналитик и инженер
+-- по ТЗ разд. 12 тоже читают мониторинг — им обоим нужна та же тройка, что
+-- диспетчеру, настроек им НФ-44 не даёт так же, как диспетчеру.
 --
 -- Накатывать после db/migrations/008_rbac.sql:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/rbac.sql
@@ -33,7 +35,9 @@ INSERT INTO ref.role_permission (role_code, permission_code) VALUES
     ('admin',      'forecasts.read'),
     ('admin',      'orders.read'),
     ('admin',      'objects.read'),
-    ('admin',      'audit.read')
+    ('admin',      'audit.read'),
+    ('admin',      'settings.read'),
+    ('admin',      'settings.write')
 
 ON CONFLICT (role_code, permission_code) DO NOTHING;
 
