@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { formatDateTime } from '../lib/format'
+import { errorMessage, formatDateTime } from '../lib/format'
 
 /* Карточка прогноза — задача 6.6 (MOS-61). До этой задачи адресуемого экрана
    на forecast_id не было вовсе: прогнозы жили только внутри карточки объекта
@@ -19,6 +19,7 @@ interface ForecastDetail {
   horizon_h: number
   probability: number
   risk_rank: number
+  as_of: string
   computed_at: string
   order_ids?: number[]
 }
@@ -45,7 +46,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         return r.json() as Promise<ForecastDetail>
       })
       .then((d) => d && setData(d))
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
   }, [forecastId])
 
   if (notFound) {
@@ -76,8 +77,11 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
     <main class="p-5 flex flex-col gap-5">
       <div>
         <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Прогноз от {formatDateTime(data.computed_at)}
+          Прогноз
         </h1>
+        <p style="color:var(--text-secondary)">
+          Срез данных {formatDateTime(data.as_of)} · расчёт {formatDateTime(data.computed_at)}
+        </p>
         <p style="color:var(--text-secondary)">
           Участок{' '}
           <a
@@ -106,7 +110,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         </h2>
         {data.order_ids === undefined ? (
           <p class="text-sm" style="color:var(--text-muted)">
-            Метод GET /api/forecasts/{'{id}'} пока не отдаёт связанные заявки — ждём задачу 6.5.
+            Метод GET /api/forecasts/{'{id}'} пока не отдаёт связанные заявки.
           </p>
         ) : orderIds.length === 0 ? (
           <p class="text-sm" style="color:var(--text-muted)">

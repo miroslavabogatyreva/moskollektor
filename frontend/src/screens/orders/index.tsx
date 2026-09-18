@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchOrders } from './api'
 import { PRIORITY_LABEL, type OrderListItem } from './types'
-import { formatDateTime } from '../../lib/format'
+import { errorMessage, formatDateTime } from '../../lib/format'
 
 /* Экран заявок — задача 6.7 (MOS-62). Данные читаются из GET /api/orders,
    форма ответа — contracts/examples/orders/order-list.json (moskollektor-44,
@@ -24,7 +24,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
   useEffect(() => {
     fetchOrders()
       .then(setItems)
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
   }, [])
 
   return (

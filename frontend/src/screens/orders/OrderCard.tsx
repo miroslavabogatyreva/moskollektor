@@ -3,13 +3,18 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchOrder } from './api'
 import { PRIORITY_LABEL, type OrderDetail } from './types'
-import { formatDateTime } from '../../lib/format'
+import { errorMessage, formatDateTime } from '../../lib/format'
 
 /* Карточка заявки — задачи 6.6 и 6.7 (MOS-61, MOS-62). Форма ответа —
    contracts/examples/orders/order.json (moskollektor-44, 17.09.2026).
    Четыре поля М-11 — объект, вид работ, срок, обоснование — показаны
-   первым блоком, не вперемешку со служебными. Ссылка «Прогноз от …» — М-12,
-   ведёт на /forecasts/:id (ForecastCard, задача 6.6). */
+   первым блоком, не вперемешку со служебными. Ссылка на прогноз — М-12,
+   ведёт на /forecasts/:id (ForecastCard, задача 6.6). Подписана «срез
+   данных», не «прогноз от»: forecast.as_of — момент среза выгрузки,
+   на которой считали, а не время самого расчёта (то же различие, что
+   у ObjectCard.current_risk.computed_at) — на /forecasts/:id заголовок
+   называет оба момента, и подписи должны совпадать, иначе клик по одной
+   дате приводит на экран с другой (нашёл оркестратор, 17.09.2026). */
 
 export function OrderCard({ orderId }: { orderId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<OrderDetail | null>(null)
@@ -23,7 +28,7 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
     setError(null)
     fetchOrder(orderId)
       .then((d) => (d ? setData(d) : setNotFound(true)))
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
   }, [orderId])
 
   if (notFound) {
@@ -87,7 +92,7 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
           class="text-sm"
           style="color:var(--link)"
         >
-          Прогноз от {formatDateTime(data.forecast.as_of)}
+          Прогноз, срез данных {formatDateTime(data.forecast.as_of)}
         </a>
       </section>
     </main>

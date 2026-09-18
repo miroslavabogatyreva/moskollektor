@@ -71,7 +71,12 @@ async def get_forecast(
     row = await conn.fetchrow(
         """
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
-               f.probability, f.risk_rank, f.factors, r.started_at AS computed_at,
+               f.probability, f.risk_rank, f.factors,
+               -- Два разных момента: as_of — срез данных, на котором считали
+               -- (снимок выгрузки заказчика); computed_at (r.started_at) —
+               -- когда сам расчёт выполнился. Разводит их та же подпись, что
+               -- в ObjectCard.current_risk (оркестратор, 17.09.2026).
+               r.as_of, r.started_at AS computed_at,
                -- М-12: заявки, которых породил этот прогноз (Q6.5, MOS-60).
                -- Массив, не null: заявок может не быть, метода — не бывает.
                COALESCE(
