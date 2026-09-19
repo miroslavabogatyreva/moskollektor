@@ -98,6 +98,9 @@ moskollektor/
 │   ├── check_licenses.py     лицензии api/worker/nginx/фронта — приёмка НФ-82
 │   ├── gen_answers_doc.py    собирает docs/meetings/2026-09-19-ответы-заказчика.md
 │   │                          из присланного xlsx; `--check` сверяет число пар
+│   ├── check_plan.py         сверяет docs/plan.md сам с собой: счётчики блоков
+│   │                          против строк задач, повторы номеров, ссылки
+│   │                          на строки приёмки; `--selftest` проверяет саму проверку
 │   ├── load_weather.py       архив погоды из Open-Meteo в dataset/weather.csv
 │   ├── predictive_metrics.py методика метрик приёмки
 │   └── *.json                справочники из Регламента: нормативы, виды работ
