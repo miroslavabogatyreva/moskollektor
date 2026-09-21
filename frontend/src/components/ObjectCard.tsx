@@ -19,6 +19,26 @@ interface Channel {
   sensor_kind: string
 }
 
+// GET /api/objects/{id}/channels (MOS-151, Q5.25) — не паспорт, а факт отказов
+// по журналу: сколько раз канал уходил в "Неисправен"/"Неопределен" дольше часа,
+// когда в последний раз и сколько в среднем лежит. faults_cnt = 0 — не пустая
+// строка, а исправная линия: печатаем "отказов не было", а не вычёркиваем канал.
+interface ChannelFaults {
+  channel_id: number
+  system_kind: string
+  sensor_kind: string
+  name: string
+  is_active: boolean
+  faults_cnt: number
+  last_fault_at: string | null
+  avg_duration_h: number | null
+}
+
+interface ChannelFaultsResponse {
+  total: number
+  items: ChannelFaults[]
+}
+
 interface CurrentRisk {
   run_id: number
   probability: number
@@ -89,6 +109,9 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   const [readings, setReadings] = useState<Reading[] | null>(null)
   const [readingsError, setReadingsError] = useState<string | null>(null)
 
+  const [channelFaults, setChannelFaults] = useState<ChannelFaults[] | null>(null)
+  const [channelFaultsError, setChannelFaultsError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!sectionId) return
     setData(null)
@@ -107,6 +130,19 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
       })
       .then((d) => d && setData(d))
       .catch((e) => setError(String(e)))
+
+    setChannelFaults(null)
+    setChannelFaultsError(null)
+    // limit=200: на участке бывает до 100 каналов (MOS-151), с запасом на вырост.
+    fetch(`/api/objects/${sectionId}/channels?limit=200`, {
+      headers: { 'X-User-Login': API_LOGIN },
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+        return r.json() as Promise<ChannelFaultsResponse>
+      })
+      .then((d) => setChannelFaults(d.items))
+      .catch((e) => setChannelFaultsError(String(e)))
   }, [sectionId])
 
   useEffect(() => {
@@ -205,6 +241,54 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </table>
       </section>
 
+      <section>
+        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
+          Отказы по каналам
+        </h2>
+        {channelFaultsError && (
+          <p style="color:var(--state-error)">
+            Не удалось загрузить отказы по каналам: {channelFaultsError}
+          </p>
+        )}
+        {channelFaults === null && !channelFaultsError && (
+          <p style="color:var(--text-muted)">Загрузка…</p>
+        )}
+        {channelFaults && (
+          <table class="w-full text-sm" style="border-collapse:collapse">
+            <thead>
+              <tr>
+                {['Датчик', 'Канал', 'Отказов', 'Последний', 'В среднем лежит'].map((h) => (
+                  <th
+                    key={h}
+                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
+                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {channelFaults.map((c) => (
+                <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
+                  <td class="px-2 py-2">{c.sensor_kind}</td>
+                  <td class="px-2 py-2 num">{c.channel_id}</td>
+                  <td class="px-2 py-2 num">{c.faults_cnt}</td>
+                  <td class="px-2 py-2 num">
+                    {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}
+                  </td>
+                  <td class="px-2 py-2 num">
+                    {c.faults_cnt === 0 || c.avg_duration_h == null
+                      ? 'в строю'
+                      : `${c.avg_duration_h.toFixed(1).replace('.', ',')} ч`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       {risk && (
         <section>
           <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
@@ -218,8 +302,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
             </div>
             <div style="color:var(--text-secondary)">
-              Данные по состоянию на {new Date(risk.as_of).toLocaleDateString('ru-RU')} —
-              момент среза выгрузки заказчика, не время расчёта
+              Данные по состоянию на {new Date(risk.as_of).toLocaleDateString('ru-RU')} — момент
+              среза выгрузки заказчика, не время расчёта
             </div>
           </div>
 
