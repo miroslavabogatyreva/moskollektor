@@ -158,6 +158,7 @@ moskollektor-service/
 ├── contracts/            ЕДИНСТВЕННОЕ место, где живёт граница с ML
 │   ├── features.v1.yaml          вход: имена признаков, типы, единицы, окна
 │   ├── predict.v1.schema.json    JSON Schema запроса и ответа /predict
+│   ├── failure.v3.json           определение отказа, на котором учили модель v3
 │   └── README.md                 правила изменения контракта
 ├── db/migrations/        нумерованные .sql, порядок — в разделе 5.4
 ├── db/seed/              типы событий, уставки Регламента, нормативы ТО
@@ -1118,6 +1119,11 @@ CREATE TABLE ref.object_xref (
                             коллектора для ML-команды — и роль ml_ro
                             только на чтение схем smvu и ref
                             (задача `Q7.14`, MOS-145)
+030_model_failure_value.sql smvu.model_failure_value — словарь отказа модели
+                            v3 из contracts/failure.v3.json — и эпизоды
+                            по нему в smvu.model_failure_episode. Экранные
+                            smvu.fault_rule и smvu.fault_episode не меняются
+                            (MOS-133, строка плана 2.21)
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
