@@ -46,6 +46,22 @@ rsync -av nikolay-hakaton@135.106.216.101:/srv/moskollektor-hakaton-data/books/ 
 Скачанные PDF обратно в git не попадут: правило `docs/books/*.pdf` стоит
 в `.gitignore`. Рядом с книгами на сервере лежит `README.txt` с этими же командами.
 
+## Бандл репозитория ML-команды тоже лежит там
+
+```
+/srv/moskollektor-hakaton-data/ml-bundle
+```
+
+Бандл репозитория ML-команды `lct-task8-sep20v3_20260920.bundle`, 1,1 МБ, ветка
+`autoresearch/sep20v3`, коммит `e76d69c8`. Нужен, чтобы сверить выписки
+в `docs/proof/2026-09-21-model-v3/excerpts.md` с источником. Забрать:
+
+```
+rsync -av nikolay-hakaton@135.106.216.101:/srv/moskollektor-hakaton-data/ml-bundle/ ./
+```
+
+sha256: 501f742b9ed6036af90a1bac3e44c3586d8825e8ca23cae3ae67b22a80f0e5c6
+
 ## Учётки
 
 - **`root`** — у Мирославы, вход по ключу.
