@@ -1100,6 +1100,11 @@ CREATE TABLE ref.object_xref (
                             журнал пишет изменение плюс пульс, а не каждый
                             расчёт. Плюс четыре настройки в ref.app_setting
                             (задача `Q3.13`, MOS-147)
+027_forecast_legacy_reason.sql
+                            пятое значение write_reason — legacy: строки,
+                            написанные до политики, не выдают себя
+                            за изменения. Граница берётся из applied_at
+                            миграции 026 в public.schema_migration
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
