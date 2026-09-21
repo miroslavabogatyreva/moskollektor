@@ -194,6 +194,13 @@ def evaluate_alerts(alerts, failures, horizon_hours=24, max_lead_hours=None,
         "lead_under_24h_share": (
             round(sum(1 for x in leads if x < 24) / len(leads), 3) if leads else None),
         "horizon_hours": horizon_hours,   # нужен verdict(), см. ниже
+        # Сами упреждения, по одному на попадание, в часах и без округления.
+        # Нужны гистограмме в code/check_metrics_report.py: без них её пришлось бы
+        # строить вторым отбором пар «отказ — предупреждение», а две реализации
+        # одного отбора расходятся молча — в этом проекте так уже вышло с числом
+        # инцидентов, 166 вместо 176. Медиана и корзины теперь считаются из одного
+        # списка, и сумма корзин обязана сойтись с tp.
+        "lead_hours": leads,
     }
     if observed_object_days:
         out["false_alarms_per_1000_object_days"] = round(
@@ -328,6 +335,12 @@ def _demo():
 
     m = evaluate_alerts(alerts, failures, horizon_hours=24,
                         observed_object_days=2000)
+    # Упреждения отдаются списком, и он обязан совпасть с tp по длине: гистограмма
+    # в check_metrics_report.py строится из него, а сумма её корзин сверяется с tp.
+    assert len(m["lead_hours"]) == m["tp"], m
+    # 48, а не 72: отказ закрывает САМОЕ ПОЗДНЕЕ подходящее предупреждение —
+    # дубль от 02.01, а не первое от 01.01. Список это правило и фиксирует.
+    assert m["lead_hours"] == [48.0], m["lead_hours"]
     assert m["tp"] == 1, m
     assert m["fn"] == 2, m
     # K-307 выдан позже порога и ни к чему не привязан -> FP; K-205 -> FP
