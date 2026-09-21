@@ -77,6 +77,39 @@ sha256: 501f742b9ed6036af90a1bac3e44c3586d8825e8ca23cae3ae67b22a80f0e5c6
   полный root у него и так был по правилу `NOPASSWD:ALL` строкой выше; членство
   в группе только убирает `sudo` перед каждой командой.
 
+### Учётка в базе для ML-команды — `ml_ro`, только чтение, с 21.09.2026
+
+Завела 21.09.2026 вместе с миграцией `db/migrations/029_ml_readonly.sql` (MOS-145).
+Николай считает прогноз по нашей базе, а не по выгрузке parquet, и суперпользователь
+`moskollektor` ему для этого не нужен.
+
+Права: `USAGE` и `SELECT` на схемы `smvu` и `ref`, плюс `ALTER DEFAULT PRIVILEGES`
+на будущие таблицы — без этой строки роль молча перестала бы видеть партиции
+`smvu.reading` за новые месяцы. Схемы `pred`, `permit`, `asset` и `audit` роли
+не видны: прогнозы, заявки и журнал доступа ей не нужны.
+
+**Пароль в git не едет.** Миграция создаёт роль без пароля, войти по ней нельзя.
+Пароль я задала на стенде и положила строкой подключения в
+`/home/nikolay-hakaton/ml_ro.env` — права `600`, владелец Николай:
+
+```
+PGHOST=127.0.0.1  PGPORT=5432  PGDATABASE=moskollektor  PGUSER=ml_ro  PGPASSWORD=...
+```
+
+Сменить пароль:
+
+```
+printf "ALTER ROLE ml_ro PASSWORD '%s';\n" "НОВЫЙ" \
+  | docker exec -i moskollektor-db-1 psql -U moskollektor -d moskollektor
+```
+
+Проверка прав 21.09.2026 — срабатыванием, а не статусом: чтение
+`smvu.channel_collector` дало 11 485 строк и 16 коллекторов, чтение журнала за
+30.06.2026 — 196 796 записей, `UPDATE smvu.channel` вернул
+`permission denied for table channel`, а `SELECT` из `pred.forecast` — отказ
+по схеме. Из контейнера Николая путь другой: сеть `moskollektor_default`, хост `db`,
+порт 5432 — наружу база по-прежнему не смотрит.
+
 ## Докер стоит с 15.09.2026
 
 До этого дня на сервере не было ни движка, ни плагина: `dpkg -l | grep -iE 'docker|containerd'`
