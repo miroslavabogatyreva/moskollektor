@@ -1,0 +1,14 @@
+# sha256 файлов, на которые ссылается docs/ml-training-report.md
+#
+# Источник — бандл ML-команды lct-task8-sep20v3_20260920.bundle,
+# ветка autoresearch/sep20v3, коммит e76d69c8a22a3ce128b9717d8f708c48f9943c0d.
+# Хеш самого бандла:
+# 501f742b9ed6036af90a1bac3e44c3586d8825e8ca23cae3ae67b22a80f0e5c6
+
+3ec380d78ae9713ab40f766877020c17bb9266dec9875b02bc88c97972a01369  autoresearch_v3/train.py
+1a5ab5e4e7eae539716a1faad4415a2327707d755503d1d19e1e889fa0ced1d2  autoresearch_v3/prepare_data.py
+a7d86d061ed7bc01ce6b1a6b4436c9f70d03c9c015fc9433b96617f5f9217b0e  scripts/ml_v3_holdout.py
+dddcbc937d587c3c0554ed5cba2d219d1317352756e27e847e20e36e82d0a84f  src/ml/serving/README.md
+61491ad5c078799a51a8c22d16fce0a7b87625b2aea5bb136a03980226eb5899  Dockerfile
+46d32dc6bf60b0be4d19e536525792f5a39ff961ee7a45619bec97df140fb557  docs/research/data_verification_20260915/episodes.md
+e9c6b5f544d3528bb985f4618f866691c988f38c04507eb0d4deaabd80010b44  docs/ml-training-report.md

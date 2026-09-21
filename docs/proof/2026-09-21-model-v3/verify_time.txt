@@ -1,0 +1,1 @@
+./.venv/bin/python scripts/ml_v3_holdout.py verify > verify_full.log 2>&1  519.02s user 185.53s system 197% cpu 5:56.94 total

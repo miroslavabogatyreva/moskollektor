@@ -1,0 +1,1 @@
+./.venv/bin/python autoresearch_v3/train.py > train_full_run2.log 2>&1  54.53s user 14.77s system 212% cpu 32.684 total
