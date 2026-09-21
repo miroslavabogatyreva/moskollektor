@@ -20,10 +20,21 @@ async def list_risks(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("risks.read")),
 ):
-    """Текущий риск по каждому участку — одна строка на участок (М-15)."""
+    """Текущий риск по каждому участку — одна строка на участок (М-15).
+
+    `as_of` — срез данных: момент, на который посчитаны признаки. Это НЕ время
+    расчёта. До 21.09.2026 поле называлось здесь `computed_at`, а в GET /api/forecasts
+    тем же именем ехало время работы расчёта — одно имя, две разные величины,
+    и клиент, читавший оба метода, сравнивал несравнимое (MOS-118). Теперь
+    `as_of` везде означает срез данных, `computed_at` — время расчёта.
+
+    Пока расчёт брал срез по текущей дате, разница была микросекундной и увидеть
+    её было нельзя; после MOS-142 срез идёт по краю выгрузки (30.06.2026), и две
+    даты расходятся на 83 суток.
+    """
     rows = await conn.fetch(
         """
-        SELECT section_id, probability, risk_rank, horizon_h, computed_at, is_stale
+        SELECT section_id, probability, risk_rank, horizon_h, as_of, is_stale
         FROM pred.forecast_current
         ORDER BY risk_rank
         """
@@ -40,7 +51,13 @@ async def list_forecasts(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("forecasts.read")),
 ):
-    """Прогнозы за период, время расчёта берётся из pred.run.started_at (М-16).
+    """Прогнозы за период (М-16). Две даты в каждой строке, и они значат разное.
+
+    `as_of` — срез данных, на котором считали (`pred.run.as_of`); `computed_at` —
+    время работы расчёта (`pred.run.started_at`). Раньше строка несла только вторую
+    дату, а GET /api/risks отдавал под этим же именем первую — MOS-118. Обе даты
+    рядом стоят дешевле одной: `pred.run` и так в соединении, лишнего чтения нет,
+    а читатель ответа видит, чем они отличаются, не заглядывая в документ.
 
     from/to — даты, а не моменты времени, и обе границы включительны. Раньше
     to сравнивался как timestamptz <= 'ГГГГ-ММ-ДД 00:00' и вырезал весь день,
@@ -79,7 +96,7 @@ async def list_forecasts(
     rows = await conn.fetch(
         f"""
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
-               f.probability, f.risk_rank, r.started_at AS computed_at
+               f.probability, f.risk_rank, r.as_of, r.started_at AS computed_at
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
@@ -98,6 +115,7 @@ async def list_forecasts(
                 "horizon_h": r["horizon_h"],
                 "probability": r["probability"],
                 "risk_rank": r["risk_rank"],
+                "as_of": r["as_of"],
                 "computed_at": r["computed_at"],
             }
             for r in rows

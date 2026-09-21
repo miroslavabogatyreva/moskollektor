@@ -30,8 +30,8 @@ export function DashboardScreen(_props: Record<string, unknown>) {
     if (!rows || rows.length === 0) return null
     const stale = rows.filter((r) => r.is_stale).length
     const computedAtMax = rows.reduce(
-      (max, r) => (r.computed_at > max ? r.computed_at : max),
-      rows[0].computed_at,
+      (max, r) => (r.as_of > max ? r.as_of : max),
+      rows[0].as_of,
     )
     const horizons = new Set(rows.map((r) => r.horizon_h))
     const horizonLabel =
@@ -99,7 +99,7 @@ export function DashboardScreen(_props: Record<string, unknown>) {
                 <td class="px-2 py-2 num">{r.section_id}</td>
                 <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
                 <td class="px-2 py-2 num">{r.horizon_h} ч</td>
-                <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>
+                <td class="px-2 py-2 num">{new Date(r.as_of).toLocaleString('ru-RU')}</td>
                 <td class="px-2 py-2" style={r.is_stale ? 'color:var(--state-warning)' : undefined}>
                   {r.is_stale ? 'устарело' : 'свежий'}
                 </td>

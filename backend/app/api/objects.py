@@ -54,8 +54,11 @@ async def get_object(
 
     current_risk = await conn.fetchrow(
         """
+        -- `as_of` у текущего риска — срез данных, `computed_at` у прогнозов ниже —
+        -- время работы расчёта. До MOS-118 оба поля звались `computed_at`, и в одном
+        -- ответе стояли два одинаковых имени с разным смыслом.
         SELECT fc.run_id, fc.probability, fc.risk_rank, fc.horizon_h,
-               fc.computed_at, fc.is_stale, f.direction, f.explanation_ru
+               fc.as_of, fc.is_stale, f.direction, f.explanation_ru
         FROM pred.forecast_current fc
         LEFT JOIN pred.forecast f ON f.run_id = fc.run_id AND f.section_id = fc.section_id
         WHERE fc.section_id = $1
