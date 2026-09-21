@@ -14,4 +14,8 @@ COPY db/migrations ./db/migrations
 # (docs/plan.md, Q7.2), и backend/app/mlclient/client.py читает файл в рантайме,
 # а не только на этапе разработки.
 COPY contracts ./contracts
+# Приёмочные проверки едут в образ: на стенде заказчика метрики М-18…М-21
+# доказывает запуск check_metrics.py внутри контейнера, а не наше слово.
+# Порядок запуска — docs/install.md, раздел «Проверки на приёмке» (MOS-120).
+COPY code ./code
 CMD ["python", "-m", "app.api.main"]

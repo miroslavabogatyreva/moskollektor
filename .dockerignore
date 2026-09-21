@@ -10,7 +10,12 @@ analysis/
 diagrams/
 final-presentation/
 dashboard/
-code/
+# Прототипы из code/ в образ не едут, КРОМЕ приёмочных проверок: на стенде
+# заказчика метрики М-18…М-21 доказывает check_metrics.py, а методику держит
+# predictive_metrics.py. Без них на приёмке предъявлять нечем (MOS-120).
+code/*
+!code/check_*.py
+!code/predictive_metrics.py
 .DS_Store
 **/__pycache__/
 *.pyc
