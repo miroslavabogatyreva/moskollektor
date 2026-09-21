@@ -27,7 +27,7 @@ HLD разд. 3.3 называет ещё три задания (полный р
 import argparse
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -56,14 +56,39 @@ async def тик_расчёт():
 
 
 async def тик_свёртка():
-    """НФ-73: только стадия 2 (свёртка), без блокировки — с полным прогоном не конфликтует."""
+    """НФ-73: только стадия 2 (свёртка), без блокировки — с полным прогоном не конфликтует.
+
+    **Каждый запуск оставляет строку в `feat.refresh_run`** (миграция 023). До
+    21.09.2026 свёртка писала только `print` в журнал контейнера, который живёт
+    до пересоздания: пропуск свёртки не видела ни одна проверка, а её задержку
+    нельзя было померить запросом. Строку заводим ДО вызова функции и закрываем
+    после — иначе свёртка, упавшая на середине, не оставила бы следа вовсе,
+    а это ровно тот случай, ради которого журнал и заведён.
+    """
     conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=60)
     try:
-        as_of = datetime.now().astimezone()
-        свёрнуто = await conn.fetchval(
-            "SELECT feat.refresh_section_daily($1::date - 1, $2::date)", as_of, as_of
+        refresh_id = await conn.fetchval(
+            "INSERT INTO feat.refresh_run (status) VALUES ('running') RETURNING refresh_id"
         )
-        print(f"свёртка: обновила {свёрнуто} строк")
+        try:
+            as_of = datetime.now().astimezone()
+            свёрнуто = await conn.fetchval(
+                "SELECT feat.refresh_section_daily($1::date - 1, $2::date)", as_of, as_of
+            )
+        except Exception as e:
+            await conn.execute(
+                "UPDATE feat.refresh_run SET status = 'failed', finished_at = now(), "
+                "error_text = $2 WHERE refresh_id = $1",
+                refresh_id, f"{type(e).__name__}: {e}"[:1000],
+            )
+            print(f"свёртка упала: {type(e).__name__}: {e}")
+            raise
+        await conn.execute(
+            "UPDATE feat.refresh_run SET status = 'done', finished_at = now(), "
+            "rows_updated = $2 WHERE refresh_id = $1",
+            refresh_id, свёрнуто,
+        )
+        print(f"свёртка {refresh_id}: обновила {свёрнуто} строк")
     finally:
         await conn.close()
 
@@ -126,16 +151,73 @@ async def _selfcheck():
     )
 
 
+def следующий_слот(минут, сейчас=None):
+    """Ближайший будущий момент, кратный интервалу от полуночи.
+
+    Зачем. `IntervalTrigger(minutes=60)` без `start_date` отсчитывает первый запуск
+    от старта планировщика, а не от круглого часа: контейнер, поднятый в 09:37,
+    считает в 10:37, 11:37 и так далее. Расписание оказывается отпечатком момента
+    выкладки, и после каждого пересоздания контейнера минута уезжает. 21.09.2026
+    так и вышло: `moskollektor-worker-1` пересоздали, слот «в 37 минут» пропал,
+    а в протоколе у нас записано «планировщик считает раз в час, в 37 минут» —
+    фраза, которая перестаёт быть верной при первой же выкладке.
+
+    Что даёт выравнивание. Расчёт идёт в 00 минут каждого часа, свёртка при
+    интервале 5 минут — в 00, 05, 10 и так далее, независимо от того, когда
+    подняли службу. Диспетчер знает, к какой минуте обновятся данные, а проверка
+    разрывов в `code/check_runtime.py` может сравнивать промежуток с нормой,
+    не гадая, от какого старта его отсчитывать.
+
+    Оговорка про сутки. Если интервал не делит 1440 минут нацело (например, 7),
+    последний слот суток окажется короче остальных: после 23:59 отсчёт начинается
+    заново от полуночи. Для наших 60 и 5 это не наступает, а для кривого интервала
+    лучше короткий слот раз в сутки, чем расписание, зависящее от момента старта.
+    """
+    сейчас = сейчас or datetime.now().astimezone()
+    полночь = сейчас.replace(hour=0, minute=0, second=0, microsecond=0)
+    прошло_мин = (сейчас - полночь).total_seconds() / 60
+    слот = (int(прошло_мин // минут) + 1) * минут
+    return полночь + timedelta(minutes=слот)
+
+
 async def _serve():
     scheduler = AsyncIOScheduler(timezone=os.environ.get("TZ", "Europe/Moscow"))
-    scheduler.add_job(тик_расчёт, IntervalTrigger(minutes=INTERVAL_MIN))
-    scheduler.add_job(тик_свёртка, IntervalTrigger(minutes=REFRESH_INTERVAL_MIN))
+    расчёт_с = следующий_слот(INTERVAL_MIN)
+    свёртка_с = следующий_слот(REFRESH_INTERVAL_MIN)
+    scheduler.add_job(
+        тик_расчёт, IntervalTrigger(minutes=INTERVAL_MIN, start_date=расчёт_с)
+    )
+    scheduler.add_job(
+        тик_свёртка, IntervalTrigger(minutes=REFRESH_INTERVAL_MIN, start_date=свёртка_с)
+    )
     scheduler.start()
     print(
-        f"планировщик запущен: расчёт каждые {INTERVAL_MIN} мин, "
-        f"свёртка каждые {REFRESH_INTERVAL_MIN} мин"
+        f"планировщик запущен: расчёт каждые {INTERVAL_MIN} мин "
+        f"(первый в {расчёт_с:%H:%M}), свёртка каждые {REFRESH_INTERVAL_MIN} мин "
+        f"(первая в {свёртка_с:%H:%M}); слоты выровнены по полуночи, "
+        f"а не по моменту запуска службы"
     )
     await asyncio.Event().wait()
+
+
+def _selfcheck_слоты():
+    """Выравнивание слотов. Базы не требует, поэтому идёт в каждом прогоне проверок."""
+    д = datetime.fromisoformat
+    # Час: контейнер подняли в 09:37 — первый расчёт всё равно в 10:00, а не в 10:37.
+    assert следующий_слот(60, д("2026-09-21 09:37:35")) == д("2026-09-21 10:00:00")
+    # Ровно на границе слот следующий, а не текущий: иначе задание встало бы
+    # в прошлое и APScheduler запустил бы его немедленно.
+    assert следующий_слот(60, д("2026-09-21 10:00:00")) == д("2026-09-21 11:00:00")
+    # Пять минут: 09:37 -> 09:40, а не 09:42.
+    assert следующий_слот(5, д("2026-09-21 09:37:35")) == д("2026-09-21 09:40:00")
+    # Последний слот суток: в 23:59 следующий — полночь, отсчёт начинается заново.
+    assert следующий_слот(60, д("2026-09-21 23:59:00")) == д("2026-09-22 00:00:00")
+    # Интервал, не делящий сутки: слоты всё равно от полуночи, а не от старта.
+    # 09:37 — это 577-я минута суток, 577 // 7 = 82, значит следующий слот 83·7 = 581,
+    # то есть 09:41. Число тут неочевидное нарочно: с круглым интервалом такая
+    # проверка прошла бы и при неверной формуле.
+    assert следующий_слот(7, д("2026-09-21 09:37:00")) == д("2026-09-21 09:41:00")
+    print("selfcheck слотов ok: 09:37 + час -> 10:00, граница, пять минут, полночь")
 
 
 def main():
@@ -144,6 +226,7 @@ def main():
         "--selfcheck", action="store_true", help="проверка блокировки без модели"
     )
     а = р.parse_args()
+    _selfcheck_слоты()
     asyncio.run(_selfcheck() if а.selfcheck else _serve())
 
 
