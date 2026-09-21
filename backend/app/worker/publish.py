@@ -65,10 +65,14 @@ async def записать(conn, run_id: int, as_of, horizon_h: int, direction: 
 
         # Полная перезапись, а не UPDATE по участкам: участок, выпавший из расчёта,
         # обязан исчезнуть из текущего прогноза, а не остаться там с прошлым числом.
+        # Колонка `as_of` (до миграции 024 называлась `computed_at`) — срез данных,
+        # а не время расчёта: сюда едет `as_of` прогона, тот же, что в pred.run.as_of.
+        # Время работы расчёта лежит в pred.run.started_at, и API отдаёт его под
+        # именем `computed_at` — одно имя, одна величина (MOS-118).
         await conn.execute("DELETE FROM pred.forecast_current")
         await conn.executemany(
             """INSERT INTO pred.forecast_current
-                   (section_id, run_id, computed_at, horizon_h, probability, risk_rank, is_stale, factors)
+                   (section_id, run_id, as_of, horizon_h, probability, risk_rank, is_stale, factors)
                VALUES ($1, $2, $3, $4, $5, $6, false, $7::jsonb)""",
             [(sid, run_id, as_of, horizon_h, float(p), место, json.dumps(ф, ensure_ascii=False))
              for sid, p, место, ф in zip(участки, вероятности, места, факторы)])

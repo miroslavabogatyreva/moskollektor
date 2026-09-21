@@ -6,9 +6,10 @@ import { DIRECTION_LABEL, type Direction } from '../lib/direction'
    по клику на маршрут /objects/:sectionId. Форма ответа GET /api/objects/{id}
    снята оркестратором с боевого контура 16.09.2026, поля ниже не выдуманы.
 
-   Два computed_at в одном ответе значат разное, и подписи это разводят:
-   current_risk.computed_at — момент среза данных (снимок выгрузки заказчика),
-   recent_forecasts[].computed_at — время расчёта (когда прогон действительно шёл). */
+   Две даты в одном ответе значат разное, и с 21.09.2026 это видно по именам
+   (MOS-118): current_risk.as_of — момент среза данных (снимок выгрузки заказчика),
+   recent_forecasts[].computed_at — время расчёта (когда прогон действительно шёл).
+   Раньше обе звались computed_at, и различить их можно было только по подписи. */
 
 interface Channel {
   channel_id: number
@@ -23,7 +24,7 @@ interface CurrentRisk {
   probability: number
   risk_rank: number
   horizon_h: number
-  computed_at: string
+  as_of: string
   is_stale: boolean
   direction: Direction
   explanation_ru: string | null
@@ -217,7 +218,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
             </div>
             <div style="color:var(--text-secondary)">
-              Данные по состоянию на {new Date(risk.computed_at).toLocaleDateString('ru-RU')} —
+              Данные по состоянию на {new Date(risk.as_of).toLocaleDateString('ru-RU')} —
               момент среза выгрузки заказчика, не время расчёта
             </div>
           </div>
