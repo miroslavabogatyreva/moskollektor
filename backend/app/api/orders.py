@@ -14,7 +14,7 @@ lead_hours и predicted_failure_at считаются той же формуло
 Две реализации одной величины расходятся молча (см. docstring order_rules.py),
 поэтому формула ровно одна.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
 from app.auth.deps import require
@@ -23,9 +23,7 @@ from app.domain.order_rules import запас_часов, момент_отка�
 
 router = APIRouter(prefix="/api")
 
-LIST_SQL = """
-SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
-       n.due_at, n.status, p.code AS priority_code, r.as_of, f.horizon_h
+FROM_SQL = """
   FROM maint.notification n
   JOIN asset.func_location l ON l.id = n.func_location_id
   JOIN ref.object_xref x     ON x.func_location_id = l.id
@@ -34,7 +32,20 @@ SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
   JOIN ref.priority p        ON p.id = n.priority_id
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
+"""
+
+COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
+
+# count(*) OVER() жил бы внутри строк LIST_SQL, а за последней страницей строк
+# нет — total подставлялся бы нулём вместо настоящего числа заявок (нашла 28,
+# 21.09.2026: GET /api/orders?offset=1000 отвечал total=0 при 224 заявках).
+# Отдельный COUNT_SQL от страницы не зависит, как и у /api/forecasts.
+LIST_SQL = f"""
+SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
+       n.due_at, n.status, p.code AS priority_code, r.as_of, f.horizon_h
+{FROM_SQL}
  ORDER BY n.due_at
+ LIMIT $1 OFFSET $2
 """
 
 DETAIL_SQL = """
@@ -82,13 +93,16 @@ SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
 
 @router.get("/orders")
 async def list_orders(
+    limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
+    offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("orders.read")),
 ):
-    rows = await conn.fetch(LIST_SQL)
+    total = await conn.fetchval(COUNT_SQL)
+    rows = await conn.fetch(LIST_SQL, limit, offset)
     return {
         "schema_version": "orders.v1",
-        "total": len(rows),
+        "total": total,
         "items": [
             {
                 "id": r["id"],

@@ -100,13 +100,49 @@ check "GET /api/forecasts (dispatcher1)"                    200 -H "X-User-Login
 # Расчёт (Q3) ещё не писал pred.forecast — 200 и пустой список, а не 404 и не 500.
 check "GET /api/forecasts/1 (dispatcher1, id не найден)"    404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts/1"
 
+# check, но берёт число из поля total тела {total, items} — постраничность
+# 4.13 (MOS-117) превратила и /api/forecasts, и /api/orders из голого массива
+# в такой объект, check_count() на них больше не годится: len() на объекте
+# считает ключи ("total","items" — всегда 2), а не строки.
+check_total() {
+    label="$1"; expected="$2"; shift 2
+    body=$(curl -s $CURL_OPTS "$@")
+    total=$(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
+    if [ "$expected" = ">0" ]; then
+        ok=$([ "$total" -gt 0 ] 2>/dev/null && echo yes || echo no)
+    else
+        ok=$([ "$total" = "$expected" ] && echo yes || echo no)
+    fi
+    if [ "$ok" = "yes" ]; then
+        echo "OK          $label -> total $total"
+    else
+        echo "РАСХОЖДЕНИЕ $label -> ждали total $expected, получили $total"
+        mismatch=1
+    fi
+}
+
 # Регрессия на границу дня (MOS-41): from=to=сегодня обязан вернуть данные,
 # если сегодня были прогоны, а не пустой список из-за строгого «<= полночь».
 TODAY=$(date +%Y-%m-%d)
-check_count "GET /api/forecasts?from=to=$TODAY (dispatcher1)" ">0" \
+check_total "GET /api/forecasts?from=to=$TODAY (dispatcher1), М-16 — данные есть" ">0" \
     -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts?from=$TODAY&to=$TODAY"
-check_count "GET /api/forecasts?from=to=2020-01-01 (день до старта проекта)" 0 \
+check_total "GET /api/forecasts?from=to=2020-01-01 (день до старта проекта)" 0 \
     -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts?from=2020-01-01&to=2020-01-01"
+
+# Постраничность (MOS-117, М-06): limit соблюдён, total — число совпадений
+# без обрезки страницей, а не длина items.
+check_forecasts_paging() {
+    label="GET /api/forecasts?limit=10, М-06 — limit соблюдён и total не урезан"
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts?limit=10")
+    echo "$body" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+items, total = d.get('items'), d.get('total')
+assert isinstance(items, list) and len(items) == 10, f'items: {len(items) if isinstance(items, list) else items!r}'
+assert isinstance(total, int) and total > 10, f'total: {total!r}'
+" && { echo "OK          $label"; } || { echo "РАСХОЖДЕНИЕ $label"; mismatch=1; }
+}
+check_forecasts_paging
 
 # Карточка объекта — паспорт, каналы, текущий риск, последние прогнозы (М-08).
 check "GET /api/objects/1 (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1"
@@ -133,21 +169,26 @@ check "GET /api/orders (dispatcher1)"                       200 -H "X-User-Login
 check "GET /api/orders/999999999 (заявки нет)"               404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/999999999"
 
 # М-16 требует не «метод отвечает», а «метод отдаёт данные»: код 200 на пустом
-# списке и код 200 на списке заявок ничем не отличаются. Считаем total из тела,
-# не длину JSON верхнего уровня — он теперь объект на четыре поля, len() дал бы
-# зелёный результат независимо от того, есть ли хоть одна заявка.
-check_orders_total() {
-    label="GET /api/orders (dispatcher1), М-16 — заявки есть"
-    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders")
-    total=$(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
-    if [ "$total" -gt 0 ] 2>/dev/null; then
-        echo "OK          $label -> $total заявок"
-    else
-        echo "РАСХОЖДЕНИЕ $label -> ждали total > 0, получили $total"
-        mismatch=1
-    fi
+# списке и код 200 на списке заявок ничем не отличаются. check_total() — та же
+# проверка, что у границы дня прогнозов выше, одной функцией на обе ручки.
+check_total "GET /api/orders (dispatcher1), М-16 — заявки есть" ">0" \
+    -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
+
+# Постраничность (MOS-117, М-06/НФ-74): тот же потолок роста, что у прогнозов,
+# — заявок уже 224 на 21.09.2026 (было 128 на дату акта М-09), limit=200 обязан
+# их обрезать, total — остаться настоящим.
+check_orders_paging() {
+    label="GET /api/orders?limit=10, М-06 — limit соблюдён и total не урезан"
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders?limit=10")
+    echo "$body" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+items, total = d.get('items'), d.get('total')
+assert isinstance(items, list) and len(items) == 10, f'items: {len(items) if isinstance(items, list) else items!r}'
+assert isinstance(total, int) and total > 10, f'total: {total!r}'
+" && { echo "OK          $label"; } || { echo "РАСХОЖДЕНИЕ $label"; mismatch=1; }
 }
-check_orders_total
+check_orders_paging
 
 # Настоящая заявка по id из списка — 200 и то же id внутри тела.
 check_order_detail() {
@@ -229,11 +270,13 @@ check "PUT /api/settings/precision_min (admin1, 1.5 — вне (0,1))" \
 # коде. Граница — максимальный action_id ДО этого PUT, ищем строго после него.
 check_settings_audit_trail() {
     label="PUT /api/settings/forecast_horizon_h (admin1) со следом old/new в audit"
+    # GET /api/audit отдаёт {total, items} с 21.09.2026 (MOS-135) — total,
+    # а не длина items: items теперь страница (умолчание 200), а не весь журнал.
     before_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
-    before=$(echo "$before_body" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+    before=$(echo "$before_body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
     before_max_id=$(echo "$before_body" | python3 -c "
 import json, sys
-rows = json.load(sys.stdin)
+rows = json.load(sys.stdin).get('items', [])
 print(max((r['action_id'] for r in rows), default=0))
 " 2>/dev/null || echo 0)
 
@@ -241,7 +284,7 @@ print(max((r['action_id'] for r in rows), default=0))
         -H "Content-Type: application/json" -d '{"value": 30}' \
         "$BASE_URL/api/settings/forecast_horizon_h"
     audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
-    after=$(echo "$audit_body" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo -1)
+    after=$(echo "$audit_body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
 
     # Вернуть горизонт как было — до печати результата, чтобы откат случился
     # даже если сама проверка ниже упадёт.

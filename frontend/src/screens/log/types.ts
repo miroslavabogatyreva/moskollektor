@@ -9,3 +9,8 @@ export interface ForecastRow {
   probability: number
   horizon_h: number
 }
+
+export interface ForecastListResponse {
+  total: number
+  items: ForecastRow[]
+}
