@@ -107,6 +107,8 @@ moskollektor/
 ├── code/           30   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_licenses.py     лицензии api/worker/nginx/фронта — приёмка НФ-82
+│   ├── check_dependency_pins.py  воспроизводимость requirements.txt внутри
+│   │                          образа без пересборки — MOS-140
 │   ├── gen_answers_doc.py    собирает docs/meetings/2026-09-19-ответы-заказчика.md
 │   │                          из присланного xlsx; `--check` сверяет число пар
 │   ├── check_plan.py         сверяет docs/plan.md сам с собой: счётчики блоков

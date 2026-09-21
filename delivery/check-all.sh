@@ -265,6 +265,17 @@ else
   skip_msg "НФ-75" "версии TLS — задайте TLS_HOST"
 fi
 
+# MOS-140, 21.09.2026: закрепление версий в requirements.txt само по себе
+# ничего не доказывает, пока никто не проверил, что пересборка сегодня даёт
+# то же самое, что уже стоит в образе (idna разошлась именно так и жила
+# незамеченной весь день). DOCKER_HOST — тот же ssh до стенда, что и у строки
+# «лицензии: сборка» выше; тот же BACKEND_IMAGE.
+if [ -n "${BACKEND_IMAGE:-}" ]; then
+  run "НФ-82"       "воспроизводимость зависимостей" "$PY" code/check_dependency_pins.py --image "$BACKEND_IMAGE"
+else
+  skip_msg "НФ-82" "воспроизводимость зависимостей — DOCKER_HOST=ssh://root@135.106.216.101 BACKEND_IMAGE=moskollektor-api:latest (см. комментарий у «лицензии: сборка»)"
+fi
+
 echo
 echo "итого: успешно $ok, упало $fail, пропущено $skip"
 if [ $fail -gt 0 ]; then
