@@ -35,6 +35,8 @@ async def list_risks(
 async def list_forecasts(
     from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
     to: date | None = Query(None, description="дата конца периода, включительно — весь день целиком"),
+    limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
+    offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("forecasts.read")),
 ):
@@ -45,21 +47,62 @@ async def list_forecasts(
     который назвали: запрос «сегодня с сегодня» при полной базе отвечал пустым
     списком — нашла фронт-сессия 16.09.2026 на боевом контуре. Здесь верхняя
     граница — начало СЛЕДУЮЩЕГО дня, сравнение строгое: включает весь to целиком.
+
+    limit/offset — М-06: без них метод отдаёт журнал целиком (425 183 строки,
+    78 МБ на 21.09.2026 на боевом стенде) — страница браузера с этим не
+    справляется. total в ответе — число совпадений по фильтру без обрезки
+    страницей, а не длина items. **Два запроса, а не count(*) OVER() в одном:**
+    на полном журнале без фильтра по дате `pred.forecast` идёт последовательным
+    сканированием (индекса на `run_id`/`started_at` под эту сортировку нет),
+    и оконная функция считает total до обрезки страницей — заставляет
+    материализовать и отсортировать все 425 183 строки вместо top-N по LIMIT.
+    Замер 21.09.2026 на боевом стенде: один запрос с count(*) OVER() — 415 мс;
+    отдельные COUNT и LIMIT-запрос — 68 мс + 121 мс = 189 мс, больше чем
+    вдвое быстрее. WHERE не дублирован текстом — это одна переменная `where`,
+    вставленная в оба запроса f-строкой, чтобы условие не могло разойтись
+    между двумя местами так же, как разошлась когда-то граница `to`.
     """
     to_exclusive = to + timedelta(days=1) if to else None
+    where = """
+        WHERE ($1::date IS NULL OR r.started_at >= $1)
+          AND ($2::timestamptz IS NULL OR r.started_at < $2)
+    """
+    total = await conn.fetchval(
+        f"""
+        SELECT count(*)
+        FROM pred.forecast f
+        JOIN pred.run r ON r.run_id = f.run_id
+        {where}
+        """,
+        from_, to_exclusive,
+    )
     rows = await conn.fetch(
-        """
+        f"""
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
                f.probability, f.risk_rank, r.started_at AS computed_at
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
-        WHERE ($1::date IS NULL OR r.started_at >= $1)
-          AND ($2::timestamptz IS NULL OR r.started_at < $2)
+        {where}
         ORDER BY r.started_at DESC, f.risk_rank
+        LIMIT $3 OFFSET $4
         """,
-        from_, to_exclusive,
+        from_, to_exclusive, limit, offset,
     )
-    return [dict(r) for r in rows]
+    return {
+        "total": total,
+        "items": [
+            {
+                "forecast_id": r["forecast_id"],
+                "section_id": r["section_id"],
+                "direction": r["direction"],
+                "horizon_h": r["horizon_h"],
+                "probability": r["probability"],
+                "risk_rank": r["risk_rank"],
+                "computed_at": r["computed_at"],
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.get("/forecasts/{forecast_id}")

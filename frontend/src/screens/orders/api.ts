@@ -1,4 +1,4 @@
-import type { OrderDetail, OrderListItem, OrderListResponse } from './types'
+import type { OrderDetail, OrderListResponse } from './types'
 
 // ponytail: вход без пароля, личность берётся из X-User-Login (backend/app/auth/deps.py).
 // Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
@@ -21,14 +21,17 @@ function ожидаетсяКарточка(body: unknown): body is OrderDetail 
   return typeof body === 'object' && body !== null && 'object' in body && 'forecast' in body
 }
 
-export async function fetchOrders(): Promise<OrderListItem[]> {
-  const r = await fetch('/api/orders', { headers: { 'X-User-Login': API_LOGIN } })
+// offset — М-06/М-16 (MOS-117): без него метод отдавал журнал заявок целиком,
+// и тот же потолок роста, что нашёлся у /api/forecasts, ждал и эту ручку.
+export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
+  const qs = offset ? `?offset=${offset}` : ''
+  const r = await fetch(`/api/orders${qs}`, { headers: { 'X-User-Login': API_LOGIN } })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()
   if (!ожидаетсяСписок(body)) {
     throw new Error('ответ GET /api/orders не по контракту orders.v1')
   }
-  return body.items
+  return body
 }
 
 export async function fetchOrder(orderId: string): Promise<OrderDetail | null> {
