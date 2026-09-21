@@ -1,0 +1,4 @@
+# Только для разработки, в образ не идёт (backend/Dockerfile ставит requirements.txt).
+# Тесты чистых функций без базы: backend/tests и code/tests.
+#   python3 -m pytest backend/tests code/tests
+pytest==8.4.2
