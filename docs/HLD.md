@@ -301,6 +301,7 @@ selfcheck конкурировал с настоящим часовым прог
 | `GET /api/orders/{id}` | карточка заявки: объект, вид работ, заказ ТОиР, приоритет, вложенный `forecast` с `forecast_id`, обоснование | `orders.read` | 200 | М-11, М-12 |
 | `GET /api/objects/{id}` | карточка объекта: `smvu_key`, инвентарный номер, момент последнего показания | `objects.read` | 200 | М-08 |
 | `GET /api/objects/{id}/readings` | ряд показаний за окно, параметры `from` и `to`. `from`/`to` обязательны: без них запрос обходит все 109 партиций `smvu.reading` | `objects.read` | 200 | Ф-91 |
+| `GET /api/objects/{id}/channels` | каналы участка с фактом отказов `{total, items[]}`, параметры `limit`/`offset` (на участке бывает до 100 каналов). Отказ — эпизод `smvu.fault_episode` закрытый, длиннее часа, не год из `ref.app_setting.forecast_weight_exclude_year` (умолчание 2021, тот же ключ, что у MOS-150 в `pred.section_weight`); `fault_value` не сужен до «Неисправен» — у тепловых датчиков и датчиков температуры `smvu.fault_rule` признаёт отказом ещё и «Неопределен» (MOS-151, Q5.25) | `objects.read` | 200 | М-05 |
 | `GET /api/settings` | четыре строки `ref.app_setting`: `forecast_horizon_h`, `precision_min`, `recall_min`, `risk_threshold_high` | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-44 |
 | `PUT /api/settings/{key}` | новое значение; старое и новое ложатся в `audit.user_action.details` тем же рядом, что пишет промежуточный слой на каждый запрос | только администратор | **422** под `admin1` на заведомо неверном значении, **403** под `dispatcher1` | НФ-44 |
 | `GET /api/audit` | журнал действий `{total, items[]}`. Параметры `from`, `to`, `limit`, `offset`. `from`/`to` — моменты времени (`datetime`), а не даты | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-77 |
@@ -317,7 +318,7 @@ selfcheck конкурировал с настоящим часовым прог
 `?from=&to=&limit=&offset=` — это перечень имён; пустой `limit=` не разбирается
 в число, и метод отвечает 422 ещё до обращения к базе. Я поймал на этом себя,
 когда прогнал пути прямо из таблицы. Ниже — блок, который копируется целиком
-и вызывает все тринадцать методов с настоящими значениями (`-k` нужен потому,
+и вызывает все четырнадцать методов с настоящими значениями (`-k` нужен потому,
 что сертификат стенда самоподписанный, `docs/server.md`):
 
 ```bash
@@ -327,7 +328,8 @@ for u in /health /openapi.json /docs; do
 done
 for u in /api/risks "/api/forecasts?limit=1" /api/forecasts/424900 \
          "/api/orders?limit=1" /api/orders/79 /api/objects/1 \
-         "/api/objects/1/readings?from=2026-06-01&to=2026-06-02"; do
+         "/api/objects/1/readings?from=2026-06-01&to=2026-06-02" \
+         "/api/objects/1/channels?limit=1"; do
   curl -s -k -o /dev/null -w "%{http_code}  $u\n" -H "X-User-Login: dispatcher1" "$B$u"
 done
 for u in /api/settings "/api/audit?limit=1"; do

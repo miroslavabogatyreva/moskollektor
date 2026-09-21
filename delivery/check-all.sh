@@ -229,12 +229,98 @@ else
 fi
 run "—"            "шаблоны объяснений"      "$PY" code/check_explain_templates.py
 
+# М-04, М-05 в части «числа участков одного объекта различаются» (MOS-150).
+# Проверка считает ВЕС и арифметику разноса, а не то, что разнос включён:
+# forecast_spread_enabled по умолчанию 0, и это осознанно — включение обязано
+# ехать вместе с новыми порогами в backend/app/domain/order_rules.py.
+if [ -n "${DATABASE_URL:-}" ]; then
+  run "М-04, М-05 частично" "разнос вероятности по участкам" "$PY" code/check_spread.py
+else
+  skip_msg "М-04, М-05 частично" "разнос вероятности — задайте DATABASE_URL"
+fi
+
+# Ф-73, М-05 (MOS-155, Q4.16): направление и объяснение риска на карточке
+# участка ловились связкой по НОМЕРУ ПРОГОНА (f.run_id = fc.run_id). Политика
+# записи журнала (MOS-147) пишет pred.forecast только когда решение
+# изменилось — на «тихом» прогоне для участка нет ни строки, и старая связка
+# отдавала NULL вместо direction/explanation_ru 56 минут из 60, а на минуте
+# пульса — все 3 173 строки разом, и экран выглядел исправным всегда, если
+# проверять его в эту самую минуту. Строка «шаблоны объяснений» выше эту
+# связку не трогает вовсе — она про модуль, не про путь через API.
+#
+# Проверка не берёт участок наугад: находит тот, у которого ИМЕННО СЕЙЧАС нет
+# строки текущего прогона в pred.forecast — настоящий «неудачный момент», а не
+# случайное совпадение с минутой пульса, — и требует от GET /api/objects/{id}
+# непустых direction и explanation_ru ровно на нём. Такого участка сейчас
+# может не найтись (сам прогон попал на минуту пульса) — тогда честный
+# ПРОПУСК, а не подставной OK: зелёная проверка, которая не проверила ничего,
+# хуже отсутствующей.
+find_quiet_section() {
+  "$PY" -c "
+import asyncio, asyncpg, os
+
+async def main():
+    conn = await asyncpg.connect(os.environ['DATABASE_URL'])
+    row = await conn.fetchrow('''
+        SELECT fc.section_id
+          FROM pred.forecast_current fc
+         WHERE NOT EXISTS (
+             SELECT 1 FROM pred.forecast f
+              WHERE f.section_id = fc.section_id AND f.run_id = fc.run_id
+         )
+         LIMIT 1
+    ''')
+    print(row['section_id'] if row else '')
+    await conn.close()
+
+asyncio.run(main())
+"
+}
+
+check_explanation_via_api() {
+  section_id="$1"
+  curl -s ${CURL_OPTS:-} -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/$section_id" | "$PY" -c "
+import json, sys
+d = json.load(sys.stdin)
+risk = d.get('current_risk') or {}
+assert risk.get('direction'), f'direction пуст: {risk!r}'
+assert risk.get('explanation_ru'), f'explanation_ru пуст: {risk!r}'
+"
+}
+
+if [ -n "${DATABASE_URL:-}" ] && [ -n "${BASE_URL:-}" ]; then
+  quiet_section=$(find_quiet_section 2>&1)
+  quiet_code=$?
+  if [ $quiet_code -ne 0 ]; then
+    # Пустая строка тут может значить и «участков без пульса сейчас нет», и
+    # «запрос к базе не выполнился» — это разные сообщения, и подменять одно
+    # другим нельзя: не найдя код возврата, вторая беда молча читалась бы
+    # как первая. Разбираю их кодом возврата, а не только текстом ответа.
+    printf 'УПАЛА %-14s %s\n' "Ф-73, М-05" "направление/объяснение через API — поиск участка без строки текущего прогона не выполнился"
+    printf '%s\n' "$quiet_section" | tail -5 | sed 's/^/        /'
+    fail=$((fail + 1))
+    failed_list="$failed_list направление/объяснение-через-API"
+  elif [ -n "$quiet_section" ]; then
+    run "Ф-73, М-05" "направление/объяснение через API (участок $quiet_section, без строки текущего прогона)" \
+      check_explanation_via_api "$quiet_section"
+  else
+    skip_msg "Ф-73, М-05" "направление/объяснение через API — сейчас у всех участков есть строка текущего прогона (момент пульса), «неудачного» участка для проверки нет"
+  fi
+else
+  skip_msg "Ф-73, М-05" "направление/объяснение через API — задайте DATABASE_URL и BASE_URL"
+fi
+
 echo
 echo "=== стенд ==="
+# MOS-151, Q5.25, 21.09.2026: examples.sh несёт и GET /api/objects/{id}/channels
+# — участок 257:269 отдаёт восемь каналов с отказами (числа сверены с задачей),
+# 890:5 без единого отказа отдаёт все девять, а не пустой список, total не
+# обнуляется за последней страницей. Отдельного вызова здесь не заводим —
+# ровно тот же довод, что у М-06 и М-16 строками ниже.
 if [ -n "${BASE_URL:-}" ]; then
-  run "М-14, М-16, М-17"  "примеры вызовов API"    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" bash contracts/examples/api/examples.sh
+  run "М-05, М-14, М-16, М-17"  "примеры вызовов API"    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" bash contracts/examples/api/examples.sh
 else
-  skip_msg "М-14, М-16, М-17" "примеры вызовов API — задайте BASE_URL"
+  skip_msg "М-05, М-14, М-16, М-17" "примеры вызовов API — задайте BASE_URL"
 fi
 
 # М-06 закрыли 16.09.2026 словами «задержки нет» при 12 692 прогнозах в журнале.
