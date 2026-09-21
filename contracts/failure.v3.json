@@ -1,0 +1,33 @@
+{
+  "schema_version": "failure.v3",
+  "updated": "2026-09-21",
+  "$comment": "Определение отказа, на котором обучена модель v3. Граница ML и продукта: модель учится на этой метке, продукт меряет её этой же меткой (М-18…М-20 в code/check_metrics.py). Правится этот файл, а не договорённость в переписке. Значения попадают в базу строками smvu.model_failure_value (db/migrations/030_model_failure_value.sql); что файл и миграция совпадают, проверяет code/tests/test_model_failure.py. Правило экрана smvu.fault_rule это определение НЕ меняет: у экрана своя задача, и его «Неисправен» плюс «Неопределен» остаются как есть.",
+  "model_version": "lgbm-v3-bag-2026.09.21",
+  "definition_id": "D5",
+  "source": {
+    "repo": "ML-команда, lct-2026-task8",
+    "failure_values": "src/ml/failure_defs.py: EXT и DEFS['D5'] = Part(EXT, 1.0)",
+    "merge_minutes": "src/ml/moments.py: MERGE_MIN = 60; склейка — labels.build_incidents(con, window_minutes=MERGE_MIN)",
+    "score_output": "ML-команда добавляет в score.json (контракт score.v3) поле failure_values с этим же списком — расхождение с этим файлом значит, что модель переобучена на другой метке"
+  },
+  "failure_values": [
+    "Неисправен",
+    "Батарея неисправна",
+    "Много неисправных устройств",
+    "Не определено"
+  ],
+  "episode": {
+    "$comment": "Эпизод — непрерывная серия записей канала, каждая со значением из failure_values. Разные значения из словаря подряд дают ОДИН эпизод, fault_value у него — значение первой записи. Эпизод закрывает первая следующая запись канала с любым другим значением, в том числе числовая. «Неопределен» (экранное правило) и «Не определено» (словарь модели) — разные строки журнала.",
+    "order_by": ["read_time", "journal_id"],
+    "min_duration_seconds": 3600,
+    "duration_strict": true,
+    "open_episode": "counted",
+    "open_episode_end": "конец архива: последняя запись журнала"
+  },
+  "incident": {
+    "$comment": "Отказы, отстоящие от соседа в той же группе не больше merge_minutes, — один инцидент; цепочка склеивается по соседям (group_incidents в code/predictive_metrics.py). Модель склеивает по префиксу тега (pfx), продукт — по коллектору дерева объектов (MOS-103); перевод ключа модели — после гейта 22.09 (docs/for-ml-team.md).",
+    "merge_minutes": 60,
+    "group_key_model": "pfx",
+    "group_key_product": "collector"
+  }
+}
