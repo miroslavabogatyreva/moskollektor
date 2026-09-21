@@ -239,6 +239,43 @@ check_order_forecast_link
 check "GET /api/audit (dispatcher1, должен отказать)"       403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/audit"
 check "GET /api/audit (admin1)"                             200 -H "X-User-Login: admin1"      "$BASE_URL/api/audit"
 
+# Постраничность и период (MOS-135, НФ-77): до 21.09.2026 метод не принимал
+# ни from/to, ни limit/offset — жёсткий LIMIT 500 вымывал десять действий
+# приёмочного сценария из окна, стоило другим запросам (в том числе этому же
+# скрипту) набежать за это время. Проверяем сначала период — окно с этого же
+# прогона обязано вернуть хотя бы наши собственные запросы, — потом limit.
+check_audit_period() {
+    label="GET /api/audit?from=&to=, НФ-77 — период возвращает данные"
+    # 'Z', не '+00:00': curl не percent-encode's '+' в query-строке, а сервер при
+    # декодировании читает его как пробел (application/x-www-form-urlencoded)
+    # — from/to ломались 422-й, хотя ручка тут ни при чём (нашла сама, 21.09.2026).
+    from_ts=$(python3 -c "import datetime; print((datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)).isoformat().replace('+00:00', 'Z'))")
+    to_ts=$(python3 -c "import datetime; print(datetime.datetime.now(datetime.UTC).isoformat().replace('+00:00', 'Z'))")
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" \
+        "$BASE_URL/api/audit?from=$from_ts&to=$to_ts")
+    echo "$body" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+total = d.get('total')
+assert isinstance(total, int) and total > 0, f'total: {total!r}'
+" && { echo "OK          $label -> total $(echo "$body" | python3 -c "import json,sys; print(json.load(sys.stdin)['total'])")"; } \
+   || { echo "РАСХОЖДЕНИЕ $label"; mismatch=1; }
+}
+check_audit_period
+
+check_audit_paging() {
+    label="GET /api/audit?limit=10, М-06 — limit соблюдён и total не урезан"
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit?limit=10")
+    echo "$body" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+items, total = d.get('items'), d.get('total')
+assert isinstance(items, list) and len(items) == 10, f'items: {len(items) if isinstance(items, list) else items!r}'
+assert isinstance(total, int) and total > 10, f'total: {total!r}'
+" && { echo "OK          $label"; } || { echo "РАСХОЖДЕНИЕ $label"; mismatch=1; }
+}
+check_audit_paging
+
 # Пороги и горизонт (MOS-110, Q4.12) — НФ-44 держит их на том же уровне, что
 # журнал аудита: диспетчеру оба метода отвечают 403, а не только PUT.
 check "GET /api/settings (dispatcher1, должен отказать)"    403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/settings"
@@ -294,7 +331,7 @@ print(max((r['action_id'] for r in rows), default=0))
 
     found=$(echo "$audit_body" | python3 -c "
 import json, sys
-rows = json.load(sys.stdin)
+rows = json.load(sys.stdin).get('items', [])
 border = $before_max_id
 for r in rows:
     if r.get('action_id', 0) <= border:
