@@ -70,7 +70,7 @@
 | click | 8.5.0 | BSD-3-Clause |
 | fastapi | 0.141.1 | MIT |
 | h11 | 0.16.0 | MIT |
-| idna | 3.19 | BSD-3-Clause |
+| idna | 3.20 | BSD-3-Clause |
 | pydantic | 2.13.5 | MIT |
 | pydantic_core | 2.46.5 | MIT |
 | starlette | 1.6.0 | BSD-3-Clause |
