@@ -79,6 +79,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .channel_place import дозаполнить_место, есть_место
+from .kind_names import canon, canon_map
 from .tag_to_section import collector_of, location_kind, section_key
 
 # Пояс заказчик не назвал (ОВ-48). Ставим московский и пишем это в отчёт:
@@ -428,10 +429,12 @@ async def load_channels(conn, path):
     # заливку. Поэтому незнакомый тип мы снимаем в NULL, а сам факт пишем
     # в load.error: ключ остаётся на месте (опечатка не создаст седьмую систему),
     # канал остаётся в базе, отчёт называет и тип, и номера каналов.
-    датчики = {r["sensor_kind"] for r in
-               await conn.fetch("SELECT sensor_kind FROM smvu.sensor_kind")}
-    системы = {r["system_kind"] for r in
-               await conn.fetch("SELECT system_kind FROM smvu.system_kind")}
+    # Сверяем по нормализованному имени (kind_names.norm_kind): лишний пробел или
+    # латинская «А» в «КД АВ» — тот же тип, а не чужой. В базу идёт имя из справочника.
+    датчики = canon_map(r["sensor_kind"] for r in
+                        await conn.fetch("SELECT sensor_kind FROM smvu.sensor_kind"))
+    системы = canon_map(r["system_kind"] for r in
+                        await conn.fetch("SELECT system_kind FROM smvu.system_kind"))
     # Вид объекта нужен location_kind: здание диспетчерской узнаём по controlHouse.
     виды = dict(await conn.fetch("SELECT object_id, kind FROM smvu.object_tree"))
     чужие = {}
@@ -442,14 +445,12 @@ async def load_channels(conn, path):
         cid = int(r["ид_канала_данных"])
         pair = keys[cid]
         smvu_key = f"{pair[0]}:{pair[1]}" if pair else None
-        тип_системы = r["тип_инж_системы"]
-        тип_датчика = r["тип_датчика"]
-        if тип_системы and тип_системы not in системы:
-            чужие.setdefault(("тип инженерной системы", тип_системы), []).append(cid)
-            тип_системы = None
-        if тип_датчика and тип_датчика not in датчики:
-            чужие.setdefault(("тип датчика", тип_датчика), []).append(cid)
-            тип_датчика = None
+        тип_системы = canon(r["тип_инж_системы"], системы)
+        тип_датчика = canon(r["тип_датчика"], датчики)
+        if r["тип_инж_системы"] and тип_системы is None:
+            чужие.setdefault(("тип инженерной системы", r["тип_инж_системы"]), []).append(cid)
+        if r["тип_датчика"] and тип_датчика is None:
+            чужие.setdefault(("тип датчика", r["тип_датчика"]), []).append(cid)
         tag, name = r["тег_инженерной_системы"], r["название_датчика"]
         место = location_kind(tag, name, виды.get(объект(r)))
         места[место] += 1
