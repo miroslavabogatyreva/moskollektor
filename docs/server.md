@@ -180,8 +180,9 @@ git ls-tree -r origin/master --name-only -- code/ | grep -E '^code/(check_.*\.py
 Точка входа — `python -u app.worker.scheduler`, `restart: unless-stopped`; в
 `docker compose ps` он теперь `Up`, а не отсутствует между ручными прогонами.
 Для него нужны две переменные в `deploy/.env`, образца от 16.09.2026 их не было
-и я дописала на стенде вручную: `SCHEDULER_INTERVAL_MIN` (60 — интервал полного
-расчёта) и `SCHEDULER_REFRESH_INTERVAL_MIN` (5 — интервал одной свёртки, ради
+и я дописала на стенде вручную: `SCHEDULER_INTERVAL_MIN` (**4 с 21.09.2026, было
+60** — интервал полного расчёта; час не укладывался в норматив задержки 300 секунд,
+разбор в `docs/HLD.md` разд. 8.2) и `SCHEDULER_REFRESH_INTERVAL_MIN` (5 — интервал одной свёртки, ради
 НФ-73). Ручной прогон на срез — так же, как раньше: `docker compose --profile app
 run --rm worker python -m app.worker.run --as-of ...`.
 
