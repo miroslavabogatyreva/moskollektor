@@ -19,6 +19,7 @@
 """
 
 import json
+from datetime import datetime, timezone
 
 # Канал оповещения. Его слушает API и рассылает кадр в открытые SSE (HLD разд. 8.2,
 # стадия 8). Имя канала — часть контракта с Q4, менять его в одиночку нельзя.
@@ -39,11 +40,95 @@ def ранги(вероятности: list[float]) -> list[int]:
     return места
 
 
+# Политика записи журнала (MOS-147, миграция 026). Значения по умолчанию нужны
+# на случай пустой таблицы настроек — ровно так же страхует себя горизонт прогноза
+# в run.py. Настоящие значения живут в ref.app_setting и меняются через API.
+ПОЛИТИКА_ПО_УМОЛЧАНИЮ = {
+    "forecast_deadband": 0.02,
+    "forecast_heartbeat_min": 60.0,
+    "risk_class_hysteresis": 0.02,
+    "risk_class_hold_min": 10.0,
+    "risk_threshold_high": 0.97,
+}
+
+
+async def политика(conn) -> dict:
+    """Настройки записи журнала из ref.app_setting, недостающие — из умолчаний."""
+    строки = await conn.fetch(
+        "SELECT key, value FROM ref.app_setting WHERE key = ANY($1::text[])",
+        list(ПОЛИТИКА_ПО_УМОЛЧАНИЮ))
+    из_базы = {r["key"]: float(r["value"]) for r in строки}
+    return {**ПОЛИТИКА_ПО_УМОЛЧАНИЮ, **из_базы}
+
+
+def класс_риска(p: float, прошлый: str | None, порог: float, гистерезис: float) -> str:
+    """Класс с гистерезисом: поднимаем выше порога+дельта, снимаем ниже порога−дельта.
+
+    Между двумя границами класс НЕ меняется — остаётся прошлым. Это и есть
+    гистерезис: ISA-18.2 (IEC 62682) зовёт дребезгом переход туда-обратно три
+    раза за 60 секунд и называет средством мёртвую зону. При расчёте раз
+    в 4 минуты объект с вероятностью ровно у порога прыгал бы 15 раз в час —
+    и писал бы строку в журнал, и мигал бы на экране у диспетчера.
+
+    Класс — это НЕ risk_rank: ранг у нас сквозное место от 1 до 3 173, и на живой
+    модели дрожание в четвёртом знаке переставляет соседей, то есть «ранг сменился»
+    верно почти для всех объектов почти всегда.
+    """
+    if p >= порог + гистерезис:
+        return "high"
+    if p <= порог - гистерезис:
+        return "normal"
+    return прошлый or "normal"
+
+
+def причина_записи(p: float, класс: str, прошлое: dict | None, сейчас, п: dict,
+                   full_log: bool = False) -> str | None:
+    """Почему строка идёт в журнал — или None, если не идёт.
+
+    Порядок проверок важен: `full` старше всех, потому что прогон для замера
+    метрик обязан быть полным; `first` старше `change`, потому что сравнивать
+    не с чем. Мёртвая зона меряется от ПОСЛЕДНЕГО ЗАПИСАННОГО значения, а не
+    от прошлого расчёта: иначе дрейф по полпроцента за прогон не запишется
+    никогда, сколько бы он ни накопил.
+    """
+    if full_log:
+        return "full"
+    if not прошлое or прошлое.get("logged_at") is None:
+        return "first"
+    if abs(p - (прошлое["logged_probability"] or 0.0)) >= п["forecast_deadband"]:
+        return "change"
+    if класс != прошлое.get("risk_class"):
+        return "change"
+    возраст_мин = (сейчас - прошлое["logged_at"]).total_seconds() / 60
+    if возраст_мин >= п["forecast_heartbeat_min"]:
+        return "heartbeat"
+    return None
+
+
+def удержать_класс(кандидат: str, прошлое: dict | None, сейчас, п: dict) -> str:
+    """Класс не меняется чаще, чем раз в risk_class_hold_min минут."""
+    if not прошлое or прошлое.get("risk_class") is None:
+        return кандидат
+    прошлый = прошлое["risk_class"]
+    if кандидат == прошлый:
+        return прошлый
+    с = прошлое.get("risk_class_since")
+    if с is not None and (сейчас - с).total_seconds() / 60 < п["risk_class_hold_min"]:
+        return прошлый
+    return кандидат
+
+
 async def записать(conn, run_id: int, as_of, horizon_h: int, direction: str,
                    участки: list[int], вероятности: list[float],
                    факторы: list[list[dict]],
-                   тексты: list[str | None] | None = None) -> int:
-    """Стадии 6 и 7: прогноз в историю, свёртка в текущее, NOTIFY. Возвращает число строк.
+                   тексты: list[str | None] | None = None,
+                   *, full_log: bool = False, сейчас=None,
+                   политика_записи: dict | None = None) -> dict:
+    """Стадии 6 и 7: прогноз в историю, свёртка в текущее, NOTIFY.
+
+    Возвращает словарь: сколько строк ушло в журнал, по скольким участкам считали
+    и по каким причинам строки записаны. Одним числом отвечать больше нельзя —
+    с MOS-147 «посчитано» и «записано» это разные числа.
 
     Текст объяснения кладётся ТОЙ ЖЕ вставкой, что и прогноз, а не отдельным
     UPDATE следом. Иначе между двумя запросами существует состояние «прогноз есть,
@@ -52,33 +137,64 @@ async def записать(conn, run_id: int, as_of, horizon_h: int, direction: 
     """
     тексты = тексты or [None] * len(участки)
     места = ранги(вероятности)
-    строки = [(run_id, sid, direction, horizon_h, float(p), место,
-               json.dumps(ф, ensure_ascii=False), т)
-              for sid, p, место, ф, т in zip(участки, вероятности, места, факторы, тексты)]
+    сейчас = сейчас or datetime.now(timezone.utc)
+    п = политика_записи or await политика(conn)
 
     async with conn.transaction():
+        # Прошлое состояние читаем ДО перезаписи текущего прогноза: в нём лежит
+        # последнее ЗАПИСАННОЕ значение, от которого меряется мёртвая зона.
+        прошлое = {r["section_id"]: dict(r) for r in await conn.fetch(
+            """SELECT section_id, logged_probability, logged_at, risk_class, risk_class_since
+                 FROM pred.forecast_current""")}
+
+        строки, текущее, причины = [], [], {}
+        for sid, p, место, ф, т in zip(участки, вероятности, места, факторы, тексты):
+            было = прошлое.get(sid)
+            кандидат = класс_риска(float(p), (было or {}).get("risk_class"),
+                                   п["risk_threshold_high"], п["risk_class_hysteresis"])
+            класс = удержать_класс(кандидат, было, сейчас, п)
+            причина = причина_записи(float(p), класс, было, сейчас, п, full_log)
+            ф_json = json.dumps(ф, ensure_ascii=False)
+            if причина:
+                строки.append((run_id, sid, direction, horizon_h, float(p), место,
+                               ф_json, т, причина))
+                причины[причина] = причины.get(причина, 0) + 1
+                записано_p, записано_в = float(p), сейчас
+            else:
+                записано_p, записано_в = было["logged_probability"], было["logged_at"]
+            # Отсчёт удержания класса начинается заново только при смене класса.
+            с_каких_пор = (было or {}).get("risk_class_since")
+            if (было or {}).get("risk_class") != класс or с_каких_пор is None:
+                с_каких_пор = сейчас
+            текущее.append((sid, run_id, as_of, horizon_h, float(p), место, ф_json,
+                            записано_p, записано_в, класс, с_каких_пор))
+
         await conn.executemany(
             """INSERT INTO pred.forecast
                    (run_id, section_id, direction, horizon_h, probability, risk_rank,
-                    factors, explanation_ru)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)""", строки)
+                    factors, explanation_ru, write_reason)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)""", строки)
 
         # Полная перезапись, а не UPDATE по участкам: участок, выпавший из расчёта,
         # обязан исчезнуть из текущего прогноза, а не остаться там с прошлым числом.
-        # Колонка `as_of` (до миграции 024 называлась `computed_at`) — срез данных,
+        # Текущий прогноз остаётся ПОЛНЫМ, 3 173 строки на прогон, — разрежается
+        # только журнал (MOS-147). Это разные вопросы: «что показать диспетчеру
+        # сейчас» и «что система показывала в момент T».
+        # Колонка `as_of` (до миграции 025 называлась `computed_at`) — срез данных,
         # а не время расчёта: сюда едет `as_of` прогона, тот же, что в pred.run.as_of.
         # Время работы расчёта лежит в pred.run.started_at, и API отдаёт его под
         # именем `computed_at` — одно имя, одна величина (MOS-118).
         await conn.execute("DELETE FROM pred.forecast_current")
         await conn.executemany(
             """INSERT INTO pred.forecast_current
-                   (section_id, run_id, as_of, horizon_h, probability, risk_rank, is_stale, factors)
-               VALUES ($1, $2, $3, $4, $5, $6, false, $7::jsonb)""",
-            [(sid, run_id, as_of, horizon_h, float(p), место, json.dumps(ф, ensure_ascii=False))
-             for sid, p, место, ф in zip(участки, вероятности, места, факторы)])
+                   (section_id, run_id, as_of, horizon_h, probability, risk_rank,
+                    is_stale, factors, logged_probability, logged_at,
+                    risk_class, risk_class_since)
+               VALUES ($1, $2, $3, $4, $5, $6, false, $7::jsonb, $8, $9, $10, $11)""",
+            текущее)
 
         await conn.execute(f"NOTIFY {КАНАЛ}, '{run_id}'")
-    return len(строки)
+    return {"журнал": len(строки), "участков": len(участки), "причины": причины}
 
 
 async def пометить_устаревшим(conn, причина: str) -> int:
@@ -100,7 +216,66 @@ def _selfcheck():
     assert ранги([0.5, 0.5, 0.5]) == [1, 2, 3]
     assert ранги([0.0]) == [1]
     assert sorted(ранги([0.3, 0.7, 0.7, 0.1])) == [1, 2, 3, 4]
+    _selfcheck_политика()
     print("publish selfcheck ok")
+
+
+def _selfcheck_политика():
+    """Политика записи журнала (MOS-147): девять случаев, база не нужна.
+
+    Проверка обязана ловить не только «записали, когда надо», но и «НЕ записали,
+    когда не надо» — второе и есть вся задача.
+    """
+    from datetime import timedelta
+
+    п = dict(ПОЛИТИКА_ПО_УМОЛЧАНИЮ)
+    t0 = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+
+    def прошлое(p, когда, класс="normal", с=None):
+        return {"logged_probability": p, "logged_at": когда,
+                "risk_class": класс, "risk_class_since": с or когда}
+
+    # 1. Первого прогноза объекта не с чем сравнивать — пишем всегда.
+    assert причина_записи(0.5, "normal", None, t0, п) == "first"
+    assert причина_записи(0.5, "normal", прошлое(None, None), t0, п) == "first"
+    # 2. Изменение больше мёртвой зоны — пишем.
+    assert причина_записи(0.53, "normal", прошлое(0.50, t0), t0, п) == "change"
+    # 3. Изменение меньше мёртвой зоны и пульс не подошёл — НЕ пишем.
+    assert причина_записи(0.505, "normal", прошлое(0.50, t0), t0, п) is None
+    # 4. Ничего не менялось, но прошёл час — пишем по пульсу.
+    час_спустя = t0 + timedelta(minutes=60)
+    assert причина_записи(0.50, "normal", прошлое(0.50, t0), час_спустя, п) == "heartbeat"
+    # 5. Класс сменился при крошечном изменении вероятности — пишем.
+    assert причина_записи(0.50, "high", прошлое(0.50, t0), t0, п) == "change"
+    # 6. Прогон для замера метрик пишет всё, даже когда не менялось ничего.
+    assert причина_записи(0.50, "normal", прошлое(0.50, t0), t0, п, full_log=True) == "full"
+
+    # 7. Гистерезис: между порогом−дельта и порогом+дельта класс НЕ меняется.
+    порог, д = п["risk_threshold_high"], п["risk_class_hysteresis"]
+    assert класс_риска(порог + д, "normal", порог, д) == "high"
+    assert класс_риска(порог - д, "high", порог, д) == "normal"
+    assert класс_риска(порог, "high", порог, д) == "high"      # у самого порога
+    assert класс_риска(порог, "normal", порог, д) == "normal"  # класс держится
+    assert класс_риска(0.1, None, порог, д) == "normal"
+
+    # 8. Удержание: класс не меняется чаще, чем раз в risk_class_hold_min.
+    рано = t0 + timedelta(minutes=п["risk_class_hold_min"] - 1)
+    поздно = t0 + timedelta(minutes=п["risk_class_hold_min"] + 1)
+    было = прошлое(0.5, t0, "normal", t0)
+    assert удержать_класс("high", было, рано, п) == "normal"
+    assert удержать_класс("high", было, поздно, п) == "high"
+
+    # 9. Дрейф по полпроцента за прогон обязан записаться, когда накопит
+    #    мёртвую зону. Это и проверяет, что сравниваем с последним ЗАПИСАННЫМ
+    #    значением, а не с прошлым расчётом: во втором случае не запишется никогда.
+    состояние, записей, p = прошлое(0.50, t0, "normal", t0), 0, 0.50
+    for шаг in range(1, 9):
+        p = 0.50 + 0.005 * шаг
+        причина = причина_записи(p, "normal", состояние, t0, п)
+        if причина:
+            записей += 1
+            состояние = прошлое(p, t0, "normal", t0)
+    assert записей == 2, записей  # на 4-м и на 8-м шаге, по 0,02 накопленного дрейфа
 
 
 if __name__ == "__main__":

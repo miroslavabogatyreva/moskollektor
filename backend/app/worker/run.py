@@ -157,16 +157,26 @@ def факторы(значения: list[list[float | None]], имена: list[
 
 
 async def прогон(conn, as_of: datetime | None = None, horizon_h: int | None = None,
-                 предел: int | None = None) -> dict:
-    """Один расчёт. Возвращает итог прогона — то же, что легло в pred.run."""
+                 предел: int | None = None, full_log: bool | None = None) -> dict:
+    """Один расчёт. Возвращает итог прогона — то же, что легло в pred.run.
+
+    `full_log` — писать ли в журнал каждый объект (MOS-147). По умолчанию его
+    решает срез: названный явно `--as-of` означает обратный расчёт для замера
+    метрик, и такой прогон обязан писать всё, потому что метрики М-18 и М-19
+    считаются по журналу. Прогон по расписанию среза не называет и пишет
+    изменения плюс пульс.
+    """
     часы = Секундомер()
     if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", БЛОКИРОВКА):
         print("занято: расчёт уже идёт в другом процессе")
         return {"status": "занято"}
 
+    if full_log is None:
+        full_log = as_of is not None
     as_of = as_of or datetime.now().astimezone()
     run_id = await conn.fetchval(
-        "INSERT INTO pred.run (status, as_of) VALUES ('running', $1) RETURNING run_id", as_of)
+        "INSERT INTO pred.run (status, as_of, full_log) VALUES ('running', $1, $2) "
+        "RETURNING run_id", as_of, full_log)
 
     итог, ошибка, участков, посчитано = "failed", None, None, None
     try:
@@ -261,8 +271,12 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
         # --- 6. Запись, свёртка, NOTIFY --------------------------------------------
         with часы.стадия("ms_write"):
             записано = await publish.записать(conn, run_id, as_of, horizon_h,
-                                              НАПРАВЛЕНИЕ, участки, вероятности, ф, тексты)
-        print(f"   записано {записано} прогнозов, разослан NOTIFY {publish.КАНАЛ}")
+                                              НАПРАВЛЕНИЕ, участки, вероятности, ф, тексты,
+                                              full_log=full_log)
+        разбор = ", ".join(f"{имя} {n}" for имя, n in sorted(записано["причины"].items()))
+        print(f"   в журнал {записано['журнал']} строк из {записано['участков']} "
+              f"посчитанных ({разбор or 'ничего не менялось'}), "
+              f"разослан NOTIFY {publish.КАНАЛ}")
 
         # --- 7. Автозаявки ---------------------------------------------------------
         # Стадия идёт ПОСЛЕ записи прогноза, а не вместе с ней: заявка ссылается
@@ -347,6 +361,8 @@ async def main():
     р.add_argument("--horizon", type=int, help="без флага — из ref.app_setting")
     р.add_argument("--limit", type=int, help="считать только первые N участков")
     р.add_argument("--rollback", action="store_true", help="откатить всё, что записали")
+    р.add_argument("--full-log", action="store_true",
+                   help="писать в журнал каждый объект; без флага это решает --as-of")
     р.add_argument("--selfcheck", action="store_true", help="проверка без базы и без модели")
     а = р.parse_args()
     if а.selfcheck:
@@ -360,12 +376,14 @@ async def main():
             tr = conn.transaction()
             await tr.start()
             try:
-                строка = await прогон(conn, as_of, а.horizon, а.limit)
+                строка = await прогон(conn, as_of, а.horizon, а.limit,
+                                      True if а.full_log else None)
             finally:
                 await tr.rollback()
                 print("откат сделан: в базе следов прогона нет")
         else:
-            строка = await прогон(conn, as_of, а.horizon, а.limit)
+            строка = await прогон(conn, as_of, а.horizon, а.limit,
+                                  True if а.full_log else None)
         return 0 if строка.get("status") in ("done", "занято") else 1
     finally:
         await conn.close()

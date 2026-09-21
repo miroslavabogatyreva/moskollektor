@@ -59,6 +59,16 @@ async def list_forecasts(
     рядом стоят дешевле одной: `pred.run` и так в соединении, лишнего чтения нет,
     а читатель ответа видит, чем они отличаются, не заглядывая в документ.
 
+    **ПРОПУСК В ЖУРНАЛЕ ОЗНАЧАЕТ «ЗНАЧЕНИЕ НЕ МЕНЯЛОСЬ», А НЕ «РАСЧЁТ НЕ ШЁЛ»**
+    (MOS-147). С миграции 026 расчёт пишет строку, только когда вероятность вышла
+    за мёртвую зону, сменился класс риска или подошёл безусловный «пульс» — раз
+    в час на объект. Между двумя строками объекта расчёт по нему шёл, и результат
+    был прежним. Отличить одно от другого позволяет `write_reason` в каждой строке:
+    `first` — первый прогноз объекта, `change` — изменение, `heartbeat` — пульс,
+    `full` — прогон с полным журналом (обратный расчёт для замера метрик).
+    Пропуски самого расчёта видны не здесь, а в `pred.run` — их стережёт строка
+    приёмки НФ-91 в `code/check_runtime.py`.
+
     from/to — даты, а не моменты времени, и обе границы включительны. Раньше
     to сравнивался как timestamptz <= 'ГГГГ-ММ-ДД 00:00' и вырезал весь день,
     который назвали: запрос «сегодня с сегодня» при полной базе отвечал пустым
@@ -96,7 +106,8 @@ async def list_forecasts(
     rows = await conn.fetch(
         f"""
         SELECT f.forecast_id, f.section_id, f.direction, f.horizon_h,
-               f.probability, f.risk_rank, r.as_of, r.started_at AS computed_at
+               f.probability, f.risk_rank, r.as_of, r.started_at AS computed_at,
+               f.write_reason
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
@@ -117,6 +128,7 @@ async def list_forecasts(
                 "risk_rank": r["risk_rank"],
                 "as_of": r["as_of"],
                 "computed_at": r["computed_at"],
+                "write_reason": r["write_reason"],
             }
             for r in rows
         ],
