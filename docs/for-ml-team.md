@@ -1099,7 +1099,7 @@ docker run --rm --network moskollektor_default -e PGPASSWORD="$PGPASSWORD" ...
 | Что | Где | Сколько |
 |---|---|---|
 | журнал показаний | `smvu.reading`, партиции по месяцам | 313 546 016 строк |
-| справочник каналов | `smvu.channel` (+ `object_id` от заказчика) | 12 627 строк, из них 11 485 справочных |
+| справочник каналов | `smvu.channel` (+ `object_id` от заказчика, `location_kind` — миграция 031) | 12 627 строк, из них 11 485 справочных; `collector` у всех 11 485, `location_kind`: section 10 721, zone 44, building 717, unknown 3 |
 | дерево объектов | `smvu.object_tree` | 1 район, 16 коллекторов, 78 узлов |
 | эпизоды потери связи | `smvu.fault_episode` | закрытые, длиннее часа, `spans_outage` отдельным флагом |
 | провалы данных | `smvu.data_outage` | окна, где молчал не датчик, а сбор |

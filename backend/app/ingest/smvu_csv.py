@@ -78,7 +78,8 @@ from collections import Counter
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .tag_to_section import section_key
+from .channel_place import дозаполнить_место, есть_место
+from .tag_to_section import collector_of, location_kind, section_key
 
 # Пояс заказчик не назвал (ОВ-48). Ставим московский и пишем это в отчёт:
 # среди значений встречается «01.01.1970 03:00:00» — нулевая эпоха, сдвинутая на три часа.
@@ -403,7 +404,9 @@ async def load_channels(conn, path):
         rows = list(csv.DictReader(f))
     if await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE NOT is_stub"):
         print("каналы: уже залиты, пропускаю")
-        return await дозаполнить_объекты(conn, rows)
+        проставлено = await дозаполнить_объекты(conn, rows)
+        await дозаполнить_место(conn, rows)
+        return проставлено
 
     keys = {}
     for r in rows:
@@ -429,7 +432,10 @@ async def load_channels(conn, path):
                await conn.fetch("SELECT sensor_kind FROM smvu.sensor_kind")}
     системы = {r["system_kind"] for r in
                await conn.fetch("SELECT system_kind FROM smvu.system_kind")}
+    # Вид объекта нужен location_kind: здание диспетчерской узнаём по controlHouse.
+    виды = dict(await conn.fetch("SELECT object_id, kind FROM smvu.object_tree"))
     чужие = {}
+    места = Counter()
 
     recs = []
     for r in rows:
@@ -444,19 +450,30 @@ async def load_channels(conn, path):
         if тип_датчика and тип_датчика not in датчики:
             чужие.setdefault(("тип датчика", тип_датчика), []).append(cid)
             тип_датчика = None
-        recs.append((cid, тип_системы, тип_датчика,
-                     r["тег_инженерной_системы"], r["название_датчика"],
-                     pair[0] if pair else None, pair[1] if pair else None,
-                     xref.get(smvu_key), объект(r), False, True))
-    await conn.copy_records_to_table(
-        "channel", schema_name="smvu", records=recs,
-        columns=["channel_id", "system_kind", "sensor_kind", "tag", "name",
-                 "collector", "picket", "section_id", "object_id",
-                 "is_stub", "is_active"])
+        tag, name = r["тег_инженерной_системы"], r["название_датчика"]
+        место = location_kind(tag, name, виды.get(объект(r)))
+        места[место] += 1
+        # Коллектор берём из тега у каждого канала, а не только у канала с пикетом:
+        # иначе 765 каналов без «ПК» в названии теряли его, хотя тег его даёт.
+        recs.append((cid, тип_системы, тип_датчика, tag, name,
+                     collector_of(tag), pair[1] if pair else None,
+                     xref.get(smvu_key), объект(r), место, False, True))
+    колонки = ["channel_id", "system_kind", "sensor_kind", "tag", "name", "collector",
+               "picket", "section_id", "object_id", "location_kind", "is_stub", "is_active"]
+    if not await есть_место(conn):
+        # Чистая база: накат встаёт на 029 до заливки, и 031 ещё не накатана.
+        # Каналы грузим без места, его проставит повторный запуск после наката.
+        recs = [r[:9] + r[10:] for r in recs]
+        колонки.remove("location_kind")
+        print("каналы: колонки location_kind нет (миграция 031 не накатана), место "
+              "проставит повторный запуск с --channels после наката")
+    await conn.copy_records_to_table("channel", schema_name="smvu", records=recs,
+                                     columns=колонки)
     без_участка = sum(1 for pair in keys.values() if not pair)
     с_объектом = sum(1 for r in rows if объект(r) is not None)
     print(f"каналы: {len(recs)} строк, участков {len(uniq)}, "
-          f"без участка {без_участка} (датчики в диспетчерских пунктах)")
+          f"без участка {без_участка}")
+    print("каналы: место — " + ", ".join(f"{k} {места[k]}" for k in sorted(места)))
     print(f"каналы: объект дерева проставлен у {с_объектом} из {len(recs)}"
           + ("" if с_объектом else " — в файле нет колонки ид_объект (выгрузка до 15.09.2026)"))
     await записать_чужие_типы(conn, path, чужие, len(recs))
