@@ -381,14 +381,17 @@ fi
 # профиль монопольно и второй сессии отвечают отказом. Зависимостей нет,
 # WebSocket лежит в стандартной поставке Node. Нужны Node 22+ и сборка
 # frontend/dist — без них строка честно говорит ПРОПУСК, а не OK.
+# BUNDLE=stand — проверяем бандл, лежащий на стенде, а не свою сборку с диска.
+# 22.09.2026 разница составила 9 строк: локальная сборка давала «проблем нет»,
+# а на стенде в ту же минуту обходной ссылки не было вовсе. Приёмочный скрипт
+# обязан смотреть на то, что отдано заказчику; свою сборку смотрят руками,
+# запуская этот же файл без BUNDLE. Поэтому frontend/dist здесь не нужен.
 if [ -z "${BASE_URL:-}" ]; then
   skip_msg "НФ-92" "доступность таблиц — задайте BASE_URL"
 elif ! command -v node >/dev/null 2>&1; then
   skip_msg "НФ-92" "доступность таблиц — нет node"
-elif [ ! -f frontend/dist/index.html ]; then
-  skip_msg "НФ-92" "доступность таблиц — нет сборки, сначала npm --prefix frontend run build"
 else
-  run "НФ-92"       "доступность таблиц"     env BASE_URL="$BASE_URL" node delivery/check-a11y.mjs
+  run "НФ-92"       "доступность таблиц"     env BASE_URL="$BASE_URL" BUNDLE=stand node delivery/check-a11y.mjs
 fi
 
 if [ -n "${TLS_HOST:-}" ]; then

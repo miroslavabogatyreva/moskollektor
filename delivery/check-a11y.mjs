@@ -42,6 +42,7 @@
 // Запуск:
 //     node delivery/check-a11y.mjs                      # стенд по умолчанию
 //     BASE_URL=https://135.106.216.101 node delivery/check-a11y.mjs
+//     BUNDLE=stand node delivery/check-a11y.mjs         # бандл, лежащий на стенде
 //     node delivery/check-a11y.mjs --selfcheck          # без браузера и сети
 //
 // Код возврата 1, если упала хоть одна строка.
@@ -59,6 +60,14 @@ const ДИСТ = path.join(КОРЕНЬ, 'frontend/dist')
 const СТЕНД = new URL(process.env.BASE_URL || 'https://135.106.216.101')
 const ЛОГИН = process.env.STAND_LOGIN || 'dispatcher1'
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+// Чей бандл проверяем. local — frontend/dist с диска (по умолчанию: так видно
+// правку до выкладки). stand — бандл, который лежит на стенде прямо сейчас.
+// Разница не теоретическая: 22.09.2026 проверка дала «проблем нет» на локальной
+// сборке, а на стенде в ту же минуту лежал бандл без этих правок. Строку приёмки
+// НФ-92 закрывает только BUNDLE=stand — иначе мы закрываем её на том, чего
+// заказчику не отдали. Данные в обоих режимах живые, со стенда.
+const БАНДЛ = process.env.BUNDLE === 'stand' ? 'stand' : 'local'
 
 // Экраны, у которых есть таблица с заголовками. Карточки объекта здесь нет
 // нарочно: её таблица в четыре строки, обходная ссылка ей не нужна.
@@ -142,7 +151,7 @@ const ТИПЫ = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript;
 
 function поднятьПрокси(порт) {
   const сервер = http.createServer((вход, ответ) => {
-    if (new URL(вход.url, 'http://x').pathname.startsWith('/api/')) {
+    if (БАНДЛ === 'stand' || new URL(вход.url, 'http://x').pathname.startsWith('/api/')) {
       const наружу = https.request(
         { host: СТЕНД.hostname, port: СТЕНД.port || 443, path: вход.url, method: вход.method,
           rejectUnauthorized: false,
@@ -270,7 +279,7 @@ async function замерить(в, порт, экран) {
 // ── прогон ───────────────────────────────────────────────────────────────────
 if (process.argv.includes('--selfcheck')) process.exit(самопроверка() === 0 ? 0 : 1)
 
-if (!fs.existsSync(path.join(ДИСТ, 'index.html')))
+if (БАНДЛ === 'local' && !fs.existsSync(path.join(ДИСТ, 'index.html')))
   throw new Error(`нет сборки фронта: ${ДИСТ}/index.html. Сначала npm --prefix frontend run build`)
 
 const порт = await свободныйПорт()
@@ -280,7 +289,9 @@ const сервер = await поднятьПрокси(порт)
 const chrome = await поднятьChrome(отладка, профиль)
 const в = await Вкладка.открыть(отладка)
 
-console.log(`проверка доступности таблиц против ${СТЕНД.origin}, сборка ${ДИСТ}\n`)
+console.log(БАНДЛ === 'stand'
+  ? `проверка доступности таблиц: БАНДЛ СО СТЕНДА ${СТЕНД.origin}, данные оттуда же\n`
+  : `проверка доступности таблиц: локальная сборка ${ДИСТ}, данные со стенда ${СТЕНД.origin}\n  строку НФ-92 этот режим не закрывает, для неё нужен BUNDLE=stand\n`)
 try {
   for (const экран of ЭКРАНЫ) {
     const з = await замерить(в, порт, экран)
