@@ -187,16 +187,26 @@ systemctl is-active  docker -> active
 на приёмке напечатал бы «худший 147: 5,6 с» вместо настоящих 32,7 с — заказчик
 получил бы неверное число под видом честного замера.
 
+**Четвёртая ловушка, 22.09.2026: `contracts/` в команде тоже не было.** Слияние
+правок ML-команды принесло `contracts/failure.v3.json`, его читает `code/model_failure.py`,
+а выложили мы `backend db code` — по этой самой инструкции. `docker build` прошёл
+без слова, `contracts` в образ попал вчерашний, и `python code/check_metrics.py --selfcheck`
+внутри образа упал `FileNotFoundError: /app/contracts/failure.v3.json`. Пропуск каталога
+не роняет сборку никогда: `COPY` берёт то, что лежит на сервере, а лежит там прошлая
+выкладка. Теперь каталогов четыре, и что список не разъедется с `COPY` в `backend/Dockerfile`,
+проверяет `code/check_deploy_set.py` — он стоит в `delivery/check-all.sh` и краснеет,
+если в `Dockerfile` появился пятый `COPY`, а в команде его нет.
+
 **Что едет на стенд для готового образа, поимённо, и откуда:**
 
 ```
-git archive origin/master backend db code | ssh root@135.106.216.101 \
+git archive origin/master backend db code contracts | ssh root@135.106.216.101 \
   "rm -rf /srv/moskollektor/backend /srv/moskollektor/db /srv/moskollektor/code \
-   && tar -x -C /srv/moskollektor"
+   /srv/moskollektor/contracts && tar -x -C /srv/moskollektor"
 ```
 
-Три каталога — `backend/`, `db/`, `code/` — и ни один не `rsync` из рабочего
-дерева разработчика: в дереве всегда лежит незакоммиченная работа нескольких
+Четыре каталога — `backend/`, `db/`, `code/`, `contracts/`, — и ни один не `rsync`
+из рабочего дерева разработчика: в дереве всегда лежит незакоммиченная работа нескольких
 сессий одновременно, а образ, который сдаём, обязан отвечать за то, что
 закоммичено, а не за то, что оказалось на чьём-то ноутбуке. Правку одного
 файла в разработке по-прежнему шлют `rsync` поимённо, как в примерах выше, —
