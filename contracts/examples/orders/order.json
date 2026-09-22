@@ -7,8 +7,8 @@
   "status": "OPEN",
   "source_system": "forecast",
   "subject": "Превентивные работы по прогнозу, участок 889:0",
-  "reported_at": "2026-06-10T08:36:56+03:00",
-  "due_at": "2026-06-11T00:36:56+03:00",
+  "reported_at": "2026-06-30T23:59:59+03:00",
+  "due_at": "2026-07-01T15:59:59+03:00",
   "deadline_hours": 16.0,
   "warning_opened_at": "2026-06-10T08:36:56+03:00",
   "risk_window_end": "2026-07-10T08:36:56+03:00",
@@ -33,8 +33,8 @@
   "work_order": {
     "order_no": "AW0000645972",
     "status": "CREATED",
-    "planned_start": "2026-06-10T08:36:56+03:00",
-    "planned_finish": "2026-06-11T00:36:56+03:00"
+    "planned_start": "2026-06-30T23:59:59+03:00",
+    "planned_finish": "2026-07-01T15:59:59+03:00"
   },
   "priority": {
     "code": "2",
