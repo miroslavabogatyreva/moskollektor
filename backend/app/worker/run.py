@@ -45,12 +45,15 @@ import bisect
 import os
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
 from app.domain import explain, order_rules
 from app.mlclient import client
 from app.worker import features, publish, run_v3, score_v3
+
+МОСКВА = ZoneInfo("Europe/Moscow")
 
 БЛОКИРОВКА = 48217
 
@@ -258,9 +261,16 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
 
             # Срез файла обязан совпадать со срезом прогона, иначе мы пишем
             # вчерашний риск сегодняшним числом. Разрешённый зазор — ЗАПАС_ФАЙЛА_Ч.
-            отставание_файла = abs(
-                (as_of - datetime.fromisoformat(v3["срез"]).replace(
-                    tzinfo=as_of.tzinfo)).total_seconds() / 3600)
+            # Время в score.json наивное, БЕЗ пояса, и оно московское: образ
+            # ml-score считает по данным заказчика, а они в московском времени
+            # (backend/app/ingest/smvu_csv.py, MSK). Подставлять сюда пояс прогона
+            # нельзя — планировщик берёт срез из базы в UTC, и один и тот же момент
+            # разошёлся бы ровно на три часа. Поймано первым же автоматическим
+            # расчётом на стенде 22.09.2026: «срез файла отстал на 3.0 ч».
+            срез_файла = datetime.fromisoformat(v3["срез"])
+            if срез_файла.tzinfo is None:
+                срез_файла = срез_файла.replace(tzinfo=МОСКВА)
+            отставание_файла = abs((as_of - срез_файла).total_seconds() / 3600)
             if отставание_файла > ЗАПАС_ФАЙЛА_Ч:
                 raise score_v3.ФайлНеГодится(
                     f"срез файла {v3['срез']} отстал от среза прогона на "
