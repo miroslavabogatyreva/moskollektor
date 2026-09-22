@@ -1197,6 +1197,10 @@ CREATE TABLE ref.object_xref (
                             pred.section_weight на нём, а не на экранном
                             smvu.fault_episode: 3 675 эпизодов в окне
                             вместо 10 726 (строка плана 3.17, MOS-153)
+039_feedback_reason_five.sql
+                            ref.feedback_reason: пять причин ложного
+                            прогноза, как в строке приёмки Ф-35;
+                            удалена model_error «Модель ошиблась»
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
