@@ -16,6 +16,10 @@ dashboard/
 code/*
 !code/check_*.py
 !code/predictive_metrics.py
+# check_metrics.py с 21.09.2026 импортирует model_failure (цель М-18…М-20
+# в определении модели). Под маску check_* файл не подходит, и без этой
+# строки команда приёмки в образе падает ModuleNotFoundError.
+!code/model_failure.py
 .DS_Store
 **/__pycache__/
 *.pyc
