@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
+import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { errorMessage } from '../../lib/format'
 import { отставание } from './lag'
@@ -87,48 +88,49 @@ export function DashboardScreen(_props: Record<string, unknown>) {
       {rows && rows.length === 0 && <p style="color:var(--text-muted)">Рисков нет.</p>}
 
       {sorted.length > 0 && (
-        <table class="w-full text-sm" style="border-collapse:collapse">
-          <thead>
-            <tr>
-              {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
-                <th
-                  key={h}
-                  class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                  style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr
-                key={r.section_id}
-                onClick={() => route(`/objects/${r.section_id}`)}
-                style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
-              >
-                <td class="px-2 py-2 num">{r.risk_rank}</td>
-                <td class="px-2 py-2">
-                  {имяОбъекта(имена.get(r.section_id), r.section_id)}{' '}
-                  <span style="color:var(--text-muted)" class="num">
-                    · {r.section_id}
-                  </span>
-                </td>
-                <td class="px-2 py-2">
-                  {словоРиска(r.risk_class)}
-                  {r.is_stale && (
-                    <span style="color:var(--state-warning)">
-                      {' '}
-                      · расчёт не прошёл, показан прошлый
-                    </span>
-                  )}
-                </td>
-                <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
+        <>
+          <SkipTable targetId="dashboard-table-end" />
+          <table class="w-full text-sm" style="border-collapse:collapse">
+            <thead>
+              <tr>
+                {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
+                  <th
+                    key={h}
+                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
+                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr
+                  key={r.section_id}
+                  {...rowLink(() => route(`/objects/${r.section_id}`))}
+                  style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
+                >
+                  <td class="px-2 py-2 num">{r.risk_rank}</td>
+                  <td class="px-2 py-2">
+                    {имяОбъекта(имена.get(r.section_id), r.section_id)}{' '}
+                    <span style="color:var(--text-muted)" class="num">
+                      · {r.section_id}
+                    </span>
+                  </td>
+                  <td class="px-2 py-2">
+                    {словоРиска(r.risk_class)}
+                    {r.is_stale && (
+                      <span style="color:var(--state-warning)"> · расчёт не прошёл, показан прошлый</span>
+                    )}
+                  </td>
+                  <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div id="dashboard-table-end" tabindex={-1} />
+        </>
       )}
     </main>
   )
