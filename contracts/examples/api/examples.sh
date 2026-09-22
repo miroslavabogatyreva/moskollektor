@@ -373,7 +373,12 @@ check "PUT /api/settings/precision_min (admin1, 1.5 — вне (0,1))" \
 # Проверка по улову, не по счётчику (нашла 58): audit.user_action пишет КАЖДЫЙ
 # запрос, включая GET-запросы этого же прогона, — разница длины «до/после»
 # не изолирует именно наш PUT. Печатаем оба числа для картины, но ассерт ищет
-# конкретную строку: метод, путь, код 200 и details.old/new словами «24»/«30».
+# конкретную строку: метод, путь, код 200 и details.old/new — прежнее значение и пробное.
+#
+# Прежнее значение ЧИТАЕТСЯ, а не зашито (MOS-179, 22.09.2026). До этого проверка
+# «возвращала как было» числом 24, а миграция 037 подняла горизонт до 720 — и каждый
+# прогон examples.sh ставил на стенде 24 (audit.user_action 7904: 720 → 30,
+# 7906: 30 → 24). Не прочиталось — PUT не делаем вовсе: вернуть было бы нечего.
 #
 # action_id, а не просто «есть подходящая строка в списке» (нашла я сама,
 # 17.09.2026): при повторных прогонах в журнале остаётся строка от ПРОШЛОГО
@@ -382,6 +387,19 @@ check "PUT /api/settings/precision_min (admin1, 1.5 — вне (0,1))" \
 # коде. Граница — максимальный action_id ДО этого PUT, ищем строго после него.
 check_settings_audit_trail() {
     label="PUT /api/settings/forecast_horizon_h (admin1) со следом old/new в audit"
+    was=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/settings" | python3 -c "
+import json, sys
+from decimal import Decimal
+v = next(r['value'] for r in json.load(sys.stdin) if r['key'] == 'forecast_horizon_h')
+print(Decimal(str(v)).normalize().to_eng_string())
+" 2>/dev/null)
+    if [ -z "$was" ]; then
+        echo "РАСХОЖДЕНИЕ $label -> GET /api/settings не отдал forecast_horizon_h, PUT не делаю"
+        mismatch=1
+        return
+    fi
+    # Пробное значение обязано отличаться от прежнего, иначе old = new и след не отличим.
+    probe=30; [ "$was" = "30" ] && probe=31
     # GET /api/audit отдаёт {total, items} с 21.09.2026 (MOS-135) — total,
     # а не длина items: items теперь страница (умолчание 200), а не весь журнал.
     before_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
@@ -393,7 +411,7 @@ print(max((r['action_id'] for r in rows), default=0))
 " 2>/dev/null || echo 0)
 
     curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
-        -H "Content-Type: application/json" -d '{"value": 30}' \
+        -H "Content-Type: application/json" -d "{\"value\": $probe}" \
         "$BASE_URL/api/settings/forecast_horizon_h"
     audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
     after=$(echo "$audit_body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
@@ -401,19 +419,26 @@ print(max((r['action_id'] for r in rows), default=0))
     # Вернуть горизонт как было — до печати результата, чтобы откат случился
     # даже если сама проверка ниже упадёт.
     curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
-        -H "Content-Type: application/json" -d '{"value": 24}' \
+        -H "Content-Type: application/json" -d "{\"value\": $was}" \
         "$BASE_URL/api/settings/forecast_horizon_h"
 
     found=$(echo "$audit_body" | python3 -c "
 import json, sys
+from decimal import Decimal
 rows = json.load(sys.stdin).get('items', [])
 border = $before_max_id
+def same(a, b):
+    try:
+        return Decimal(str(a)) == Decimal(str(b))
+    except Exception:
+        return False
 for r in rows:
     if r.get('action_id', 0) <= border:
         continue
     d = r.get('details') or {}
     if (r.get('method') == 'PUT' and r.get('path') == '/api/settings/forecast_horizon_h'
-            and r.get('status_code') == 200 and d.get('old') == '24' and d.get('new') == '30'):
+            and r.get('status_code') == 200 and same(d.get('old'), '$was')
+            and same(d.get('new'), '$probe')):
         print('да')
         break
 else:
@@ -424,7 +449,7 @@ else:
     if [ "$found" = "да" ]; then
         echo "OK          $label"
     else
-        echo "РАСХОЖДЕНИЕ $label -> среди строк новее action_id $before_max_id нет PUT .../forecast_horizon_h, код 200, old=24/new=30"
+        echo "РАСХОЖДЕНИЕ $label -> среди строк новее action_id $before_max_id нет PUT .../forecast_horizon_h, код 200, old=$was/new=$probe"
         mismatch=1
     fi
 }
