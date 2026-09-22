@@ -21,6 +21,7 @@ const guard: Section = {
   section_id: 1,
   smvu_key: '1:1',
   collector: 1,
+  collector_name: 'тестовый коллектор',
   picket: 1,
   kinds: ['guardObject'],
 }
@@ -28,6 +29,7 @@ const control: Section = {
   section_id: 2,
   smvu_key: '1:2',
   collector: 1,
+  collector_name: 'тестовый коллектор',
   picket: 2,
   kinds: ['controlHouse'],
 }
@@ -35,6 +37,7 @@ const both: Section = {
   section_id: 3,
   smvu_key: '1:3',
   collector: 1,
+  collector_name: 'тестовый коллектор',
   picket: 3,
   kinds: ['controlHouse', 'guardObject'],
 }
