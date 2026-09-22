@@ -60,7 +60,7 @@ export function LogScreen(_props: Record<string, unknown>) {
         setTotal(r.total)
       })
       .catch((e) => {
-        if (e.name !== 'AbortError') setError(errorMessage(e))
+        if (e?.name !== 'AbortError') setError(errorMessage(e))
       })
     return () => ac.abort()
   }, [dateFrom, dateTo, offset])
