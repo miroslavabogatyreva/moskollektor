@@ -9,17 +9,22 @@ app.domain.order_rules.завести() — поэтому джойны на wor
 должен явно потерять такую строку, а не молча подставить null в объект,
 которого по контракту не бывает.
 
-lead_hours и predicted_failure_at считаются той же формулой, что и при
-заведении заявки, — app.domain.order_rules.запас_часов() и момент_отказа().
-Две реализации одной величины расходятся молча (см. docstring order_rules.py),
-поэтому формула ровно одна.
+Срок заявки отдаётся двумя числами рядом (MOS-179): deadline_hours — due_at − reported_at
+самой заявки, из её же двух колонок, и priority.response_hours — норматив приоритета
+из справочника. У новых заявок класса A они совпадают (16 ч); у B и C срок меньше
+норматива, его ограничил потолок превентивности order_preventive_cap_h; у заведённых
+до миграции 037 они расходятся, потому что их срок считался от as_of + horizon_h, а историю
+задним числом мы не переписываем. Расхождение видно в одной строке карточки.
+
+predicted_failure_at и lead_hours убраны: момент as_of + horizon_h — конец окна риска,
+а не предсказанный отказ (ревью Codex 22.09.2026, М-13). Вместо них — warning_opened_at
+и risk_window_end, колонки заявки из той же миграции.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
 from app.auth.deps import require
 from app.db import get_conn
-from app.domain.order_rules import запас_часов, момент_отказа
 
 router = APIRouter(prefix="/api")
 
@@ -42,7 +47,7 @@ COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 # Отдельный COUNT_SQL от страницы не зависит, как и у /api/forecasts.
 LIST_SQL = f"""
 SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
-       n.due_at, n.status, p.code AS priority_code, r.as_of, f.horizon_h
+       n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
  ORDER BY n.due_at
  LIMIT $1 OFFSET $2
@@ -51,6 +56,7 @@ SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
 DETAIL_SQL = """
 SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
        n.subject, n.reported_at, n.due_at, n.long_text AS reason,
+       n.warning_opened_at, n.risk_window_end,
        n.created_at, n.created_by,
        x.section_id, x.smvu_key,
        l.id AS func_location_id, l.code AS func_location_code, l.name AS object_name,
@@ -91,6 +97,11 @@ SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
 """
 
 
+def _часов(от, до) -> float:
+    """Срок заявки в часах: due_at − reported_at, из двух колонок самой заявки."""
+    return round((до - от).total_seconds() / 3600, 1)
+
+
 @router.get("/orders")
 async def list_orders(
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
@@ -110,7 +121,7 @@ async def list_orders(
                 "smvu_key": r["smvu_key"],
                 "work_type_name": r["work_type_name"],
                 "due_at": r["due_at"],
-                "lead_hours": round(запас_часов(r["due_at"], r["as_of"], r["horizon_h"]), 1),
+                "deadline_hours": _часов(r["reported_at"], r["due_at"]),
                 "status": r["status"],
                 "priority_code": r["priority_code"],
             }
@@ -145,6 +156,9 @@ async def get_order(
         "subject": row["subject"],
         "reported_at": row["reported_at"],
         "due_at": row["due_at"],
+        "deadline_hours": _часов(row["reported_at"], row["due_at"]),
+        "warning_opened_at": row["warning_opened_at"],
+        "risk_window_end": row["risk_window_end"],
         "object": {
             "section_id": row["section_id"],
             "smvu_key": row["smvu_key"],
@@ -182,8 +196,6 @@ async def get_order(
             "horizon_h": row["horizon_h"],
             "probability": row["probability"],
             "risk_rank": row["risk_rank"],
-            "predicted_failure_at": момент_отказа(row["as_of"], row["horizon_h"]),
-            "lead_hours": round(запас_часов(row["due_at"], row["as_of"], row["horizon_h"]), 1),
         },
         "reason": row["reason"],
         "created_at": row["created_at"],

@@ -111,15 +111,20 @@ async def собрать(conn):
     # которое не отсекает ничего, даёт ложную уверенность: оно выглядит работающим.
     d["отсев"] = dict(
         await conn.fetchrow(
+            # С 038 (MOS-153) отказ — эпизод модели D5. Условия «незакрытый» и
+            # «короче часа» больше не отсекают: открытый эпизод по контракту
+            # считается, а порог применяет построитель эпизодов. Их счёт остаётся,
+            # чтобы было видно, что это ноль по построению, а не пропавшее условие.
             """SELECT count(*)                                              AS всего,
                   count(*) FILTER (WHERE ended_at IS NULL)              AS незакрытых,
                   count(*) FILTER (WHERE ended_at IS NOT NULL
                                      AND ended_at - started_at <= interval '1 hour')
                                                                         AS короче_часа,
-                  count(*) FILTER (WHERE extract(year FROM started_at) = 2021)
-                                                                        AS год_2021,
+                  count(*) FILTER (WHERE timezone('Europe/Moscow', started_at)::date
+                                         NOT BETWEEN w.date_from AND w.date_to)
+                                                                        AS вне_окна,
                   count(*) FILTER (WHERE section_id IS NULL)            AS без_участка
-             FROM smvu.fault_episode"""
+             FROM smvu.model_failure_event CROSS JOIN pred.weight_window() w"""
         )
     )
     # Ряд alpha: как меняется отношение крайних плиток объекта. Не проверка,
@@ -129,12 +134,11 @@ async def собрать(conn):
         for r in await conn.fetch(
             """WITH base AS (
              SELECT so.section_id, so.object_id,
-                    (SELECT count(*) FROM smvu.fault_episode e
+                    (SELECT count(*) FROM smvu.model_failure_event e
                       WHERE e.section_id = so.section_id
-                        AND e.ended_at IS NOT NULL
-                        AND e.ended_at - e.started_at > interval '1 hour'
-                        AND extract(year FROM e.started_at) <> 2021) AS n
-               FROM pred.section_object so
+                        AND timezone('Europe/Moscow', e.started_at)::date
+                            BETWEEN w.date_from AND w.date_to) AS n
+               FROM pred.section_object so CROSS JOIN pred.weight_window() w
               WHERE EXISTS (SELECT 1 FROM feat.section_daily d
                              WHERE d.section_id = so.section_id)),
            agg AS (SELECT object_id, count(*) AS N, sum(n) AS SUMN, max(n) AS MAXN
@@ -235,12 +239,16 @@ def check_v03(d):
 
 
 def check_v04(d):
-    """Отказы только в 2021 — это третье состояние, его видно в excluded_cnt."""
+    """Отказы только вне окна веса — третье состояние, его видно в excluded_cnt.
+
+    Окно — pred.weight_window(), период обучения модели (032, MOS-159); до 032
+    вне окна был один 2021 год.
+    """
     вычеркнутые = [r for r in d["вес"] if r["excluded_cnt"] and not r["episodes_cnt"]]
     чистые = [r for r in d["вес"] if not r["excluded_cnt"] and not r["episodes_cnt"]]
     ок = bool(вычеркнутые) and bool(чистые)
     как = (
-        f"{len(вычеркнутые)} участков отказывали только в 2021 и в вес не попали, "
+        f"{len(вычеркнутые)} участков отказывали только вне окна веса и в вес не попали, "
         f"{len(чистые)} не отказывали ни разу, вместе {len(вычеркнутые) + len(чистые)} "
         f"участков с нулевым весом отказов; в данных они различимы колонкой "
         f"excluded_cnt, вес у них одинаковый"
@@ -326,19 +334,16 @@ def check_v06(d):
 def печать_справок(d):
     """То, что не проверка, а числа для решения: отсев, alpha, пороги заявок."""
     о = d["отсев"]
-    print(f"\nчто отсекает определение отказа (всего эпизодов {о['всего']}):")
-    print(f"   незакрытых (ended_at IS NULL)      {о['незакрытых']}")
-    print(f"   короче часа                        {о['короче_часа']}")
-    print(f"   2021 год                           {о['год_2021']}")
+    print(f"\nчто отсекает определение отказа (всего эпизодов D5 {о['всего']}):")
+    print(f"   вне окна веса (pred.weight_window) {о['вне_окна']}")
     print(f"   без участка (каналы-заглушки)      {о['без_участка']}")
+    # Эти два не отсекают по построению (038): открытый эпизод контракт считает,
+    # а короче часа построитель эпизодов не создаёт. Печатаем, чтобы ноль был виден.
+    print(f"   незакрытых — считаются, не отсекаются  {о['незакрытых']}")
+    print(f"   короче часа — ноль по построению       {о['короче_часа']}")
     пустые = [
         имя
-        for имя, n in (
-            ("незакрытые", о["незакрытых"]),
-            ("короче часа", о["короче_часа"]),
-            ("2021 год", о["год_2021"]),
-            ("без участка", о["без_участка"]),
-        )
+        for имя, n in (("вне окна веса", о["вне_окна"]), ("без участка", о["без_участка"]))
         if n == 0
     ]
     if пустые:
@@ -363,20 +368,19 @@ def печать_справок(d):
         )
 
     # Самое важное следствие разноса — и оно не в этой задаче, а в соседней.
-    макс_доля = (
-        max(
-            float(r["макс_доля"])
-            for r in d["alpha"]
-            if abs(float(r["alpha"]) - d["настройки"].get("forecast_weight_alpha", 1.0))
-            < 1e-9
-        )
-        if d["alpha"]
-        else 0.0
-    )
-    print(
-        f"\nпороги автозаявок при включённом разносе (alpha="
-        f"{d['настройки'].get('forecast_weight_alpha', 1.0):g}):"
-    )
+    alpha = d["настройки"].get("forecast_weight_alpha", 1.0)
+    print(f"\nпороги автозаявок при включённом разносе (alpha={alpha:g}):")
+    доли = [
+        float(r["макс_доля"])
+        for r in d["alpha"]
+        if abs(float(r["alpha"]) - alpha) < 1e-9
+    ]
+    # Пустая база или alpha вне ряда 0,1/0,5/1,0/2,0: сравнивать пороги не с чем.
+    # Раньше здесь выходил 0,0, и строка «порог / макс_доля» делила на ноль.
+    if not доли:
+        print(f"   сравнить не с чем: в ряду alpha нет строк для alpha={alpha:g}")
+        return
+    макс_доля = max(доли)
     print(f"   самая большая доля участка среди проверенных объектов {макс_доля:.4f}")
     print(
         f"   значит даже при вероятности объекта 1,000 участок получит "
@@ -413,6 +417,11 @@ def demo():
     близко(разнести_по_весу(0.0, [0.9, 0.1]), [0.0, 0.0], "нулевая вероятность")
     assert доля(12, 3173).startswith("12 из 3173")
     assert доля(1, 0) == "1 из 0"
+    if asyncpg is not None:  # три диагноза сбоя не сливаются в «нет связи»
+        assert причина_сбоя(asyncio.TimeoutError()).startswith("запрос не уложился")
+        assert причина_сбоя(ConnectionRefusedError(61, "refused")).startswith("нет связи")
+        нет_таблицы = asyncpg.UndefinedTableError("relation does not exist")
+        assert причина_сбоя(нет_таблицы).startswith("база ответила ошибкой")
     print("демо: сумма разнесённого равна исходной вероятности на четырёх раскладах")
     print("OK")
 
@@ -454,9 +463,29 @@ def main(argv):
         return fail_all("не задана переменная DATABASE_URL, подключаться не к чему")
     try:
         результаты, d = asyncio.run(run_checks(dsn))
-    except (OSError, ValueError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
-        return fail_all(f"нет связи с базой: {str(e).splitlines()[0]}")
+    except Exception as e:
+        return fail_all(причина_сбоя(e))
     return report(результаты, d)
+
+
+def причина_сбоя(e: BaseException) -> str:
+    """Три разных диагноза, а не один «нет связи».
+
+    До 22.09.2026 любая ошибка базы печаталась как «нет связи с базой», и f2 увидела
+    «нет связи с базой: relation smvu.model_failure_event does not exist» — связь
+    была, не было миграции. TimeoutError приходит с пустым текстом, и splitlines()[0]
+    падал IndexError (нашла e8), поэтому пустой текст заменяем классом ошибки.
+    """
+    текст = (str(e).splitlines() or [type(e).__name__])[0]
+    связь = (OSError, ValueError, asyncpg.PostgresConnectionError,
+             asyncpg.InvalidAuthorizationSpecificationError, asyncpg.InvalidCatalogNameError)
+    if isinstance(e, asyncio.TimeoutError):
+        return f"запрос не уложился в таймаут: {текст}"
+    if isinstance(e, связь):
+        return f"нет связи с базой: {текст}"
+    if isinstance(e, asyncpg.PostgresError):
+        return f"база ответила ошибкой: {текст}"
+    raise e
 
 
 if __name__ == "__main__":

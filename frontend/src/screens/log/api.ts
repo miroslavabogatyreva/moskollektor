@@ -22,7 +22,10 @@ function ожидаетсяСписок(body: unknown): body is ForecastListResp
 // GET /api/forecasts?from=&to=&offset= — М-06, М-16, Ф-55. Постраничность
 // с умолчанием 200 записей на странице (backend/app/api/routes.py) — на
 // 425 183 строках без неё браузер вставал.
-export async function fetchForecasts(query: ForecastQuery): Promise<ForecastListResponse> {
+export async function fetchForecasts(
+  query: ForecastQuery,
+  signal?: AbortSignal,
+): Promise<ForecastListResponse> {
   const params = new URLSearchParams()
   if (query.from) params.set('from', query.from)
   if (query.to) params.set('to', query.to)
@@ -30,6 +33,7 @@ export async function fetchForecasts(query: ForecastQuery): Promise<ForecastList
   const qs = params.toString()
   const r = await fetch(`/api/forecasts${qs ? `?${qs}` : ''}`, {
     headers: { 'X-User-Login': API_LOGIN },
+    signal,
   })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()

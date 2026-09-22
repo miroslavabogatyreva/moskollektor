@@ -67,15 +67,28 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
           {data.object.name} <span class="num">· {data.object.smvu_key}</span>
         </Field>
         <Field label="Вид работ">{data.work_type.activity_type_name}</Field>
-        <Field label="Срок выполнения">{formatDateTime(data.due_at)}</Field>
+        <Field label="Срок выполнения">
+          {formatDateTime(data.due_at)}{' '}
+          <span style="color:var(--text-muted)">
+            · срок заявки <span class="num">{data.deadline_hours}</span> ч от обнаружения
+          </span>
+        </Field>
+        {data.warning_opened_at && (
+          <Field label="Предупреждение модели открыто">
+            {formatDateTime(data.warning_opened_at)}
+          </Field>
+        )}
+        {data.risk_window_end && (
+          <Field label="Окно риска до">{formatDateTime(data.risk_window_end)}</Field>
+        )}
         <Field label="Обоснование">{data.reason}</Field>
       </section>
 
       <section class="text-sm flex flex-col gap-1" style="color:var(--text-secondary)">
         <div>
           Статус <b>{data.status}</b> · приоритет{' '}
-          <b>{PRIORITY_LABEL[data.priority.code] ?? data.priority.name}</b> (реакция{' '}
-          {data.priority.response_hours} ч)
+          <b>{PRIORITY_LABEL[data.priority.code] ?? data.priority.name}</b> (норматив реакции{' '}
+          <span class="num">{data.priority.response_hours}</span> ч)
         </div>
         <div>
           Завёл: {data.created_by ?? 'расчёт'}, {formatDateTime(data.created_at)}
