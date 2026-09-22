@@ -371,6 +371,26 @@ else
   skip_msg "М-03…М-15" "экраны и метод рисков — задайте BASE_URL"
 fi
 
+# Доступность таблиц (НФ-92, часть III). Проверяет не нажатия, а дерево
+# доступности: заголовков columnheader столько же, сколько <th> в <thead>;
+# строк row столько же, сколько строк <tbody> плюс шапка; ячеек больше нуля;
+# строк с ролью link ровно ноль. Третье условие здесь главное: 22.09.2026
+# role="link" на <tr> вынес 3 173 строки дашборда из состава таблицы, и от
+# первых двух условий это не покраснело бы — заголовки были в порядке.
+# Браузер свой и профиль свой: MCP playwright и MCP chrome-devtools держат
+# профиль монопольно и второй сессии отвечают отказом. Зависимостей нет,
+# WebSocket лежит в стандартной поставке Node. Нужны Node 22+ и сборка
+# frontend/dist — без них строка честно говорит ПРОПУСК, а не OK.
+if [ -z "${BASE_URL:-}" ]; then
+  skip_msg "НФ-92" "доступность таблиц — задайте BASE_URL"
+elif ! command -v node >/dev/null 2>&1; then
+  skip_msg "НФ-92" "доступность таблиц — нет node"
+elif [ ! -f frontend/dist/index.html ]; then
+  skip_msg "НФ-92" "доступность таблиц — нет сборки, сначала npm --prefix frontend run build"
+else
+  run "НФ-92"       "доступность таблиц"     env BASE_URL="$BASE_URL" node delivery/check-a11y.mjs
+fi
+
 if [ -n "${TLS_HOST:-}" ]; then
   run "НФ-75"       "версии TLS и шифры"     sh deploy/check-tls.sh "$TLS_HOST"
 else
