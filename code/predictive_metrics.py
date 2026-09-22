@@ -176,12 +176,18 @@ def evaluate_alerts(alerts, failures, horizon_hours=24, max_lead_hours=None,
             leads.append((t_fail - alerts[best][1]).total_seconds() / 3600)
 
     fp = sum(1 for i in range(len(alerts)) if not matched_to_failure[i])
+    # Дубли считаем своим проходом, а не разностью «всего минус tp минус fp»:
+    # разностью тождество «предупреждений = tp + fp + дублей» верно всегда
+    # и ничего не проверяет. Отдельный счёт ловит поломку, при которой одно
+    # предупреждение закрыло два отказа (MOS-167).
+    dup = sum(1 for i in range(len(alerts)) if matched_to_failure[i] and not used[i])
 
     precision, recall = precision_recall(tp, fp, fn)
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
 
     out = {
-        "tp": tp, "fp": fp, "fn": fn,
+        "tp": tp, "fp": fp, "fn": fn, "dup": dup,
+        "alerts": len(alerts),
         "precision": round(precision, 3),
         "recall": round(recall, 3),
         "f1": round(f1, 3),

@@ -5,6 +5,7 @@
 и GET здесь ограничен require(), а не открыт всем ролям, как риски и заявки.
 """
 
+from datetime import date, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -16,28 +17,89 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
-# Границы по ключу — находка 58 и 57: без них PUT принимал горизонт 0 и −5.
-# forecast_horizon_h целый и ≥ 24 (постановка: горизонт прогноза не меньше
-# 24 часов); пороги и уровень риска — доля в открытом интервале (0, 1).
-_BOUNDS = {
-    "forecast_horizon_h": (Decimal(24), None),
-    "precision_min": (Decimal(0), Decimal(1)),
-    "recall_min": (Decimal(0), Decimal(1)),
-    "risk_threshold_high": (Decimal(0), Decimal(1)),
-    # Потолок срока автозаявки, ч (037, MOS-179): больше нуля и не дальше горизонта модели.
-    "order_preventive_cap_h": (Decimal(0), Decimal(720)),
+# Правило на каждый ключ, который сеют миграции 020, 026, 028, 032, 035, 037. Находки 58
+# и 57: без границ PUT принимал горизонт 0 и −5. Ключа нет в правилах — 422, а не
+# KeyError и 500: так падали 10 ключей из 16 (MOS-159, вопрос Николая в PR #5).
+# Новая настройка без правила через API не правится, пока правило не заведут.
+#   "prob"  — вероятность, открытый интервал (0, 1): пороги Precision/Recall, риска, заявок
+#   "frac"  — доля [0, 1): мёртвая зона и гистерезис, ноль значит «выключено»
+#   "int"   — целое не меньше нижней границы; горизонт ≥ 24 ч по постановке,
+#             пульс ≥ 1 мин — при нуле publish.py пишет журнал на каждом прогоне
+#   "flag"  — 0 или 1
+#   "pos"   — строго больше нуля: alpha = 0 обнуляет долю участков без отказов
+#   "open"  — открытый интервал (low, high): потолок срока автозаявки (0, 720) ч —
+#             больше нуля и не дальше горизонта модели (037, MOS-179)
+_RULES = {
+    "forecast_horizon_h": ("int", Decimal(24)),
+    "forecast_heartbeat_min": ("int", Decimal(1)),
+    "risk_class_hold_min": ("int", Decimal(0)),
+    "order_top_sections_per_object": ("int", Decimal(0)),
+    "precision_min": ("prob", None),
+    "recall_min": ("prob", None),
+    "risk_threshold_high": ("prob", None),
+    "order_threshold_a": ("prob", None),
+    "order_threshold_b": ("prob", None),
+    "order_threshold_c": ("prob", None),
+    "forecast_deadband": ("frac", None),
+    "risk_class_hysteresis": ("frac", None),
+    "forecast_spread_enabled": ("flag", None),
+    "forecast_weight_alpha": ("pos", None),
+    "order_preventive_cap_h": ("open", (Decimal(0), Decimal(720))),
 }
+
+# Окно истории отказов для веса участка (032_section_weight_window.sql, MOS-159):
+# дата числом ГГГГММДД, потому что колонка value числовая. Без проверки PUT принял
+# бы 20221399, и pred.weight_window() падал бы на to_date при каждом чтении веса —
+# то есть сломался бы разнос в воркере, а не запрос администратора.
+_WINDOW_FROM = "forecast_weight_window_from"
+_WINDOW_TO = "forecast_weight_window_to"
+_WINDOW_PAIR = {_WINDOW_FROM: _WINDOW_TO, _WINDOW_TO: _WINDOW_FROM}
+
+
+def _as_date(value: Decimal) -> date | None:
+    if value != value.to_integral_value():
+        return None
+    текст = str(int(value))
+    # Ровно восемь цифр: strptime прочтёт и «2022041» как 2022-04-01, а to_date
+    # в pred.weight_window() — по-своему, и API с базой разошлись бы в дате.
+    if len(текст) != 8 or not текст.isdigit():
+        return None
+    try:
+        return datetime.strptime(текст, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _window_order_error(key: str, value: Decimal, other: Decimal | None) -> str | None:
+    """«С» позже «по» — окно пустое, и вес молча становится ровным 1/N у всех участков."""
+    if other is None:
+        return None
+    start, end = (value, other) if key == _WINDOW_FROM else (other, value)
+    if _as_date(start) > _as_date(end):
+        return f"окно веса: начало {start} позже конца {end}"
+    return None
 
 
 def _validation_error(key: str, value: Decimal) -> str | None:
-    if key == "forecast_horizon_h":
-        low, _ = _BOUNDS[key]
-        if value != value.to_integral_value() or value < low:
-            return f"forecast_horizon_h: целое число часов, не меньше {low}"
+    if key in _WINDOW_PAIR:
+        if _as_date(value) is None:
+            return f"{key}: дата числом ГГГГММДД, например 20220401"
         return None
-    low, high = _BOUNDS[key]
-    if not (low < value < high):
-        return f"{key}: значение должно быть в интервале ({low}, {high})"
+    if key not in _RULES:
+        return f"{key}: для настройки нет правила проверки, правка через API закрыта"
+    kind, low = _RULES[key]
+    if kind == "int" and (value != value.to_integral_value() or value < low):
+        return f"{key}: целое число, не меньше {low}"
+    if kind == "prob" and not (0 < value < 1):
+        return f"{key}: значение должно быть в интервале (0, 1)"
+    if kind == "frac" and not (0 <= value < 1):
+        return f"{key}: значение должно быть в интервале [0, 1)"
+    if kind == "flag" and value not in (0, 1):
+        return f"{key}: 0 или 1"
+    if kind == "pos" and value <= 0:
+        return f"{key}: значение должно быть больше 0"
+    if kind == "open" and not (low[0] < value < low[1]):
+        return f"{key}: значение должно быть в интервале ({low[0]}, {low[1]})"
     return None
 
 
@@ -71,6 +133,11 @@ async def update_setting(
     if old is None:
         raise HTTPException(404, f"настройки «{key}» нет")
     ошибка = _validation_error(key, body.value)
+    if ошибка is None and key in _WINDOW_PAIR:
+        other = await conn.fetchval(
+            "SELECT value FROM ref.app_setting WHERE key = $1", _WINDOW_PAIR[key]
+        )
+        ошибка = _window_order_error(key, body.value, other)
     if ошибка is not None:
         raise HTTPException(422, ошибка)
     row = await conn.fetchrow(

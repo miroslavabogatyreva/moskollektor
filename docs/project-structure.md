@@ -108,6 +108,8 @@ moskollektor/
 │       └── ingest/           заливка выгрузки СМВУ и разбор тега на участок;
 │                              эпизоды отказа экрана (fault_episodes.py) и эпизоды
 │                              по словарю модели v3 (model_failure_episodes.py);
+│                              вес, карточка участка и метрики с 038 читают
+│                              вторые, первые — только features.py заглушки;
 │                              место канала — channel_place.py и kind_names.py
 ├── backend/tests/       pytest чистых функций без базы, вместе с code/tests/:
 │                        python3 -m pytest backend/tests code/tests — 35 тестов.

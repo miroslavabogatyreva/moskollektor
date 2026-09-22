@@ -48,13 +48,21 @@ export function LogScreen(_props: Record<string, unknown>) {
   })
 
   useEffect(() => {
+    // AbortController, а не флажок (как в ForecastCard.tsx/ObjectCard.tsx):
+    // здесь недостаточно погасить устаревший ответ в состоянии, запрос ушедшей
+    // страницы (или предыдущего окна дат) должен оборваться в сети по-настоящему —
+    // MOS-178, приёмка Playwright видит его в devtools как canceled.
     setError(null)
-    fetchForecasts({ from: dateFrom || undefined, to: dateTo || undefined, offset })
+    const ac = new AbortController()
+    fetchForecasts({ from: dateFrom || undefined, to: dateTo || undefined, offset }, ac.signal)
       .then((r) => {
         setItems(r.items)
         setTotal(r.total)
       })
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => {
+        if (e?.name !== 'AbortError') setError(errorMessage(e))
+      })
+    return () => ac.abort()
   }, [dateFrom, dateTo, offset])
 
   function изменитьДату(setter: (v: string) => void, value: string) {
