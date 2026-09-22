@@ -160,15 +160,16 @@ async def list_object_channels(
     незакрытый обрывает наработку и не сравним по длительности), длиннее часа
     (порог уже заложен при построении эпизодов, условие в запросе не холостое —
     держит определение видимым и сработает, если порог когда-нибудь сдвинут)
-    и не год из `ref.app_setting.forecast_weight_exclude_year` (по умолчанию
-    2021, заказчик 19.09.2026: переход СМВУ на новую версию раздул тревоги,
-    этот год рекомендован к исключению из анализа). Год читаем из настройки,
-    а не пишем числом в запросе: 21.09.2026 нашли ровно эту ловушку у другого
-    умолчания — воркер считал по интервалу из одного места, проверка сверяла
-    с другим, — и MOS-150 (db/migrations/028_section_weight.sql) завёл ту же
-    настройку под этот же год для веса участка. Два места, один ключ. `0` в
-    настройке значит «не исключать ни одного» — извлечённый год реальной даты
-    никогда не равен 0, поэтому `<>` отключается сам, без отдельной ветки.
+    и начат внутри окна `pred.weight_window()` — по умолчанию 2022-04-01 …
+    2026-03-31, период обучения модели v3 (MOS-159,
+    db/migrations/032_section_weight_window.sql). Окно то же, по которому
+    pred.section_weight считает вес участка: с 21.09.2026 мы знаем цену двух
+    умолчаний в двух местах — воркер считал по интервалу из одного, проверка
+    сверяла с другим, — поэтому границы читает одна функция, а не этот запрос
+    и представление каждый по-своему. Карточка и вес участка сходятся по
+    определению. 2021 год, который заказчик 19.09.2026 рекомендовал исключить
+    (переход СМВУ на новую версию раздул тревоги), лежит вне окна целиком;
+    до 2022-04 парк другой, и отказы оттуда модель не видела.
 
     `fault_value` в запросе не сужаем до «Неисправен»: у тепловых датчиков
     и датчиков температуры smvu.fault_rule признаёт отказом ещё и «Неопределен»,
@@ -199,10 +200,6 @@ async def list_object_channels(
     if exists is None:
         raise HTTPException(404, "участок не найден")
 
-    excl_year = await conn.fetchval(
-        "SELECT coalesce(max(value) FILTER (WHERE key = 'forecast_weight_exclude_year'), 2021) "
-        "FROM ref.app_setting"
-    )
     total = await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE section_id = $1", section_id)
     rows = await conn.fetch(
         """
@@ -212,16 +209,17 @@ async def list_object_channels(
                round(avg(extract(epoch FROM e.ended_at - e.started_at)) / 3600.0, 1)
                    AS avg_duration_h
         FROM smvu.channel c
+        CROSS JOIN pred.weight_window() w
         LEFT JOIN smvu.fault_episode e ON e.channel_id = c.channel_id
             AND e.ended_at IS NOT NULL
             AND e.ended_at - e.started_at > interval '1 hour'
-            AND extract(year FROM e.started_at) <> $2
+            AND timezone('Europe/Moscow', e.started_at)::date BETWEEN w.date_from AND w.date_to
         WHERE c.section_id = $1
         GROUP BY c.channel_id, c.system_kind, c.sensor_kind, c.name, c.is_active
         ORDER BY faults_cnt DESC, last_fault_at DESC NULLS LAST, avg_duration_h DESC NULLS LAST,
                  c.channel_id
-        LIMIT $3 OFFSET $4
+        LIMIT $2 OFFSET $3
         """,
-        section_id, excl_year, limit, offset,
+        section_id, limit, offset,
     )
     return {"total": total, "items": [dict(r) for r in rows]}

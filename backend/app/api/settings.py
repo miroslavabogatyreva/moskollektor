@@ -5,6 +5,7 @@
 и GET здесь ограничен require(), а не открыт всем ролям, как риски и заявки.
 """
 
+from datetime import date, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -26,8 +27,44 @@ _BOUNDS = {
     "risk_threshold_high": (Decimal(0), Decimal(1)),
 }
 
+# Окно истории отказов для веса участка (032_section_weight_window.sql, MOS-159):
+# дата числом ГГГГММДД, потому что колонка value числовая. Без проверки PUT принял
+# бы 20221399, и pred.weight_window() падал бы на to_date при каждом чтении веса —
+# то есть сломался бы разнос в воркере, а не запрос администратора.
+_WINDOW_FROM = "forecast_weight_window_from"
+_WINDOW_TO = "forecast_weight_window_to"
+_WINDOW_PAIR = {_WINDOW_FROM: _WINDOW_TO, _WINDOW_TO: _WINDOW_FROM}
+
+
+def _as_date(value: Decimal) -> date | None:
+    if value != value.to_integral_value():
+        return None
+    текст = str(int(value))
+    # Ровно восемь цифр: strptime прочтёт и «2022041» как 2022-04-01, а to_date
+    # в pred.weight_window() — по-своему, и API с базой разошлись бы в дате.
+    if len(текст) != 8 or not текст.isdigit():
+        return None
+    try:
+        return datetime.strptime(текст, "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _window_order_error(key: str, value: Decimal, other: Decimal | None) -> str | None:
+    """«С» позже «по» — окно пустое, и вес молча становится ровным 1/N у всех участков."""
+    if other is None:
+        return None
+    start, end = (value, other) if key == _WINDOW_FROM else (other, value)
+    if _as_date(start) > _as_date(end):
+        return f"окно веса: начало {start} позже конца {end}"
+    return None
+
 
 def _validation_error(key: str, value: Decimal) -> str | None:
+    if key in _WINDOW_PAIR:
+        if _as_date(value) is None:
+            return f"{key}: дата числом ГГГГММДД, например 20220401"
+        return None
     if key == "forecast_horizon_h":
         low, _ = _BOUNDS[key]
         if value != value.to_integral_value() or value < low:
@@ -69,6 +106,11 @@ async def update_setting(
     if old is None:
         raise HTTPException(404, f"настройки «{key}» нет")
     ошибка = _validation_error(key, body.value)
+    if ошибка is None and key in _WINDOW_PAIR:
+        other = await conn.fetchval(
+            "SELECT value FROM ref.app_setting WHERE key = $1", _WINDOW_PAIR[key]
+        )
+        ошибка = _window_order_error(key, body.value, other)
     if ошибка is not None:
         raise HTTPException(422, ошибка)
     row = await conn.fetchrow(
