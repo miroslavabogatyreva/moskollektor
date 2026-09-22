@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchDataStatus, fetchRisks } from './api'
+import { отставание } from './lag'
 import type { DataStatus, RiskRow } from './types'
 
 /* Дашборд рисков — задача 5.2 (MOS-49). Плитки и ранжированный список по риску
@@ -140,15 +141,28 @@ function DataEdgeTile({ status, error }: { status: DataStatus | null; error: str
       />
     )
   }
+  /* Отставание среза от края — MOS-129. Сервер считает его сам (`lag_days`),
+     браузер только подписывает: вычитание двух дат здесь пошло бы в поясе
+     того, кто смотрит. Когда срез и край сошлись — а на плановом прогоне они
+     сходятся всегда — про срез молчим: две даты под одной плиткой диспетчер
+     читает как одну, и лишняя строка «отставание 0» перестаёт замечаться
+     ровно тогда, когда в ней появляется число. */
+  const разрыв = отставание(status.lag_days)
   return (
     <Tile
       label="Данные по состоянию на"
       value={new Date(status.data_edge).toLocaleDateString('ru-RU')}
-      sub="конец выгрузки заказчика"
+      sub="конец выгрузки заказчика, по всему парку сразу"
       note={
         status.computed_at
-          ? `расчёт от ${new Date(status.computed_at).toLocaleString('ru-RU')}`
+          ? `расчёт от ${new Date(status.computed_at).toLocaleString('ru-RU')}` +
+            (разрыв.разошлись ? '' : `, ${разрыв.текст}`)
           : 'расчёта ещё не было'
+      }
+      warn={
+        разрыв.разошлись && status.as_of
+          ? `срез расчёта — ${new Date(status.as_of).toLocaleDateString('ru-RU')}: ${разрыв.текст}`
+          : undefined
       }
     />
   )
@@ -159,11 +173,13 @@ function Tile({
   value,
   sub,
   note,
+  warn,
 }: {
   label: string
   value: string
   sub?: string
   note?: string
+  warn?: string
 }) {
   return (
     <article
@@ -184,6 +200,11 @@ function Tile({
       {note && (
         <div class="text-xs" style="color:var(--text-muted)">
           {note}
+        </div>
+      )}
+      {warn && (
+        <div class="text-xs" style="color:var(--state-warning)">
+          {warn}
         </div>
       )}
     </article>
