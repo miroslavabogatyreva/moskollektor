@@ -139,25 +139,31 @@ def get_model(*, url: str = None, таймаут: float = None, пауза: floa
                        таймаут or TIMEOUT_S, пауза)
 
 
-def проверить_контракт(модель: dict) -> None:
+def проверить_контракт(модель: dict, ждём: str | None = None) -> None:
     """Схема признаков разошлась — дальше не считаем.
+
+    `ждём` называет схему явно: расчёт по выдаче модели v3 ждёт `feat.v3`,
+    прежний путь с заглушкой — `feat.v1`. Умолчание оставлено прежним, чтобы
+    старая ветка вела себя ровно как вела.
 
     HLD разд. 8.2, стадия 0: «Не совпало → failed, выход. Молча считать нельзя».
     Модель, обученная на другом наборе признаков, ответит числами, а не ошибкой,
     и отличить их от правильных будет нечем.
     """
     пришло = модель.get("feature_schema")
-    if пришло != SCHEMA_VERSION:
+    if пришло != (ждём or SCHEMA_VERSION):
         raise ModelRejected(
             f"GET /model: feature_schema='{пришло}', а наш контракт — "
-            f"'{SCHEMA_VERSION}'. Модель обучена на другом наборе признаков")
+            f"'{ждём or SCHEMA_VERSION}'. Модель обучена на другом наборе признаков")
 
 
 def predict(run_id: int, computed_at: str, horizon_h: int,
             section_ids: list[int], values: list[list[float | None]],
             directions: tuple[str, ...] = ("sensor_failure",),
             *, url: str = None, таймаут: float = None,
-            пауза: float = RETRY_AFTER_S) -> dict:
+            пауза: float = RETRY_AFTER_S,
+            feature_names: list[str] | None = None,
+            schema_version: str | None = None) -> dict:
     """POST /predict колонками. Возвращает разобранный ответ модели.
 
     Имена признаков едут один раз, значения — массивом на каждый участок:
@@ -172,13 +178,22 @@ def predict(run_id: int, computed_at: str, horizon_h: int,
     """
     if len(values) != len(section_ids):
         raise ValueError(f"строк values {len(values)}, а участков {len(section_ids)}")
+    # Имена и версию схемы можно назвать явно — так ходит ветка v3: у модели
+    # Николая 42 своих признака, и список приезжает в score.json вместе с числами
+    # (backend/app/worker/score_v3.py). Умолчания оставлены прежние, чтобы путь
+    # feat.v1 с заглушкой работал ровно как работал.
+    имена = feature_names or FEATURE_NAMES
+    if len(values) and len(values[0]) != len(имена):
+        raise ValueError(
+            f"значений в строке {len(values[0])}, а имён признаков {len(имена)} — "
+            f"порядок колонок не сойдётся, и модель ответит уверенно и неверно")
     тело = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": schema_version or SCHEMA_VERSION,
         "run_id": run_id,
         "computed_at": computed_at,
         "horizon_h": horizon_h,
         "directions": list(directions),
-        "feature_names": FEATURE_NAMES,
+        "feature_names": имена,
         "section_ids": section_ids,
         "values": values,
     }
