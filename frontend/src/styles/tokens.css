@@ -1,6 +1,8 @@
 /* Цвета и обводки — dashboard/color-palette.md, раздел 9, дословно.
-   Шкала риска (--risk-*) сюда не перенесена: она понадобится задачам 5.2/5.3/5.5,
-   переносить её раньше времени незачем. */
+   Шкала риска (--risk-*) перенесена задачей 5.22 (MOS-106): пять токенов заведены
+   все сразу, но сервер сегодня считает риск бинарно (high/normal, publish.py:77) —
+   живут только --risk-critical (high) и --risk-low (normal). --risk-high, --risk-medium
+   и --risk-nodata лежат до решения о трёхуровневой шкале (Слава/MOS-106). */
 
 /* Шрифты: два файла с Google Fonts, снятые один раз и положенные в assets/fonts —
    браузер их больше не запрашивает. Каждый файл вариативный (один .woff2 на все
@@ -64,6 +66,23 @@
   --focus-ring: #0b6fcb;
   --focus-ring-offset: #ffffff;
 
+  /* шкала риска: заливка / текст / обводка (dashboard/color-palette.md, разд. 9) */
+  --risk-critical: #a81f16;
+  --risk-critical-text: #ffffff;
+  --risk-critical-border: #7a1610;
+  --risk-high: #b35c00;
+  --risk-high-text: #ffffff;
+  --risk-high-border: #7a3d00;
+  --risk-medium: #f2c200;
+  --risk-medium-text: #2b1f00;
+  --risk-medium-border: #a17e00;
+  --risk-low: #e4ede7;
+  --risk-low-text: #1e5a38;
+  --risk-low-border: #5d8a70;
+  --risk-nodata: #c9cfd6;
+  --risk-nodata-text: #2e353d;
+  --risk-nodata-border: #7d8894;
+
   /* графики: Okabe-Ito, без изменений (color-palette.md, разд. 6) */
   --chart-1: #000000;
   --chart-2: #e69f00;
@@ -109,6 +128,22 @@
     --focus-ring: #6fc2ea;
     --focus-ring-offset: #131a22;
 
+    --risk-critical: #3a1310;
+    --risk-critical-text: #ff9a8d;
+    --risk-critical-border: #d9534a;
+    --risk-high: #3a2409;
+    --risk-high-text: #ffb566;
+    --risk-high-border: #d98324;
+    --risk-medium: #332a08;
+    --risk-medium-text: #f2ce4b;
+    --risk-medium-border: #c4a02e;
+    --risk-low: #16241c;
+    --risk-low-text: #7fd1a0;
+    --risk-low-border: #3e7a57;
+    --risk-nodata: #232a31;
+    --risk-nodata-text: #a6b0ba;
+    --risk-nodata-border: #6b7886;
+
     --chart-1: #cfd6dd;
     --chart-2: #e69f00;
     --chart-3: #56b4e9;
@@ -152,6 +187,22 @@
   --row-selected-bar: #6fc2ea;
   --focus-ring: #6fc2ea;
   --focus-ring-offset: #131a22;
+
+  --risk-critical: #3a1310;
+  --risk-critical-text: #ff9a8d;
+  --risk-critical-border: #d9534a;
+  --risk-high: #3a2409;
+  --risk-high-text: #ffb566;
+  --risk-high-border: #d98324;
+  --risk-medium: #332a08;
+  --risk-medium-text: #f2ce4b;
+  --risk-medium-border: #c4a02e;
+  --risk-low: #16241c;
+  --risk-low-text: #7fd1a0;
+  --risk-low-border: #3e7a57;
+  --risk-nodata: #232a31;
+  --risk-nodata-text: #a6b0ba;
+  --risk-nodata-border: #6b7886;
 
   --chart-1: #cfd6dd;
   --chart-2: #e69f00;
