@@ -116,10 +116,11 @@ async def собрать(conn):
                   count(*) FILTER (WHERE ended_at IS NOT NULL
                                      AND ended_at - started_at <= interval '1 hour')
                                                                         AS короче_часа,
-                  count(*) FILTER (WHERE extract(year FROM started_at) = 2021)
-                                                                        AS год_2021,
+                  count(*) FILTER (WHERE timezone('Europe/Moscow', started_at)::date
+                                         NOT BETWEEN w.date_from AND w.date_to)
+                                                                        AS вне_окна,
                   count(*) FILTER (WHERE section_id IS NULL)            AS без_участка
-             FROM smvu.fault_episode"""
+             FROM smvu.fault_episode CROSS JOIN pred.weight_window() w"""
         )
     )
     # Ряд alpha: как меняется отношение крайних плиток объекта. Не проверка,
@@ -133,8 +134,9 @@ async def собрать(conn):
                       WHERE e.section_id = so.section_id
                         AND e.ended_at IS NOT NULL
                         AND e.ended_at - e.started_at > interval '1 hour'
-                        AND extract(year FROM e.started_at) <> 2021) AS n
-               FROM pred.section_object so
+                        AND timezone('Europe/Moscow', e.started_at)::date
+                            BETWEEN w.date_from AND w.date_to) AS n
+               FROM pred.section_object so CROSS JOIN pred.weight_window() w
               WHERE EXISTS (SELECT 1 FROM feat.section_daily d
                              WHERE d.section_id = so.section_id)),
            agg AS (SELECT object_id, count(*) AS N, sum(n) AS SUMN, max(n) AS MAXN
@@ -235,12 +237,16 @@ def check_v03(d):
 
 
 def check_v04(d):
-    """Отказы только в 2021 — это третье состояние, его видно в excluded_cnt."""
+    """Отказы только вне окна веса — третье состояние, его видно в excluded_cnt.
+
+    Окно — pred.weight_window(), период обучения модели (032, MOS-159); до 032
+    вне окна был один 2021 год.
+    """
     вычеркнутые = [r for r in d["вес"] if r["excluded_cnt"] and not r["episodes_cnt"]]
     чистые = [r for r in d["вес"] if not r["excluded_cnt"] and not r["episodes_cnt"]]
     ок = bool(вычеркнутые) and bool(чистые)
     как = (
-        f"{len(вычеркнутые)} участков отказывали только в 2021 и в вес не попали, "
+        f"{len(вычеркнутые)} участков отказывали только вне окна веса и в вес не попали, "
         f"{len(чистые)} не отказывали ни разу, вместе {len(вычеркнутые) + len(чистые)} "
         f"участков с нулевым весом отказов; в данных они различимы колонкой "
         f"excluded_cnt, вес у них одинаковый"
@@ -329,14 +335,14 @@ def печать_справок(d):
     print(f"\nчто отсекает определение отказа (всего эпизодов {о['всего']}):")
     print(f"   незакрытых (ended_at IS NULL)      {о['незакрытых']}")
     print(f"   короче часа                        {о['короче_часа']}")
-    print(f"   2021 год                           {о['год_2021']}")
+    print(f"   вне окна веса (pred.weight_window) {о['вне_окна']}")
     print(f"   без участка (каналы-заглушки)      {о['без_участка']}")
     пустые = [
         имя
         for имя, n in (
             ("незакрытые", о["незакрытых"]),
             ("короче часа", о["короче_часа"]),
-            ("2021 год", о["год_2021"]),
+            ("вне окна веса", о["вне_окна"]),
             ("без участка", о["без_участка"]),
         )
         if n == 0
