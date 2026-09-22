@@ -1,3 +1,7 @@
+// Уровень риска, посчитанный расчётом. Отдельным именем, а не литералом внутри
+// RiskRow: на него ссылаются rows.ts и его проверка (MOS-127).
+export type RiskClass = 'high' | 'normal' | null
+
 export interface RiskRow {
   section_id: number
   probability: number
@@ -8,7 +12,7 @@ export interface RiskRow {
   // Уровень риска, посчитанный расчётом: гистерезис и удержание класса — это
   // состояние между прогонами, клиент его воспроизвести не может (MOS-106, М-05).
   // null — расчёта по объекту ещё не было; это не «низкий риск».
-  risk_class: 'high' | 'normal' | null
+  risk_class: RiskClass
 }
 
 // GET /api/data-status (MOS-148). Три момента, которые на экране легко спутать.
