@@ -38,7 +38,7 @@ try:
 except ImportError:  # пакет живёт в образе бэкенда, локально его может не быть
     asyncpg = None
 
-ROWS = ("М-21", "НФ-72", "НФ-91", "свёртка")
+ROWS = ("М-21", "НФ-72", "НФ-91", "НФ-41 зависший прогон", "свёртка")
 
 # Постановка: «время формирования прогноза менее 5 минут». Пять минут — это 300
 # секунд, и меньше значит строго меньше.
@@ -598,10 +598,45 @@ async def check_свёртка(conn, окно_мин=24 * 60):
     )
 
 
+def зависшие(прогоны, сейчас, интервал_мин):
+    """Прогоны в статусе running, начатые раньше, чем интервал планировщика назад.
+
+    Живой расчёт идёт секунды (худший 3,6 с на 22.09.2026), следующий стартует
+    через интервал. Running старше интервала — расчёт оборвали, а строка
+    осталась: 22.09.2026 перезапуск worker при выкладке 037 оставил так прогон 669.
+    """
+    граница = сейчас - timedelta(minutes=интервал_мин)
+    return [п for п in прогоны if п["started_at"] < граница]
+
+
+async def check_зависший(conn):
+    """НФ-41: прерванный расчёт не оставляет после себя незакрытой строки журнала."""
+    строки = await conn.fetch(
+        "SELECT run_id, started_at, now() AS сейчас FROM pred.run WHERE status = 'running'"
+    )
+    if not строки:
+        return True, f"прогонов со status=running старше интервала {ИНТЕРВАЛ_МИН} мин: 0"
+    сейчас = строки[0]["сейчас"]
+    беда = зависшие(строки, сейчас, ИНТЕРВАЛ_МИН)
+    мск = timezone(timedelta(hours=3))
+    итог = (
+        f"прогонов со status=running старше интервала {ИНТЕРВАЛ_МИН} мин: "
+        f"{len(беда)} из {len(строки)} running"
+    )
+    if беда:
+        return False, итог + " — " + ", ".join(
+            f"{п['run_id']} (старт {п['started_at'].astimezone(мск):%d.%m %H:%M} мск, "
+            f"{(сейчас - п['started_at']).total_seconds() / 60:.0f} мин назад)"
+            for п in беда
+        )
+    return True, итог
+
+
 CHECKS = (
     ("М-21", check_m21),
     ("НФ-72", check_nf72),
     ("НФ-91", check_расписание),
+    ("НФ-41 зависший прогон", check_зависший),
     ("НФ-73 арифметика", check_нф73),
     ("свёртка", check_свёртка),
 )
@@ -615,7 +650,7 @@ async def run_checks(dsn):
             try:
                 ok, text = await fn(conn)
             except asyncpg.PostgresError as e:
-                ok, text = False, f"база отказала: {str(e).splitlines()[0]}"
+                ok, text = False, f"база отказала: {(str(e).splitlines() or [type(e).__name__])[0]}"
             out.append((name, ok, text))
         return out
     finally:
@@ -636,6 +671,13 @@ def fail_all(reason):
 
 def demo(verbose=True):
     """Проверка арифметики без базы: что считается длительностью и что нормативом."""
+    # НФ-41: running моложе интервала — идёт расчёт; старше — оборван и забыт.
+    т = datetime(2026, 9, 22, 20, 45, tzinfo=timezone.utc)
+    прогоны = [
+        {"run_id": 669, "started_at": т - timedelta(minutes=9)},
+        {"run_id": 672, "started_at": т - timedelta(minutes=1)},
+    ]
+    assert [п["run_id"] for п in зависшие(прогоны, т, 4)] == [669]
     полный = dict(
         ms_fetch=4609,
         ms_aggregate=3094,
@@ -824,7 +866,7 @@ def main(argv):
     try:
         results = asyncio.run(run_checks(dsn))
     except (OSError, ValueError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
-        return fail_all(f"нет связи с базой: {str(e).splitlines()[0]}")
+        return fail_all(f"нет связи с базой: {(str(e).splitlines() or [type(e).__name__])[0]}")
     return report(results)
 
 
