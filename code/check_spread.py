@@ -418,6 +418,11 @@ def demo():
     близко(разнести_по_весу(0.0, [0.9, 0.1]), [0.0, 0.0], "нулевая вероятность")
     assert доля(12, 3173).startswith("12 из 3173")
     assert доля(1, 0) == "1 из 0"
+    if asyncpg is not None:  # три диагноза сбоя не сливаются в «нет связи»
+        assert причина_сбоя(asyncio.TimeoutError()).startswith("запрос не уложился")
+        assert причина_сбоя(ConnectionRefusedError(61, "refused")).startswith("нет связи")
+        нет_таблицы = asyncpg.UndefinedTableError("relation does not exist")
+        assert причина_сбоя(нет_таблицы).startswith("база ответила ошибкой")
     print("демо: сумма разнесённого равна исходной вероятности на четырёх раскладах")
     print("OK")
 
@@ -459,11 +464,29 @@ def main(argv):
         return fail_all("не задана переменная DATABASE_URL, подключаться не к чему")
     try:
         результаты, d = asyncio.run(run_checks(dsn))
-    except (OSError, ValueError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
-        # TimeoutError приходит с пустым текстом, и splitlines()[0] падал IndexError
-        # вместо «нет связи с базой» — тогда называем хотя бы класс ошибки.
-        return fail_all(f"нет связи с базой: {(str(e).splitlines() or [type(e).__name__])[0]}")
+    except Exception as e:
+        return fail_all(причина_сбоя(e))
     return report(результаты, d)
+
+
+def причина_сбоя(e: BaseException) -> str:
+    """Три разных диагноза, а не один «нет связи».
+
+    До 22.09.2026 любая ошибка базы печаталась как «нет связи с базой», и f2 увидела
+    «нет связи с базой: relation smvu.model_failure_event does not exist» — связь
+    была, не было миграции. TimeoutError приходит с пустым текстом, и splitlines()[0]
+    падал IndexError (нашла e8), поэтому пустой текст заменяем классом ошибки.
+    """
+    текст = (str(e).splitlines() or [type(e).__name__])[0]
+    связь = (OSError, ValueError, asyncpg.PostgresConnectionError,
+             asyncpg.InvalidAuthorizationSpecificationError, asyncpg.InvalidCatalogNameError)
+    if isinstance(e, asyncio.TimeoutError):
+        return f"запрос не уложился в таймаут: {текст}"
+    if isinstance(e, связь):
+        return f"нет связи с базой: {текст}"
+    if isinstance(e, asyncpg.PostgresError):
+        return f"база ответила ошибкой: {текст}"
+    raise e
 
 
 if __name__ == "__main__":
