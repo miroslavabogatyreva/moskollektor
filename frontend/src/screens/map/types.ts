@@ -6,7 +6,14 @@ export type ObjectKind = 'controlHouse' | 'guardObject'
 export interface Section {
   section_id: number
   smvu_key: string
+  // collector — collector_id дерева объектов заказчика (16 значений), не префикс
+  // тега из smvu_key (MOS-181, М-05): по нему же считает риск прогноз и отдаёт
+  // GET /api/objects/{id}, подпись группы — collector_name, имя из того же дерева.
   collector: number
+  // Опционально по тому же поводу, что kinds ниже: во время того же окна
+  // рассинхрона старый sections.json несёт старый collector (префикс тега) и
+  // вовсе без этого поля — компилятор обязан видеть читателя без него.
+  collector_name?: string
   picket: number
   // Опционально: бандл и sections.json выкладываются раздельно (rsync без атомарной
   // подмены), окно рассинхрона реально — стенд отдавал участки без kinds вовсе,
