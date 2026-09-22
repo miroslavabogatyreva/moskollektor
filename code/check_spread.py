@@ -111,6 +111,10 @@ async def собрать(conn):
     # которое не отсекает ничего, даёт ложную уверенность: оно выглядит работающим.
     d["отсев"] = dict(
         await conn.fetchrow(
+            # С 038 (MOS-153) отказ — эпизод модели D5. Условия «незакрытый» и
+            # «короче часа» больше не отсекают: открытый эпизод по контракту
+            # считается, а порог применяет построитель эпизодов. Их счёт остаётся,
+            # чтобы было видно, что это ноль по построению, а не пропавшее условие.
             """SELECT count(*)                                              AS всего,
                   count(*) FILTER (WHERE ended_at IS NULL)              AS незакрытых,
                   count(*) FILTER (WHERE ended_at IS NOT NULL
@@ -120,7 +124,7 @@ async def собрать(conn):
                                          NOT BETWEEN w.date_from AND w.date_to)
                                                                         AS вне_окна,
                   count(*) FILTER (WHERE section_id IS NULL)            AS без_участка
-             FROM smvu.fault_episode CROSS JOIN pred.weight_window() w"""
+             FROM smvu.model_failure_event CROSS JOIN pred.weight_window() w"""
         )
     )
     # Ряд alpha: как меняется отношение крайних плиток объекта. Не проверка,
@@ -130,10 +134,8 @@ async def собрать(conn):
         for r in await conn.fetch(
             """WITH base AS (
              SELECT so.section_id, so.object_id,
-                    (SELECT count(*) FROM smvu.fault_episode e
+                    (SELECT count(*) FROM smvu.model_failure_event e
                       WHERE e.section_id = so.section_id
-                        AND e.ended_at IS NOT NULL
-                        AND e.ended_at - e.started_at > interval '1 hour'
                         AND timezone('Europe/Moscow', e.started_at)::date
                             BETWEEN w.date_from AND w.date_to) AS n
                FROM pred.section_object so CROSS JOIN pred.weight_window() w
@@ -332,19 +334,16 @@ def check_v06(d):
 def печать_справок(d):
     """То, что не проверка, а числа для решения: отсев, alpha, пороги заявок."""
     о = d["отсев"]
-    print(f"\nчто отсекает определение отказа (всего эпизодов {о['всего']}):")
-    print(f"   незакрытых (ended_at IS NULL)      {о['незакрытых']}")
-    print(f"   короче часа                        {о['короче_часа']}")
+    print(f"\nчто отсекает определение отказа (всего эпизодов D5 {о['всего']}):")
     print(f"   вне окна веса (pred.weight_window) {о['вне_окна']}")
     print(f"   без участка (каналы-заглушки)      {о['без_участка']}")
+    # Эти два не отсекают по построению (038): открытый эпизод контракт считает,
+    # а короче часа построитель эпизодов не создаёт. Печатаем, чтобы ноль был виден.
+    print(f"   незакрытых — считаются, не отсекаются  {о['незакрытых']}")
+    print(f"   короче часа — ноль по построению       {о['короче_часа']}")
     пустые = [
         имя
-        for имя, n in (
-            ("незакрытые", о["незакрытых"]),
-            ("короче часа", о["короче_часа"]),
-            ("вне окна веса", о["вне_окна"]),
-            ("без участка", о["без_участка"]),
-        )
+        for имя, n in (("вне окна веса", о["вне_окна"]), ("без участка", о["без_участка"]))
         if n == 0
     ]
     if пустые:
