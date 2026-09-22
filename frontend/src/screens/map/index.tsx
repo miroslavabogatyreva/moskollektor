@@ -18,11 +18,12 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    от подписи в меню: меню держится за формулировку М-05 ("Карта объектов"),
    а здесь — про способ показа.
 
-   Масштаб (5.15, MOS-126): на коллекторе 15 из 74 пар соседних меток 49 стоят
-   ближе 10 единиц SVG при диаметре метки 10 — на полной оси их не разлепить
-   мышью. Приближение не перекладывает точки, а сужает видимый диапазон
-   пикетов на той же ширине SVG — слипшиеся метки раздвигаются сами, без
-   алгоритма разбежки. Арифметика окна — в viewport.ts, с самопроверкой. */
+   Масштаб (5.15, MOS-126): на коллекторе с тегом 15 (до MOS-181 — номер в
+   выпадающем списке, сейчас часть группы «объект Бета») из 74 пар соседних
+   меток 49 стоят ближе 10 единиц SVG при диаметре метки 10 — на полной оси
+   их не разлепить мышью. Приближение не перекладывает точки, а сужает видимый
+   диапазон пикетов на той же ширине SVG — слипшиеся метки раздвигаются сами,
+   без алгоритма разбежки. Арифметика окна — в viewport.ts, с самопроверкой. */
 
 const AXIS_WIDTH = 1000
 const AXIS_HEIGHT = 120
@@ -76,12 +77,20 @@ export function MapScreen(_props: Record<string, unknown>) {
     return m
   }, [risks])
 
+  // Группа — collector_id дерева объектов заказчика (MOS-181, М-05), подпись —
+  // collector_name оттуда же, не голый номер тега.
   const collectors = useMemo(() => {
     if (!sections) return []
-    const counts = new Map<number, number>()
-    for (const s of sections) counts.set(s.collector, (counts.get(s.collector) ?? 0) + 1)
-    return [...counts.entries()].sort((a, b) => a[0] - b[0])
+    const byId = new Map<number, { name: string; count: number }>()
+    for (const s of sections) {
+      const g = byId.get(s.collector) ?? { name: s.collector_name ?? String(s.collector), count: 0 }
+      g.count += 1
+      byId.set(s.collector, g)
+    }
+    return [...byId.entries()].sort((a, b) => a[0] - b[0])
   }, [sections])
+
+  const collectorName = collectors.find(([c]) => c === collector)?.[1].name ?? String(collector ?? '')
 
   const onAxis = useMemo(
     () => (sections && collector != null ? sections.filter((s) => s.collector === collector) : []),
@@ -146,9 +155,9 @@ export function MapScreen(_props: Record<string, unknown>) {
               value={collector ?? undefined}
               onChange={(e) => setCollector(Number((e.target as HTMLSelectElement).value))}
             >
-              {collectors.map(([c, n]) => (
+              {collectors.map(([c, g]) => (
                 <option key={c} value={c}>
-                  {c} · {n} участков
+                  {g.name} · {g.count} участков
                 </option>
               ))}
             </select>
@@ -212,7 +221,7 @@ export function MapScreen(_props: Record<string, unknown>) {
           <svg
             viewBox={`0 0 ${AXIS_WIDTH} ${AXIS_HEIGHT}`}
             role="img"
-            aria-label={`Ось пикетов коллектора ${collector}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${onAxis.length} участков`}
+            aria-label={`Ось пикетов коллектора ${collectorName}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${onAxis.length} участков`}
             class="w-full"
             style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
             onWheel={onWheel}
