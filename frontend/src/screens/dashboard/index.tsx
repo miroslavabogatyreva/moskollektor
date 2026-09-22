@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
+import { errorMessage } from '../../lib/format'
 import { отставание } from './lag'
 import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
 import type { SectionRef } from './rows'
@@ -30,10 +31,10 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   useEffect(() => {
     fetchRisks()
       .then(setRows)
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
     fetchDataStatus()
       .then(setStatus)
-      .catch((e) => setStatusError(String(e)))
+      .catch((e) => setStatusError(errorMessage(e)))
     fetchSections()
       .then(setSections)
       .catch(() => setSections([]))
