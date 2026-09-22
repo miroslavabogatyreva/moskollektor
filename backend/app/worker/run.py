@@ -38,6 +38,9 @@
     python -m app.worker.run --as-of 2026-06-30T23:59:59+03:00
     python -m app.worker.run --limit 50 --rollback # проверка без следов в базе
 
+С `--rollback` прогон перед откатом печатает свои заявки строками `ЗАЯВКА_JSON {...}`:
+откат их стирает, а замеру метрик по потоку заявок они нужны (91 срез апреля–июня).
+
 `--limit N` берёт первые N участков по возрастанию section_id на обоих путях:
 прежний отбирает их до сборки признаков, путь v3 режет выдачу score.json после
 чтения (MOS-168; до правки v3 считал весь парк и заводил заявки). Без `--rollback`
@@ -48,6 +51,7 @@
 import argparse
 import asyncio
 import bisect
+import json
 import os
 import time
 from datetime import datetime
@@ -497,6 +501,36 @@ def _selfcheck():
     print("run selfcheck ok: выбор факторов, направление, белый список")
 
 
+# Заявки прогона с откатом — строкой JSON в stdout, до отката (просьба 78, замер метрик
+# по потоку заявок): откат снимает побочные эффекты, но вместе с ними и сами заявки.
+# LEFT JOIN на коллектор: участок без коллектора попадает в выгрузку с null, а не пропадает.
+ЗАЯВКИ_ПРОГОНА = """
+SELECT n.id, so.object_id, f.section_id, n.source_key, n.reported_at, n.due_at,
+       n.warning_opened_at
+  FROM maint.notification n
+  JOIN pred.forecast f ON f.forecast_id = n.forecast_id
+  LEFT JOIN pred.section_object so ON so.section_id = f.section_id
+ WHERE n.source_system = 'forecast' AND f.run_id = $1
+ ORDER BY n.id
+"""
+ПРИСТАВКА_ЗАЯВКИ = "ЗАЯВКА_JSON"
+
+
+async def выгрузить_заявки(conn, run_id: int) -> int:
+    """Напечатать заявки прогона по одной строке `ЗАЯВКА_JSON {...}`. -> сколько."""
+    строки = await conn.fetch(ЗАЯВКИ_ПРОГОНА, run_id)
+    for r in строки:
+        print(ПРИСТАВКА_ЗАЯВКИ, json.dumps(
+            {"id": r["id"], "object_id": r["object_id"], "section_id": r["section_id"],
+             "source_key": r["source_key"],
+             "reported_at": r["reported_at"].astimezone(МОСКВА).isoformat(),
+             "due_at": r["due_at"].astimezone(МОСКВА).isoformat(),
+             "warning_opened_at": r["warning_opened_at"] and
+                                  r["warning_opened_at"].astimezone(МОСКВА).isoformat()},
+            ensure_ascii=False))
+    return len(строки)
+
+
 async def main():
     р = argparse.ArgumentParser(description="Прогон расчёта прогноза")
     р.add_argument("--as-of", help="момент среза, например 2026-06-30T23:59:59+03:00")
@@ -528,6 +562,9 @@ async def main():
             try:
                 строка = await прогон(conn, as_of, а.horizon, а.limit,
                                       True if а.full_log else None, заявки)
+                if строка.get("run_id"):
+                    print(f"   заявок прогона выгружено строкой {ПРИСТАВКА_ЗАЯВКИ}: "
+                          f"{await выгрузить_заявки(conn, строка['run_id'])}")
             finally:
                 await tr.rollback()
                 print("откат сделан: в базе следов прогона нет")
