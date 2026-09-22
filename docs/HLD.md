@@ -303,9 +303,9 @@ selfcheck конкурировал с настоящим часовым прог
 | `GET /api/orders/{id}` | карточка заявки: объект, вид работ, заказ ТОиР, приоритет с нормативом `response_hours`, `deadline_hours`, `warning_opened_at` (открытие предупреждения модели, `null` на прежнем пути), `risk_window_end` (конец окна риска), вложенный `forecast` с `forecast_id`, обоснование. **`forecast.predicted_failure_at` и `forecast.lead_hours` убраны** | `orders.read` | 200 | М-11, М-12, М-13 |
 | `GET /api/objects/{id}` | карточка объекта: `smvu_key`, инвентарный номер, момент последнего показания | `objects.read` | 200 | М-08 |
 | `GET /api/objects/{id}/readings` | ряд показаний за окно, параметры `from` и `to`. `from`/`to` обязательны: без них запрос обходит все 109 партиций `smvu.reading` | `objects.read` | 200 | Ф-91 |
-| `GET /api/objects/{id}/channels` | каналы участка с фактом отказов `{total, items[]}`, параметры `limit`/`offset` (на участке бывает до 100 каналов). Отказ — эпизод `smvu.fault_episode` закрытый, длиннее часа, не год из `ref.app_setting.forecast_weight_exclude_year` (умолчание 2021, тот же ключ, что у MOS-150 в `pred.section_weight`); `fault_value` не сужен до «Неисправен» — у тепловых датчиков и датчиков температуры `smvu.fault_rule` признаёт отказом ещё и «Неопределен» (MOS-151, Q5.25) | `objects.read` | 200 | М-05 |
-| `GET /api/settings` | четыре строки `ref.app_setting`: `forecast_horizon_h`, `precision_min`, `recall_min`, `risk_threshold_high` | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-44 |
-| `PUT /api/settings/{key}` | новое значение; старое и новое ложатся в `audit.user_action.details` тем же рядом, что пишет промежуточный слой на каждый запрос | только администратор | **422** под `admin1` на заведомо неверном значении, **403** под `dispatcher1` | НФ-44 |
+| `GET /api/objects/{id}/channels` | каналы участка с фактом отказов `{total, items[]}`, параметры `limit`/`offset` (на участке бывает до 100 каналов). Отказ — эпизод модели v3 из представления `smvu.model_failure_event` (словарь D5 из `contracts/failure.v3.json`, длиннее часа, открытый считается; миграция 038, MOS-153), начат не раньше нижней границы `pred.weight_window()` (настройка `forecast_weight_window_from`, умолчание 2022-04-01, начало периода обучения модели; MOS-159, миграция 032) и до конца архива. Определение то же, что у веса `pred.section_weight` и у метрик М-18…М-20; окно у веса — период обучения целиком, до 2026-03-31, ему нельзя подглядывать в проверочное окно модели, а карточка — факт журнала для диспетчера, и апрель–июнь на ней есть. До 038 карточка считала экранные `smvu.fault_episode` вместе с «Неопределен»: на участке 1490 было 10 отказов с 2022-04, стало 0 | `objects.read` | 200 | М-05 |
+| `GET /api/settings` | все строки `ref.app_setting`, счёт не фиксирован — каждая новая настройка добавляет строку: горизонт, пороги Precision/Recall, риска и автозаявок, политика записи журнала, окно и сглаживание веса участка | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-44 |
+| `PUT /api/settings/{key}` | новое значение; старое и новое ложатся в `audit.user_action.details` тем же рядом, что пишет промежуточный слой на каждый запрос. Правило проверки — у каждого ключа (`_RULES` в `backend/app/api/settings.py`); ключ без правила отвечает 422 «нет правила проверки», а не 500, как до MOS-159 отвечали 10 ключей из 16 | только администратор | **422** под `admin1` на заведомо неверном значении, **403** под `dispatcher1` | НФ-44 |
 | `GET /api/audit` | журнал действий `{total, items[]}`. Параметры `from`, `to`, `limit`, `offset`. `from`/`to` — моменты времени (`datetime`), а не даты | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-77 |
 | `GET /docs`, `GET /openapi.json` | описание методов, генерирует сам FastAPI. Обратите внимание: без префикса `/api` | всем, заголовок не нужен | 200 без заголовка | М-17 |
 
@@ -1178,12 +1178,23 @@ CREATE TABLE ref.object_xref (
                             Вместе с ней collector пишется из тега
                             у всех 11 485 каналов, а не только
                             у 10 720 с пикетом
+032_section_weight_window.sql
+                            окно веса участка — период обучения модели
+                            v3, 2022-04-01 … 2026-03-31: настройки
+                            forecast_weight_window_from/_to и функция
+                            pred.weight_window() вместо
+                            forecast_weight_exclude_year (MOS-159)
 037_order_deadline.sql      maint.notification: warning_opened_at и
                             risk_window_end; индекс uq_notif_forecast_key
                             по source_key вместо суточного; write_reason
                             'warning'; нормативы ref.priority 16/48/72 ч
                             по Регламенту; order_preventive_cap_h;
                             forecast_horizon_h = 720 (MOS-180, MOS-179)
+038_weight_on_d5.sql        представление smvu.model_failure_event —
+                            отказ в определении D5 одним местом — и вес
+                            pred.section_weight на нём, а не на экранном
+                            smvu.fault_episode: 3 675 эпизодов в окне
+                            вместо 10 726 (строка плана 3.17, MOS-153)
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
