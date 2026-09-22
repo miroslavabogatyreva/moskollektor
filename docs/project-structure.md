@@ -36,8 +36,9 @@
 moskollektor/
 ├── CLAUDE.md            правила работы над проектом, читается первым
 ├── README.md            что это за репозиторий, описание каждого файла
-├── .claude/         2   настройки Claude Code: хук и ссылки на десять скиллов
-│                        из `.agents/skills/`, состав — в `skills-lock.json`
+├── .claude/         2   настройки Claude Code: хук и ссылки на девять скиллов
+│                        из `.agents/skills/`, состав — в `skills-lock.json`;
+│                        плюс наш скилл `skills/story-tdd` — TDD по историям
 │   └── hooks/format.sh   форматирует файл после правки: ruff для Python,
 │                          prettier для фронта. Старые 43 файла не трогает
 ├── docs/           28   документы: постановка, ТЗ, архитектура, план, приёмка
@@ -175,6 +176,9 @@ backend/app/
                     базы, там они другие),
                     объяснение прогноза (explain.py)
 frontend/src/screens/{dashboard, map, log, orders}
+frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на историю
+                    из docs/user-stories.md, тест на сценарий; конфигурация
+                    frontend/playwright.config.ts, запуск npm run e2e
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
 delivery/           check-all.sh — один прогон всех проверок;
                     check-a11y.mjs — доступность таблиц настоящим браузером (НФ-92),
