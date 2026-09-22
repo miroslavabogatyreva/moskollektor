@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
+import { errorMessage, formatDateTime } from '../lib/format'
+import { rowLink } from '../lib/a11y'
+import {
+  axisTicks,
+  defaultWindow,
+  fmtValue,
+  groupChannelsBySystem,
+  groupRepeatedForecasts,
+  shortDate,
+  type RecentForecast,
+} from './ObjectCard.logic'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
    по клику на маршрут /objects/:sectionId. Форма ответа GET /api/objects/{id}
@@ -50,15 +61,6 @@ interface CurrentRisk {
   explanation_ru: string | null
 }
 
-interface RecentForecast {
-  forecast_id: number
-  direction: Direction
-  probability: number
-  risk_rank: number
-  explanation_ru: string | null
-  computed_at: string
-}
-
 interface ObjectDetail {
   section_id: number
   smvu_key: string
@@ -81,22 +83,6 @@ interface Reading {
 // Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
 const API_LOGIN = 'dispatcher1'
 
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
-
-// Окно по умолчанию — 7 суток, оканчивающихся последней записью участка
-// (last_reading_at из GET /api/objects/{id}), а не сегодняшней датой: у 54,4%
-// участков за последние 7 суток выгрузки нет ни строки, данные могли замолчать
-// задолго до конца выгрузки. Без last_reading_at (участок совсем без записей —
-// сегодня таких нет) откатываемся на 7 суток от сегодня.
-function defaultWindow(lastReadingAt: string | null): [string, string] {
-  const end = lastReadingAt ? new Date(lastReadingAt) : new Date()
-  const start = new Date(end)
-  start.setDate(start.getDate() - 6)
-  return [isoDate(start), isoDate(end)]
-}
-
 export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -114,22 +100,37 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
 
   useEffect(() => {
     if (!sectionId) return
+    // Тот же класс гонки, что у эффекта показаний ниже, только тише: без
+    // флажка ответ СТАРОГО участка, пришедший позже ответа нового, тихо
+    // перезаписывает карточку — на экране целый, согласованный, но чужой
+    // участок под чужим адресом, ни ошибки, ни пустого кадра (нашла ab,
+    // 22.09.2026, на паузе 20мс между переходами, 2 раза из 9 попыток).
+    let отменено = false
     setData(null)
     setNotFound(false)
     setError(null)
     setReadFrom('')
     setReadTo('')
+    // Без этого при живой смене участка (без перезагрузки) один кадр рисует
+    // показания СТАРОГО участка поверх пустого окна нового — эффект ниже видит
+    // readFrom/readTo === '' и выходит, не тронув readings (нашла ab, 22.09.2026:
+    // 12 NaN-rect и один RangeError на переходе 2204 → 2157).
+    setReadings(null)
     fetch(`/api/objects/${sectionId}`, { headers: { 'X-User-Login': API_LOGIN } })
       .then((r) => {
         if (r.status === 404) {
-          setNotFound(true)
+          if (!отменено) setNotFound(true)
           return null
         }
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<ObjectDetail>
       })
-      .then((d) => d && setData(d))
-      .catch((e) => setError(String(e)))
+      .then((d) => {
+        if (!отменено && d) setData(d)
+      })
+      .catch((e) => {
+        if (!отменено) setError(errorMessage(e))
+      })
 
     setChannelFaults(null)
     setChannelFaultsError(null)
@@ -141,8 +142,15 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<ChannelFaultsResponse>
       })
-      .then((d) => setChannelFaults(d.items))
-      .catch((e) => setChannelFaultsError(String(e)))
+      .then((d) => {
+        if (!отменено) setChannelFaults(d.items)
+      })
+      .catch((e) => {
+        if (!отменено) setChannelFaultsError(errorMessage(e))
+      })
+    return () => {
+      отменено = true
+    }
   }, [sectionId])
 
   useEffect(() => {
@@ -156,6 +164,13 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
 
   useEffect(() => {
     if (!sectionId || !readFrom || !readTo) return
+    // ab поймала гонку и после починки зависимостей ниже — дважды вживую,
+    // не смогла надёжно воспроизвести по заказу, окно в доли миллисекунды.
+    // Флажок отменяет применение ответа, если этот же эффект успел
+    // перезапуститься (новый readFrom/readTo или другой участок) раньше,
+    // чем старый fetch вернулся: без него более старый ответ может лечь
+    // поверх более нового состояния.
+    let отменено = false
     setReadings(null)
     setReadingsError(null)
     fetch(`/api/objects/${sectionId}/readings?from=${readFrom}&to=${readTo}`, {
@@ -165,9 +180,32 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<Reading[]>
       })
-      .then(setReadings)
-      .catch((e) => setReadingsError(String(e)))
-  }, [sectionId, readFrom, readTo])
+      .then((d) => {
+        if (!отменено) setReadings(d)
+      })
+      .catch((e) => {
+        if (!отменено) setReadingsError(errorMessage(e))
+      })
+    // sectionId нарочно не в списке зависимостей, хотя используется внутри —
+    // ниже почему. sectionId читается из ЭТОГО рендера и всегда свежий: эффект
+    // перезапускается вместе с readFrom/readTo, а те меняются на КАЖДУЮ смену
+    // участка (эффект выше синхронно сбрасывает их в '' и пересчитывает заново).
+    //
+    // Если добавить sectionId в зависимости, эффект стреляет ПРЕЖДЕ, чем даты
+    // успевают сброситься: на смену участка первым срабатывает первый эффект
+    // (его единственная зависимость — sectionId) и планирует readFrom/readTo → '',
+    // но ЭТОТ эффект в том же проходе ещё видит СТАРЫЕ даты старого участка —
+    // они не менялись, а sectionId в его собственном списке зависимостей уже
+    // сменился, и он запускает fetch НОВОГО участка со СТАРЫМ окном дат. Запрос
+    // настоящий и часто успевает раньше основного /api/objects/{id}: setReadings
+    // получает реальный, непустой массив ДО того, как readFrom/readTo обнулились
+    // на экране, и следующий кадр рисует его поверх пустого окна — те же NaN
+    // <rect>, что чинит setReadings(null) выше, только с другой стороны.
+    // Нашла ab, 22.09.2026, на переходе 2204 → 2157.
+    return () => {
+      отменено = true
+    }
+  }, [readFrom, readTo])
 
   if (notFound) {
     return (
@@ -217,7 +255,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         <table class="w-full text-sm" style="border-collapse:collapse">
           <thead>
             <tr>
-              {['Тег', 'Название', 'Система', 'Тип датчика'].map((h) => (
+              {['Тег', 'Название', 'Тип датчика'].map((h) => (
                 <th
                   key={h}
                   class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -229,13 +267,29 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             </tr>
           </thead>
           <tbody>
-            {data.channels.map((c) => (
-              <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
-                <td class="px-2 py-2 num">{c.tag}</td>
-                <td class="px-2 py-2">{c.name}</td>
-                <td class="px-2 py-2">{c.system_kind}</td>
-                <td class="px-2 py-2">{c.sensor_kind}</td>
-              </tr>
+            {groupChannelsBySystem(data.channels).map((g) => (
+              <>
+                <tr key={`system-${g.systemKind}`}>
+                  <td
+                    colSpan={3}
+                    class="px-2 py-2 text-xs font-semibold"
+                    style="background:var(--bg-surface); border-bottom:1px solid var(--border-subtle)"
+                  >
+                    <SystemShape kind={g.systemKind} />
+                    {g.systemKind}{' '}
+                    <span class="font-normal num" style="color:var(--text-muted)">
+                      · {g.channels.length}
+                    </span>
+                  </td>
+                </tr>
+                {g.channels.map((c) => (
+                  <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
+                    <td class="px-2 py-2 num">{c.tag}</td>
+                    <td class="px-2 py-2">{c.name}</td>
+                    <td class="px-2 py-2">{c.sensor_kind}</td>
+                  </tr>
+                ))}
+              </>
             ))}
           </tbody>
         </table>
@@ -272,7 +326,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               {channelFaults.map((c) => (
                 <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
                   <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2 num">{c.channel_id}</td>
+                  <td class="px-2 py-2">{c.name}</td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
                     {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}
@@ -363,13 +417,16 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             </tr>
           </thead>
           <tbody>
-            {data.recent_forecasts.map((f) => (
+            {groupRepeatedForecasts(data.recent_forecasts).map(({ forecast: f, repeats }) => (
               <tr
                 key={f.forecast_id}
-                onClick={() => route(`/forecasts/${f.forecast_id}`)}
+                {...rowLink(() => route(`/forecasts/${f.forecast_id}`))}
                 style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
               >
-                <td class="px-2 py-2 num">{new Date(f.computed_at).toLocaleString('ru-RU')}</td>
+                <td class="px-2 py-2 num">
+                  {new Date(f.computed_at).toLocaleString('ru-RU')}
+                  {repeats > 1 && <span style="color:var(--text-muted)"> · {repeats}×</span>}
+                </td>
                 <td class="px-2 py-2">{DIRECTION_LABEL[f.direction]}</td>
                 <td class="px-2 py-2 num">{f.probability.toFixed(4)}</td>
                 <td class="px-2 py-2 num">{f.risk_rank}</td>
@@ -437,9 +494,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                   <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
                     {c.name} · {c.sensor_kind}
                   </div>
-                  {chReadings.length === 0 ? (
+                  {chReadings.length < 2 ? (
                     <p class="text-sm" style="color:var(--text-muted)">
-                      Нет показаний за период.
+                      {chReadings.length === 0
+                        ? 'Нет показаний за период.'
+                        : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
                     </p>
                   ) : numericShare > 0.5 ? (
                     <NumericLine readings={chReadings} />
@@ -453,6 +512,92 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         )}
       </section>
     </main>
+  )
+}
+
+// Фигура для подзаголовка группы каналов (MOS-172) — шесть значений
+// smvu.channel.system_kind (db/migrations/004_events.sql:38-44), седьмая
+// (NO_SYSTEM_KIND) — без фигуры: пустая заливка соврала бы, будто у канала
+// есть система. Цвета нет ни у одной фигуры (currentColor), четыре залиты
+// сплошняком, две нарисованы обводкой — читается на чёрно-белой распечатке
+// той же логикой, что НФ-50 для состояний.
+//
+// Какая фигура какой системе — назначили мы. Легенды заказчика у нас нет,
+// в выгрузке обозначений систем нет вовсе; на защите это наше решение,
+// а не срисованное у СМВУ.
+const SYSTEM_SHAPE: Record<
+  string,
+  'triangle' | 'square' | 'circle' | 'diamond' | 'square-outline' | 'cross'
+> = {
+  'Пожарная охрана': 'triangle',
+  'Диспетчерский контроль': 'square',
+  'Охранная подсистема': 'circle',
+  'Температурная подсистема': 'diamond',
+  // Был восьмиугольник — на 12×12 он расходится с кругом на 2 px из 144, на
+  // чёрно-белой распечатке неотличим (нашёл 5f, 22.09.2026, замером расстояния
+  // между фигурами). Полый квадрат — следующий по непохожести на уже занятые
+  // формы, до ближайшего соседа (круга) 50 px.
+  'Газовая охрана': 'square-outline',
+  'Диагностическая подсистема': 'cross',
+}
+
+function SystemShape({ kind }: { kind: string }) {
+  const shape = SYSTEM_SHAPE[kind]
+  if (!shape) return null
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="12"
+      height="12"
+      class="inline-block align-middle mr-1"
+      fill="currentColor"
+    >
+      {shape === 'triangle' && <polygon points="8,1 15,15 1,15" />}
+      {shape === 'square' && <rect x="2" y="2" width="12" height="12" />}
+      {shape === 'circle' && <circle cx="8" cy="8" r="7" />}
+      {shape === 'diamond' && <polygon points="8,1 15,8 8,15 1,8" />}
+      {shape === 'square-outline' && (
+        <rect
+          x="2.5"
+          y="2.5"
+          width="11"
+          height="11"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        />
+      )}
+      {shape === 'cross' && (
+        <>
+          <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M5,8 H11 M8,5 V11" stroke="currentColor" stroke-width="1.5" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+// Ось времени под лентой/линией — 4 деления (начало, конец и две между ними),
+// подпись через formatDateTime — общий формат дат по всему фронту (М-12).
+function TimeAxis({ start, end }: { start: number; end: number }) {
+  const W = 1000
+  const TICKS = 4
+  const ticks = axisTicks(start, end, TICKS)
+  return (
+    <svg viewBox={`0 0 ${W} 14`} class="w-full">
+      {ticks.map((t, i) => (
+        <text
+          key={i}
+          x={i === 0 ? 0 : i === TICKS - 1 ? W : (W * i) / (TICKS - 1)}
+          y="11"
+          font-size="10"
+          fill="var(--text-muted)"
+          text-anchor={i === 0 ? 'start' : i === TICKS - 1 ? 'end' : 'middle'}
+        >
+          {formatDateTime(new Date(t).toISOString())}
+        </text>
+      ))}
+    </svg>
   )
 }
 
@@ -487,20 +632,29 @@ function NumericLine({ readings }: { readings: Reading[] }) {
   })
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      class="w-full"
-      style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
-    >
-      <path
-        d={d}
-        fill="none"
-        stroke="var(--chart-outline)"
-        stroke-width="4"
-        stroke-linecap="round"
-      />
-      <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
-    </svg>
+    <>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        class="w-full"
+        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
+      >
+        <path
+          d={d}
+          fill="none"
+          stroke="var(--chart-outline)"
+          stroke-width="4"
+          stroke-linecap="round"
+        />
+        <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
+        <text x={PAD} y={PAD + 2} font-size="10" fill="var(--text-muted)">
+          {fmtValue(vMax)}
+        </text>
+        <text x={PAD} y={H - 3} font-size="10" fill="var(--text-muted)">
+          {fmtValue(vMin)}
+        </text>
+      </svg>
+      <TimeAxis start={tMin} end={tMax} />
+    </>
   )
 }
 
@@ -510,34 +664,50 @@ function NumericLine({ readings }: { readings: Reading[] }) {
 function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string; to: string }) {
   const W = 1000
   const H = 36
-  const winStart = new Date(from).getTime()
-  const winEnd = new Date(to).getTime() + 24 * 3600 * 1000
+  // new Date("2026-06-24") — полночь UTC, то есть 03:00 по Москве (нашла ab,
+  // 22.09.2026): граница ленты уезжала на три часа от дат в полях выше, и часть
+  // показаний оказывалась левее начала оси. Россия не переходит на летнее время
+  // с 2014 года, смещение фиксированное — +03:00 можно не вычислять, а написать.
+  const winStart = new Date(`${from}T00:00:00+03:00`).getTime()
+  const winEnd = new Date(`${to}T00:00:00+03:00`).getTime() + 24 * 3600 * 1000
+  // На стыке смены участка эффекты выше на один кадр могут прислать пустые
+  // from/to при уже непустых readings (нашла ab, 22.09.2026, дважды поймала
+  // вживую даже после починки зависимостей). new Date('') даёт NaN, а
+  // TimeAxis зовёт .toISOString() на нём и бросает исключение, роняя весь
+  // блок «Показания датчиков» без самовосстановления. Гвард закрывает класс
+  // целиком: любая будущая гонка того же вида станет одним пустым кадром,
+  // а не сломанным экраном.
+  if (!Number.isFinite(winStart) || !Number.isFinite(winEnd)) return null
   const x = (t: number) => ((t - winStart) / (winEnd - winStart || 1)) * W
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      class="w-full"
-      style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
-    >
-      {readings.map((r, i) => {
-        const t0 = new Date(r.read_time).getTime()
-        const t1 = i + 1 < readings.length ? new Date(readings[i + 1].read_time).getTime() : winEnd
-        const x0 = x(t0)
-        const width = Math.max(x(t1) - x0, 0.5)
-        return (
-          <rect
-            key={i}
-            x={x0}
-            y={6}
-            width={width}
-            height={H - 12}
-            fill={r.is_alarm ? 'var(--state-warning)' : 'var(--border-strong)'}
-          >
-            <title>{`${r.value_text ?? '—'} · ${new Date(r.read_time).toLocaleString('ru-RU')}`}</title>
-          </rect>
-        )
-      })}
-    </svg>
+    <>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        class="w-full"
+        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
+      >
+        {readings.map((r, i) => {
+          const t0 = new Date(r.read_time).getTime()
+          const t1 =
+            i + 1 < readings.length ? new Date(readings[i + 1].read_time).getTime() : winEnd
+          const x0 = x(t0)
+          const width = Math.max(x(t1) - x0, 0.5)
+          return (
+            <rect
+              key={i}
+              x={x0}
+              y={6}
+              width={width}
+              height={H - 12}
+              fill={r.is_alarm ? 'var(--state-warning)' : 'var(--border-strong)'}
+            >
+              <title>{`${r.value_text ?? '—'} · ${new Date(r.read_time).toLocaleString('ru-RU')}`}</title>
+            </rect>
+          )
+        })}
+      </svg>
+      <TimeAxis start={winStart} end={winEnd} />
+    </>
   )
 }

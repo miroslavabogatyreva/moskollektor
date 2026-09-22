@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
+import { errorMessage } from '../../lib/format'
+import { rowLink, SkipTable } from '../../lib/a11y'
 
 /* Журнал прогнозов — задача 5.4 (MOS-51), постраничность — 4.13 (MOS-117).
    Данные читаются из GET /api/forecasts. Колонки — время, объект, направление,
@@ -52,7 +54,7 @@ export function LogScreen(_props: Record<string, unknown>) {
         setItems(r.items)
         setTotal(r.total)
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
   }, [dateFrom, dateTo, offset])
 
   function изменитьДату(setter: (v: string) => void, value: string) {
@@ -140,18 +142,32 @@ export function LogScreen(_props: Record<string, unknown>) {
         </label>
       </div>
 
+      <SkipTable targetId="log-table-end" />
       <table class="w-full text-sm" style="border-collapse:collapse">
         <thead>
           <tr>
             {COLUMNS.map((c) => (
               <th
                 key={c.key}
-                onClick={() => toggleSort(c.key)}
-                class="text-left px-2 py-2 text-xs uppercase tracking-wide cursor-pointer select-none"
-                style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+                aria-sort={
+                  sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
+                }
+                class="text-left"
+                style="border-bottom:1px solid var(--border-subtle)"
               >
-                {c.label}
-                {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
+                {/* role="button" на th раньше вытеснял неявную роль columnheader —
+                    aria-sort определён только для неё, и программа чтения молчала
+                    про направление сортировки (нашёл 5f, 22.09.2026). Настоящая
+                    button отдаёт Enter и пробел сама, без ручного onKeyDown. */}
+                <button
+                  type="button"
+                  onClick={() => toggleSort(c.key)}
+                  class="w-full text-left px-2 py-2 text-xs uppercase tracking-wide cursor-pointer select-none"
+                  style="color:var(--text-muted)"
+                >
+                  {c.label}
+                  {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
+                </button>
               </th>
             ))}
           </tr>
@@ -160,7 +176,7 @@ export function LogScreen(_props: Record<string, unknown>) {
           {filtered.map((r) => (
             <tr
               key={r.forecast_id}
-              onClick={() => route(`/forecasts/${r.forecast_id}`)}
+              {...rowLink(() => route(`/forecasts/${r.forecast_id}`))}
               style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
               <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>
@@ -172,6 +188,7 @@ export function LogScreen(_props: Record<string, unknown>) {
           ))}
         </tbody>
       </table>
+      <div id="log-table-end" tabindex={-1} />
 
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && filtered.length === 0 && (
