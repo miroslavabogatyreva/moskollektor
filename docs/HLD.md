@@ -1124,6 +1124,13 @@ CREATE TABLE ref.object_xref (
                             по нему в smvu.model_failure_episode. Экранные
                             smvu.fault_rule и smvu.fault_episode не меняются
                             (MOS-133, строка плана 2.21)
+031_channel_location_kind.sql
+                            smvu.channel.location_kind: section, zone,
+                            building или unknown — где стоит канал.
+                            На выгрузке от 15.09.2026: 10 721 / 44 /
+                            717 / 3. Вместе с ней collector пишется
+                            из тега у всех 11 485 каналов, а не только
+                            у 10 720 с пикетом
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
