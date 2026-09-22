@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import { fetchDataStatus, fetchRisks } from './api'
+import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { отставание } from './lag'
+import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
+import type { SectionRef } from './rows'
 import type { DataStatus, RiskRow } from './types'
 
 /* Дашборд рисков — задача 5.2 (MOS-49). Плитки и ранжированный список по риску
@@ -20,6 +22,10 @@ export function DashboardScreen(_props: Record<string, unknown>) {
      список рисков — это две разные беды, и на экране они выглядят по-разному. */
   const [status, setStatus] = useState<DataStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
+  /* Справочник участков — чтобы назвать объект словами (MOS-127). Его отказ
+     не гасит ни список, ни плитки: без него в столбце «Объект» останется
+     номер участка, и таблица работает дальше. */
+  const [sections, setSections] = useState<SectionRef[] | null>(null)
 
   useEffect(() => {
     fetchRisks()
@@ -28,12 +34,17 @@ export function DashboardScreen(_props: Record<string, unknown>) {
     fetchDataStatus()
       .then(setStatus)
       .catch((e) => setStatusError(String(e)))
+    fetchSections()
+      .then(setSections)
+      .catch(() => setSections([]))
   }, [])
 
   const sorted = useMemo(
     () => (rows ? [...rows].sort((a, b) => a.risk_rank - b.risk_rank) : []),
     [rows],
   )
+
+  const имена = useMemo(() => указатель(sections ?? []), [sections])
 
   const stats = useMemo(() => {
     if (!rows || rows.length === 0) return null
@@ -78,7 +89,7 @@ export function DashboardScreen(_props: Record<string, unknown>) {
         <table class="w-full text-sm" style="border-collapse:collapse">
           <thead>
             <tr>
-              {['Ранг', 'Объект', 'Вероятность', 'Горизонт', 'Момент среза', 'Статус'].map((h) => (
+              {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
                 <th
                   key={h}
                   class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -94,16 +105,25 @@ export function DashboardScreen(_props: Record<string, unknown>) {
               <tr
                 key={r.section_id}
                 onClick={() => route(`/objects/${r.section_id}`)}
-                style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
+                style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
               >
                 <td class="px-2 py-2 num">{r.risk_rank}</td>
-                <td class="px-2 py-2 num">{r.section_id}</td>
-                <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
-                <td class="px-2 py-2 num">{r.horizon_h} ч</td>
-                <td class="px-2 py-2 num">{new Date(r.as_of).toLocaleString('ru-RU')}</td>
-                <td class="px-2 py-2" style={r.is_stale ? 'color:var(--state-warning)' : undefined}>
-                  {r.is_stale ? 'устарело' : 'свежий'}
+                <td class="px-2 py-2">
+                  {имяОбъекта(имена.get(r.section_id), r.section_id)}{' '}
+                  <span style="color:var(--text-muted)" class="num">
+                    · {r.section_id}
+                  </span>
                 </td>
+                <td class="px-2 py-2">
+                  {словоРиска(r.risk_class)}
+                  {r.is_stale && (
+                    <span style="color:var(--state-warning)">
+                      {' '}
+                      · расчёт не прошёл, показан прошлый
+                    </span>
+                  )}
+                </td>
+                <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
               </tr>
             ))}
           </tbody>
