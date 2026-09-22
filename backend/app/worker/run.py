@@ -37,6 +37,12 @@
     python -m app.worker.run                      # весь парк, срез = сейчас
     python -m app.worker.run --as-of 2026-06-30T23:59:59+03:00
     python -m app.worker.run --limit 50 --rollback # проверка без следов в базе
+
+`--limit N` берёт первые N участков по возрастанию section_id на обоих путях:
+прежний отбирает их до сборки признаков, путь v3 режет выдачу score.json после
+чтения (MOS-168; до правки v3 считал весь парк и заводил заявки). Без `--rollback`
+такой прогон заявок не заводит, но текущий прогноз заменяет этими N участками —
+поэтому проверочный прогон запускаем только вместе с `--rollback`.
 """
 
 import argparse
@@ -173,8 +179,13 @@ def факторы(значения: list[list[float | None]], имена: list[
 
 
 async def прогон(conn, as_of: datetime | None = None, horizon_h: int | None = None,
-                 предел: int | None = None, full_log: bool | None = None) -> dict:
+                 предел: int | None = None, full_log: bool | None = None,
+                 заявки: bool = True) -> dict:
     """Один расчёт. Возвращает итог прогона — то же, что легло в pred.run.
+
+    `предел` — считать только первые N участков по возрастанию section_id, на обоих
+    путях: прежнем (отбор до сборки признаков) и v3 (срез после чтения score.json).
+    `заявки` — заводить ли автозаявки на стадии 7; решает `run_v3.заявки_разрешены()`.
 
     `full_log` — писать ли в журнал каждый объект (MOS-147). По умолчанию его
     решает срез: названный явно `--as-of` означает обратный расчёт для замера
@@ -277,6 +288,16 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
                                           НАПРАВЛЕНИЕ, ФАКТОРОВ_В_ОБЪЯСНЕНИИ)
             участки, значения = v3["участки"], None
             вероятности, ф_готовые = v3["вероятности"], v3["факторы"]
+            if предел:
+                # MOS-168: файл несёт весь парк, и без среза здесь `--limit` молча
+                # не работал — прогон 501 на стенде при --limit посчитал все 3 173
+                # участка и завёл 18 заявок. Режем до записи, чтобы и журнал,
+                # и заявки видели только эти участки.
+                всего = len(участки)
+                участки, вероятности, ф_готовые = run_v3.урезать(
+                    участки, вероятности, ф_готовые, предел)
+                print(f"   --limit {предел}: берём {len(участки)} участков из {всего} "
+                      f"по возрастанию section_id")
             участков = посчитано = len(участки)
             # Инференс прошёл внутри стадии выше — запрос к модели за вкладами
             # там же. Ноль здесь честнее, чем пустая колонка: своей стадии
@@ -383,9 +404,13 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
         # на forecast_id, и пока прогноз не лёг в базу, ссылаться не на что.
         # Своей колонки ms_* у стадии нет — в pred.run их ровно шесть, и заводить
         # седьмую ради заявок значит менять схему прогонов из блока Q6.
-        счёт = await order_rules.завести(conn, run_id, НАПРАВЛЕНИЕ)
-        print(f"   заявки: выше порога {счёт['выше_порога']} участков из {счёт['участков']}, "
-              f"заведено {счёт['заявок']}, отброшено повторами за сутки {счёт['повторов']}")
+        if заявки:
+            счёт = await order_rules.завести(conn, run_id, НАПРАВЛЕНИЕ)
+            print(f"   заявки: выше порога {счёт['выше_порога']} участков "
+                  f"из {счёт['участков']}, заведено {счёт['заявок']}, "
+                  f"отброшено повторами за сутки {счёт['повторов']}")
+        else:
+            print("   заявки НЕ заводятся: прогон с --limit без --rollback")
         итог = "done"
 
     except client.ModelRejected as e:
@@ -459,7 +484,10 @@ async def main():
     # горизонта, а не тихо подменяться на ГОРИЗОНТ_Ч раньше, чем таблица
     # успеет сказать своё слово (нашла 44).
     р.add_argument("--horizon", type=int, help="без флага — из ref.app_setting")
-    р.add_argument("--limit", type=int, help="считать только первые N участков")
+    р.add_argument("--limit", type=int,
+                   help="считать только первые N участков по section_id (оба пути); "
+                        "без --rollback заявки не заводятся, а текущий прогноз "
+                        "заменяется этими N участками")
     р.add_argument("--rollback", action="store_true", help="откатить всё, что записали")
     р.add_argument("--full-log", action="store_true",
                    help="писать в журнал каждый объект; без флага это решает --as-of")
@@ -472,18 +500,19 @@ async def main():
     conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=900)
     try:
         as_of = datetime.fromisoformat(а.as_of) if а.as_of else None
+        заявки = run_v3.заявки_разрешены(а.limit, а.rollback)
         if а.rollback:
             tr = conn.transaction()
             await tr.start()
             try:
                 строка = await прогон(conn, as_of, а.horizon, а.limit,
-                                      True if а.full_log else None)
+                                      True if а.full_log else None, заявки)
             finally:
                 await tr.rollback()
                 print("откат сделан: в базе следов прогона нет")
         else:
             строка = await прогон(conn, as_of, а.horizon, а.limit,
-                                  True if а.full_log else None)
+                                  True if а.full_log else None, заявки)
         return 0 if строка.get("status") in ("done", "занято") else 1
     finally:
         await conn.close()
