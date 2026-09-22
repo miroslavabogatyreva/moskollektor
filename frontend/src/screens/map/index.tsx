@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { route } from 'preact-router'
 import { errorMessage } from '../../lib/format'
+import { AxisLine } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
-import { isDense, riskColors, riskLabel, type RiskClass } from './risk'
+import { riskColors, riskLabel, type RiskClass } from './risk'
 import type { RiskClassRow, Section } from './types'
-import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewport'
+import type { ViewRange } from './viewport'
 
 /* Ось пикетов — первая половина задачи 5.3 (MOS-50): сам чертёж и клик по метке
    ведёт на /objects/:sectionId (ObjectCard, 5.5, MOS-52). Цвет значка по уровню
@@ -18,17 +18,11 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    от подписи в меню: меню держится за формулировку М-05 ("Карта объектов"),
    а здесь — про способ показа.
 
-   Масштаб (5.15, MOS-126): на коллекторе с тегом 15 (до MOS-181 — номер в
-   выпадающем списке, сейчас часть группы «объект Бета») из 74 пар соседних
-   меток 49 стоят ближе 10 единиц SVG при диаметре метки 10 — на полной оси
-   их не разлепить мышью. Приближение не перекладывает точки, а сужает видимый
-   диапазон пикетов на той же ширине SVG — слипшиеся метки раздвигаются сами,
-   без алгоритма разбежки. Арифметика окна — в viewport.ts, с самопроверкой. */
-
-const AXIS_WIDTH = 1000
-const AXIS_HEIGHT = 120
-const PADDING = 40
-const MIN_VIEW_FRACTION = 0.01
+   Коллектор дерева заказчика (MOS-181) собирает несколько префиксов тега
+   («объект Зита» — пять), и пикет 0 у каждого свой. Одна общая ось наложила бы
+   их участки друг на друга (275 позиций, 575 участков из 3 173 — нашла e8) —
+   поэтому под коллектором рисуется по одной линии AxisLine.tsx на префикс,
+   каждая со своим масштабом (5.15, MOS-126, арифметика — в viewport.ts). */
 
 // ponytail: логин без входа, как в screens/dashboard/api.ts — заглушка до экрана
 // логина (Q4.2, LDAP), заменить константу сессией пользователя.
@@ -43,7 +37,8 @@ export function MapScreen(_props: Record<string, unknown>) {
   const [sections, setSections] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
-  const [viewRange, setViewRange] = useState<ViewRange | null>(null)
+  // Своё окно просмотра на каждую линию (префикс), не одно на коллектор.
+  const [viewRanges, setViewRanges] = useState<Record<string, ViewRange | null>>({})
   const [risks, setRisks] = useState<RiskClassRow[]>([])
   const [filters, setFilters] = useState<MapFilterState>(DEFAULT_FILTERS)
 
@@ -104,37 +99,29 @@ export function MapScreen(_props: Record<string, unknown>) {
     [onAxis, riskBySection, filters],
   )
 
-  // Смена коллектора меняет диапазон пикетов — старое окно просмотра теряет смысл.
-  useEffect(() => setViewRange(null), [collector])
+  // Смена коллектора меняет набор линий — старые окна просмотра теряют смысл.
+  useEffect(() => setViewRanges({}), [collector])
 
-  const maxPicket = Math.max(1, ...onAxis.map((s) => s.picket))
-  const minViewWidth = Math.max(1, maxPicket * MIN_VIEW_FRACTION)
-  const [viewStart, viewEnd] = viewRange ?? fullView(maxPicket)
-  const viewWidth = viewEnd - viewStart
-  const zoomed = !isFullView([viewStart, viewEnd], maxPicket)
-  const visibleAxis = useMemo(
-    () => filteredAxis.filter((s) => s.picket >= viewStart && s.picket <= viewEnd),
-    [filteredAxis, viewStart, viewEnd],
-  )
+  // Линия — один префикс тега (MOS-181): smvu_key = "префикс:пикет", и у каждого
+  // префикса пикет 0 свой. all — на масштаб линии (фильтры его не двигают),
+  // filteredByPrefix — что внутри линии показывать.
+  const lines = useMemo(() => {
+    const byPrefix = new Map<string, Section[]>()
+    for (const s of onAxis) {
+      const prefix = s.smvu_key.split(':')[0]
+      byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), s])
+    }
+    return [...byPrefix.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))
+  }, [onAxis])
 
-  const innerWidth = AXIS_WIDTH - PADDING * 2
-  const x = (picket: number) => PADDING + ((picket - viewStart) / viewWidth) * innerWidth
-  const baselineY = AXIS_HEIGHT / 2
-  const dense = isDense(visibleAxis.length, innerWidth)
-
-  const zoomBy = (factor: number, center = (viewStart + viewEnd) / 2) =>
-    setViewRange(zoomView([viewStart, viewEnd], factor, center, maxPicket, minViewWidth))
-  const panBy = (fraction: number) =>
-    setViewRange(panView([viewStart, viewEnd], fraction, maxPicket))
-  const resetView = () => setViewRange(null)
-
-  const onWheel = (e: WheelEvent) => {
-    e.preventDefault()
-    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
-    const svgX = ((e.clientX - rect.left) / rect.width) * AXIS_WIDTH
-    const center = viewStart + ((svgX - PADDING) / innerWidth) * viewWidth
-    zoomBy(e.deltaY > 0 ? 1.4 : 1 / 1.4, center)
-  }
+  const filteredByPrefix = useMemo(() => {
+    const m = new Map<string, Section[]>()
+    for (const s of filteredAxis) {
+      const prefix = s.smvu_key.split(':')[0]
+      m.set(prefix, [...(m.get(prefix) ?? []), s])
+    }
+    return m
+  }, [filteredAxis])
 
   return (
     <main class="p-5 flex flex-col gap-4">
@@ -170,150 +157,23 @@ export function MapScreen(_props: Record<string, unknown>) {
             totalCount={onAxis.length}
           />
 
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              disabled={viewWidth <= minViewWidth}
-              onClick={() => zoomBy(0.5)}
-            >
-              + приблизить
-            </button>
-            <button
-              type="button"
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              disabled={!zoomed}
-              onClick={() => zoomBy(2)}
-            >
-              − отдалить
-            </button>
-            <button
-              type="button"
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              disabled={!zoomed || viewStart <= 0}
-              onClick={() => panBy(-0.3)}
-            >
-              ◀ левее
-            </button>
-            <button
-              type="button"
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              disabled={!zoomed || viewEnd >= maxPicket}
-              onClick={() => panBy(0.3)}
-            >
-              правее ▶
-            </button>
-            <button
-              type="button"
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              disabled={!zoomed}
-              onClick={resetView}
-            >
-              вся ось
-            </button>
+          <p class="text-sm" style="color:var(--text-secondary)">
+            Коллектор «{collectorName}»: {lines.length} {lines.length === 1 ? 'линия' : 'линии'}
+          </p>
+
+          <div class="flex flex-col gap-4">
+            {lines.map(([prefix, all]) => (
+              <AxisLine
+                key={prefix}
+                prefix={prefix}
+                all={all}
+                visible={filteredByPrefix.get(prefix) ?? []}
+                riskBySection={riskBySection}
+                viewRange={viewRanges[prefix] ?? null}
+                onViewRangeChange={(v) => setViewRanges((prev) => ({ ...prev, [prefix]: v }))}
+              />
+            ))}
           </div>
-
-          <svg
-            viewBox={`0 0 ${AXIS_WIDTH} ${AXIS_HEIGHT}`}
-            role="img"
-            aria-label={`Ось пикетов коллектора ${collectorName}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${onAxis.length} участков`}
-            class="w-full"
-            style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
-            onWheel={onWheel}
-          >
-            <line
-              x1={PADDING}
-              y1={baselineY}
-              x2={AXIS_WIDTH - PADDING}
-              y2={baselineY}
-              stroke="var(--border-strong)"
-              stroke-width="2"
-            />
-            <text x={PADDING} y={baselineY + 28} font-size="11" fill="var(--text-muted)">
-              ПК{Math.round(viewStart)}
-            </text>
-            <text
-              x={AXIS_WIDTH - PADDING}
-              y={baselineY + 28}
-              font-size="11"
-              fill="var(--text-muted)"
-              text-anchor="end"
-            >
-              ПК{Math.round(viewEnd)}
-            </text>
-            {visibleAxis.map((s) => {
-              const cls = riskBySection.get(s.section_id)
-              const colors = riskColors(cls)
-              const title = `${s.smvu_key} · участок ${s.section_id} · ${riskLabel(cls)}`
-              const cx = x(s.picket)
-
-              // Густо — показываем только цветной чип без номера (правило плотности,
-              // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
-              if (dense) {
-                return (
-                  <rect
-                    key={s.section_id}
-                    x={cx - 3}
-                    y={baselineY - 3}
-                    width={6}
-                    height={6}
-                    fill={colors.fill}
-                    stroke={colors.border}
-                    stroke-width={1}
-                    style="cursor:pointer"
-                    onClick={() => route(`/objects/${s.section_id}`)}
-                  >
-                    <title>{title}</title>
-                  </rect>
-                )
-              }
-
-              // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
-              // как на экране заказчика: номер читается при любом цвете чипа.
-              return (
-                <g
-                  key={s.section_id}
-                  style="cursor:pointer"
-                  onClick={() => route(`/objects/${s.section_id}`)}
-                >
-                  <title>{title}</title>
-                  <rect
-                    x={cx - 10}
-                    y={baselineY - 10}
-                    width={20}
-                    height={20}
-                    rx={2}
-                    fill="var(--bg-table)"
-                    stroke="var(--border-strong)"
-                    stroke-width={1.5}
-                  />
-                  <text
-                    x={cx}
-                    y={baselineY + 4}
-                    font-size="9"
-                    text-anchor="middle"
-                    fill="var(--text-primary)"
-                  >
-                    {Math.round(s.picket)}
-                  </text>
-                  <rect
-                    x={cx + 5}
-                    y={baselineY - 13}
-                    width={7}
-                    height={7}
-                    fill={colors.fill}
-                    stroke={colors.border}
-                    stroke-width={1}
-                  />
-                </g>
-              )
-            })}
-          </svg>
 
           {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
               в title значка — на настенном экране диспетчерской мышью не водят. */}
