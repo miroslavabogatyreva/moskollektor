@@ -460,7 +460,9 @@ def main(argv):
     try:
         результаты, d = asyncio.run(run_checks(dsn))
     except (OSError, ValueError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
-        return fail_all(f"нет связи с базой: {str(e).splitlines()[0]}")
+        # TimeoutError приходит с пустым текстом, и splitlines()[0] падал IndexError
+        # вместо «нет связи с базой» — тогда называем хотя бы класс ошибки.
+        return fail_all(f"нет связи с базой: {(str(e).splitlines() or [type(e).__name__])[0]}")
     return report(результаты, d)
 
 
