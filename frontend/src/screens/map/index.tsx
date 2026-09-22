@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import type { Section } from './types'
+import { errorMessage } from '../../lib/format'
+import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
+import { MapFilters } from './MapFilters'
+import { isDense, riskColors, riskLabel, type RiskClass } from './risk'
+import type { RiskClassRow, Section } from './types'
 import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewport'
 
 /* Ось пикетов — первая половина задачи 5.3 (MOS-50): сам чертёж и клик по метке
-   ведёт на /objects/:sectionId (ObjectCard, 5.5, MOS-52). Цвет и форма метки
-   по уровню риска — вторая половина, оставлена без изменений в этой правке.
+   ведёт на /objects/:sectionId (ObjectCard, 5.5, MOS-52). Цвет значка по уровню
+   риска — задача 5.22 (MOS-106): личность объекта (рамка с номером) и его
+   состояние (маленький чип сбоку) нарисованы раздельно, как на экране заказчика
+   (docs/meetings/img-forum/19-10-интерфейс-смву-крупно.png) — номер читается
+   при любом цвете чипа. Цвета и правило плотности — risk.ts, с самопроверкой.
    3 173 участка одной лентой не показать (dashboard/dashboard.md, разд. 9) —
    поэтому сначала выбор коллектора, потом ось. Заголовок экрана отличается
    от подписи в меню: меню держится за формулировку М-05 ("Карта объектов"),
@@ -22,11 +29,22 @@ const AXIS_HEIGHT = 120
 const PADDING = 40
 const MIN_VIEW_FRACTION = 0.01
 
+// ponytail: логин без входа, как в screens/dashboard/api.ts — заглушка до экрана
+// логина (Q4.2, LDAP), заменить константу сессией пользователя.
+const API_LOGIN = 'dispatcher1'
+
+// Порядок легенды (MOS-170) — те же три состояния, что красит риск.ts. Слова
+// должны дословно совпасть с легендой на дашборде (зона fe) — текст согласован
+// в переписке к MOS-170, менять только вместе с ним.
+const LEGEND_STATES: RiskClass[] = ['high', 'normal', null]
+
 export function MapScreen(_props: Record<string, unknown>) {
   const [sections, setSections] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
   const [viewRange, setViewRange] = useState<ViewRange | null>(null)
+  const [risks, setRisks] = useState<RiskClassRow[]>([])
+  const [filters, setFilters] = useState<MapFilterState>(DEFAULT_FILTERS)
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -38,8 +56,25 @@ export function MapScreen(_props: Record<string, unknown>) {
         setSections(data)
         setCollector(data[0]?.collector ?? null)
       })
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(errorMessage(e)))
   }, [])
+
+  useEffect(() => {
+    fetch('/api/risks', { headers: { 'X-User-Login': API_LOGIN } })
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+        return r.json() as Promise<RiskClassRow[]>
+      })
+      .then(setRisks)
+      // Риск не грузится — не блокируем схему, участки просто выйдут нейтральными.
+      .catch((e) => console.error('не удалось загрузить /api/risks:', errorMessage(e)))
+  }, [])
+
+  const riskBySection = useMemo(() => {
+    const m = new Map<number, RiskClassRow['risk_class']>()
+    for (const r of risks) m.set(r.section_id, r.risk_class)
+    return m
+  }, [risks])
 
   const collectors = useMemo(() => {
     if (!sections) return []
@@ -53,6 +88,13 @@ export function MapScreen(_props: Record<string, unknown>) {
     [sections, collector],
   )
 
+  // Фильтры сужают набор значков, но не масштаб оси — линейка и подписи ПК держатся
+  // на полном onAxis, иначе включённый фильтр менял бы диапазон под ногами.
+  const filteredAxis = useMemo(
+    () => onAxis.filter((s) => matchesFilters(s, riskBySection.get(s.section_id), filters)),
+    [onAxis, riskBySection, filters],
+  )
+
   // Смена коллектора меняет диапазон пикетов — старое окно просмотра теряет смысл.
   useEffect(() => setViewRange(null), [collector])
 
@@ -62,13 +104,14 @@ export function MapScreen(_props: Record<string, unknown>) {
   const viewWidth = viewEnd - viewStart
   const zoomed = !isFullView([viewStart, viewEnd], maxPicket)
   const visibleAxis = useMemo(
-    () => onAxis.filter((s) => s.picket >= viewStart && s.picket <= viewEnd),
-    [onAxis, viewStart, viewEnd],
+    () => filteredAxis.filter((s) => s.picket >= viewStart && s.picket <= viewEnd),
+    [filteredAxis, viewStart, viewEnd],
   )
 
   const innerWidth = AXIS_WIDTH - PADDING * 2
   const x = (picket: number) => PADDING + ((picket - viewStart) / viewWidth) * innerWidth
   const baselineY = AXIS_HEIGHT / 2
+  const dense = isDense(visibleAxis.length, innerWidth)
 
   const zoomBy = (factor: number, center = (viewStart + viewEnd) / 2) =>
     setViewRange(zoomView([viewStart, viewEnd], factor, center, maxPicket, minViewWidth))
@@ -110,6 +153,13 @@ export function MapScreen(_props: Record<string, unknown>) {
               ))}
             </select>
           </label>
+
+          <MapFilters
+            filters={filters}
+            onChange={setFilters}
+            matchCount={filteredAxis.length}
+            totalCount={onAxis.length}
+          />
 
           <div class="flex items-center gap-2">
             <button
@@ -187,26 +237,97 @@ export function MapScreen(_props: Record<string, unknown>) {
             >
               ПК{Math.round(viewEnd)}
             </text>
-            {visibleAxis.map((s) => (
-              <circle
-                key={s.section_id}
-                cx={x(s.picket)}
-                cy={baselineY}
-                r={5}
-                fill="var(--bg-table)"
-                stroke="var(--border-strong)"
-                stroke-width={1.5}
-                style="cursor:pointer"
-                onClick={() => route(`/objects/${s.section_id}`)}
-              >
-                <title>{`${s.smvu_key} · участок ${s.section_id}`}</title>
-              </circle>
-            ))}
+            {visibleAxis.map((s) => {
+              const cls = riskBySection.get(s.section_id)
+              const colors = riskColors(cls)
+              const title = `${s.smvu_key} · участок ${s.section_id} · ${riskLabel(cls)}`
+              const cx = x(s.picket)
+
+              // Густо — показываем только цветной чип без номера (правило плотности,
+              // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
+              if (dense) {
+                return (
+                  <rect
+                    key={s.section_id}
+                    x={cx - 3}
+                    y={baselineY - 3}
+                    width={6}
+                    height={6}
+                    fill={colors.fill}
+                    stroke={colors.border}
+                    stroke-width={1}
+                    style="cursor:pointer"
+                    onClick={() => route(`/objects/${s.section_id}`)}
+                  >
+                    <title>{title}</title>
+                  </rect>
+                )
+              }
+
+              // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
+              // как на экране заказчика: номер читается при любом цвете чипа.
+              return (
+                <g
+                  key={s.section_id}
+                  style="cursor:pointer"
+                  onClick={() => route(`/objects/${s.section_id}`)}
+                >
+                  <title>{title}</title>
+                  <rect
+                    x={cx - 10}
+                    y={baselineY - 10}
+                    width={20}
+                    height={20}
+                    rx={2}
+                    fill="var(--bg-table)"
+                    stroke="var(--border-strong)"
+                    stroke-width={1.5}
+                  />
+                  <text
+                    x={cx}
+                    y={baselineY + 4}
+                    font-size="9"
+                    text-anchor="middle"
+                    fill="var(--text-primary)"
+                  >
+                    {Math.round(s.picket)}
+                  </text>
+                  <rect
+                    x={cx + 5}
+                    y={baselineY - 13}
+                    width={7}
+                    height={7}
+                    fill={colors.fill}
+                    stroke={colors.border}
+                    stroke-width={1}
+                  />
+                </g>
+              )
+            })}
           </svg>
-          <p class="text-xs" style="color:var(--text-muted)">
-            Цвет и форма метки по уровню риска ещё не подключены к /api/risks — пока каждая метка
-            нейтральная, это не значит «нет данных» в смысле молчащего датчика.
-          </p>
+
+          {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
+              в title значка — на настенном экране диспетчерской мышью не водят. */}
+          <div
+            class="flex flex-wrap items-center gap-4 text-sm"
+            style="color:var(--text-secondary)"
+          >
+            {LEGEND_STATES.map((cls) => {
+              const colors = riskColors(cls)
+              return (
+                <span key={String(cls)} class="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    style={`display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors.fill};border:1px solid ${colors.border}`}
+                  />
+                  {riskLabel(cls)}
+                  {cls == null && (
+                    <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
+                  )}
+                </span>
+              )
+            })}
+          </div>
         </>
       )}
     </main>

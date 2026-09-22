@@ -5,6 +5,14 @@
 
 Подключение через SSH-туннель на localhost:55432 (docs/server.md), пароль берём
 переменной окружения PGPASSWORD, чтобы не класть его в аргументы командной строки.
+
+Задача 5.12 (MOS-122, приёмка Ф-93) добавила поле `kinds` — вид_объекта
+(smvu.object_tree.kind) участка, для фильтра по типу объекта на экране карты.
+У участка бывает несколько видов сразу (435 из 3173 несут оба — датчик
+диспетчерского дома и охранной зоны на одном пикете), поэтому это массив,
+а не одно значение. «Район» в фильтр не попал: у дерева объектов заказчика
+один корень на весь парк, «Район по эксплуатации» (day-one.md:187) — различать
+там нечего, это не наш недосмотр, а свойство выгрузки.
 """
 import asyncio
 import json
@@ -28,8 +36,19 @@ async def main() -> None:
     )
     try:
         rows = await conn.fetch(
-            "SELECT section_id, smvu_key FROM ref.object_xref "
-            "WHERE smvu_key IS NOT NULL ORDER BY smvu_key"
+            """
+            SELECT x.section_id, x.smvu_key,
+                   COALESCE(k.kinds, ARRAY[]::text[]) AS kinds
+            FROM ref.object_xref x
+            LEFT JOIN (
+                SELECT c.section_id, array_agg(DISTINCT ot.kind ORDER BY ot.kind) AS kinds
+                FROM smvu.channel c
+                JOIN smvu.object_tree ot ON ot.object_id = c.object_id
+                WHERE c.section_id IS NOT NULL
+                GROUP BY c.section_id
+            ) k ON k.section_id = x.section_id
+            WHERE x.smvu_key IS NOT NULL
+            """
         )
     finally:
         await conn.close()
@@ -42,6 +61,7 @@ async def main() -> None:
             "smvu_key": r["smvu_key"],
             "collector": int(collector),
             "picket": int(picket),
+            "kinds": list(r["kinds"]),
         })
     sections.sort(key=lambda s: (s["collector"], s["picket"]))
 
