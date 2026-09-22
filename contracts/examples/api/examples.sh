@@ -97,6 +97,16 @@ check "GET /api/risks без входа"                            401 "$BASE_U
 # Роль диспетчера видит риски и прогнозы, но не журнал аудита (НФ-44).
 check "GET /api/risks (dispatcher1)"                        200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks"
 check "GET /api/forecasts (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts"
+# Состояние данных (MOS-148, М-04). Метод обязан быть открыт диспетчеру: под ним
+# ходит дашборд (frontend/src/screens/dashboard/api.ts). Проверяем не только код,
+# но и поле: пропади data_edge — плитка снова начнёт выводить край из прогнозов,
+# а код ответа при этом останется 200.
+check "GET /api/data-status без входа"                      401 "$BASE_URL/api/data-status"
+check "GET /api/data-status (dispatcher1)"                  200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/data-status"
+check_contains "GET /api/data-status отдаёт data_edge" '"data_edge"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/data-status"
+# lag_days считает сервер (MOS-129, сделано в MOS-148): вычитание двух дат
+# на фронте пошло бы в поясе браузера.
+check_contains "GET /api/data-status отдаёт lag_days" '"lag_days"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/data-status"
 # Расчёт (Q3) ещё не писал pred.forecast — 200 и пустой список, а не 404 и не 500.
 check "GET /api/forecasts/1 (dispatcher1, id не найден)"    404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts/1"
 
