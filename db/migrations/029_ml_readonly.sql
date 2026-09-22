@@ -66,10 +66,29 @@ GRANT SELECT ON ALL TABLES IN SCHEMA smvu, ref TO ml_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA smvu, ref GRANT SELECT ON TABLES TO ml_ro;
 
 -- Самопроверка накатом: три утверждения, каждое про своё.
+--
+-- ПУСТОЙ СПРАВОЧНИК — НЕ ПОВОД ПАДАТЬ, и это не послабление, а починка установки
+-- с нуля (задача 1.16, MOS-165). Заказчик распаковывает пакет и запускает накат
+-- на пустой базе, справочники заливаются после него. До 22.09.2026 второй ASSERT
+-- сравнивал число коллекторов с литералом 16 и получал 0, накат вставал на 029,
+-- а `api` и `worker` не поднимались вовсе: они ждут контейнер `migrate` через
+-- `condition: service_completed_successfully`. Проверено на пустой базе: накат
+-- доезжал до 028 и возвращал код 1.
+--
+-- Поэтому на пустом справочнике три проверки пропускаются вслух, а не молча.
+-- Что они при этом теряют: на чистой установке 029 запишется в журнал зелёной
+-- и больше не выполнится никогда — `migrate.py` накатанный файл не повторяет.
+-- Долговременное место для этих счётчиков — приёмочный скрипт, который ходит
+-- в живую базу, а не миграция.
 DO $$
 DECLARE к_всего int; к_видно int; коллекторов int; сирот int;
 BEGIN
   SELECT count(*) INTO к_всего  FROM smvu.channel WHERE is_active AND object_id IS NOT NULL;
+  IF к_всего = 0 THEN
+    RAISE NOTICE '029: справочник каналов пуст — три проверки пропущены. Залейте '
+                 'справочники (deploy/README.md, «Залить выгрузку СМВУ») и повторите накат';
+    RETURN;
+  END IF;
   SELECT count(*), count(DISTINCT collector_id) INTO к_видно, коллекторов FROM smvu.channel_collector;
   SELECT count(*) INTO сирот FROM smvu.object_tree WHERE level = 3
      AND parent_id NOT IN (SELECT object_id FROM smvu.object_tree WHERE level = 2);
