@@ -23,22 +23,57 @@
 DATABASE_URL. Своего способа не заводим, иначе стенд и приёмка смотрят в разные
 базы и расходятся молча.
 
-Запуск:  DATABASE_URL=postgresql://... python3 code/check_orders.py
-Самопроверка без базы (М-13, сравнение сроков):  python3 code/check_orders.py --demo
+М-10 и М-13 спрашивают ещё и выдачу модели — score.json с открытыми предупреждениями
+и их историей (контракт score.v3). В базе предупреждений нет: worker читает файл
+и складывает флаг в вероятность коллектора. Путь к файлу — SCORE_JSON; check-all.sh
+забирает его со стенда сам, если задан STAND_SSH. Без файла обе строки — СБОЙ.
+
+Запуск:  DATABASE_URL=postgresql://... SCORE_JSON=score.json python3 code/check_orders.py
+Самопроверка без базы (М-10, М-13):  python3 code/check_orders.py --demo
 """
 
 import asyncio
+import json
 import os
 import sys
-from datetime import timedelta
-from statistics import median
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from zoneinfo import ZoneInfo
 
 try:
     import asyncpg
 except ImportError:  # пакет живёт в образе бэкенда, локально его может не быть
     asyncpg = None
 
+# Участок -> коллектор берём из продукта, а не пишем второй раз: этим же запросом
+# worker раскладывает вероятность коллектора по участкам. Своя копия разошлась бы
+# с продуктом молча — ровно та беда, которую проверка должна ловить, а не носить.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА  # noqa: E402
+
+# Медиану упреждения для М-13 считает та же методика, что М-18…М-20a: эпизоды
+# цели модели по контракту, склейка контракта, evaluate_alerts с окном 0…168 ч.
+# Своя реализация совпадений здесь была до 22.09.2026 и дала 23,1 ч вместо
+# канонических 16,7 — окно 720 ч, без порога длительности, один коллектор на префикс.
+import model_failure  # noqa: E402
+from check_metrics_report import ВЕРХ_ОКНА_Ч, ОКНО_ДО, ОКНО_ОТ  # noqa: E402
+from predictive_metrics import evaluate_alerts  # noqa: E402
+
 ROWS = ("М-09", "М-10", "М-11", "М-12", "М-13")
+
+# Время в score.json без зоны — это московское время выгрузки: срез
+# «2026-06-30T23:59:59» worker кладёт в pred.run.as_of как 23:59:59+03.
+МОСКВА = ZoneInfo("Europe/Moscow")
+
+# Предупреждение модели приходит на префикс тега, инцидент — на коллектор.
+# Префикс кладём на ВСЕ коллекторы, где у него есть каналы, как в
+# check_metrics_report.замер: 798 и 163 ведут к двум коллекторам каждый.
+ПРЕФИКС_КОЛЛЕКТОРЫ = """
+SELECT DISTINCT split_part(tag, '-', 1) AS pfx, collector_id
+  FROM smvu.channel_collector WHERE collector_id IS NOT NULL
+"""
 
 # Что модулю заявок нужно в схеме. Проверяем колонки, а не таблицы: таблица
 # maint.notification есть с 001_assets.sql, но без forecast_id и due_at модуль
@@ -56,37 +91,135 @@ REQUIRED_COLUMNS = (
     "pred.run.as_of",
 )
 
+# ------------------------------------------------------------------ М-10, М-13: логика
+#
+# До 22.09.2026 М-13 сравнивала due_at с as_of + horizon_h — той же формулой,
+# по которой order_rules.срок() этот due_at и поставил. Такая проверка зелёная
+# по построению: 259 из 259, запас 8…12 ч, и так при любом сроке и любом
+# горизонте (ревью Codex 22.09.2026, строка М-13 — gap). Теперь срок сравнивается
+# не с формулой, а с данными: с медианой упреждения пойманных отказов, которую
+# считает методика М-18…М-20a (упреждение() ниже).
 
-# ------------------------------------------------------------------ М-13: логика
+
+def _момент(текст):
+    t = datetime.fromisoformat(текст)
+    return t if t.tzinfo else t.replace(tzinfo=МОСКВА)
 
 
-def lead_hours(due_at, as_of, horizon_h):
-    """Запас в часах между сроком работ и прогнозируемым отказом.
+def read_score(path):
+    """Выдача модели из score.json: версия, горизонт, открытые и все предупреждения."""
+    д = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {
+        "model": д["model_version"],
+        "horizon_h": int(д["horizon_h"]),
+        # (pfx, момент открытия, та же строка как в файле): строкой момент
+        # входит в ключ заявки warn:<pfx>:<открытие>:<участок> (миграция 037).
+        "open": [
+            (str(к["pfx"]), _момент(к["warning_opened_at"]), к["warning_opened_at"])
+            for к in д["collectors"]
+            if к.get("warning_open")
+        ],
+        "alerts": [(str(а["pfx"]), _момент(а["t"])) for а in д.get("alerts") or []],
+    }
 
-    Прогнозируемый момент отказа — это as_of прогона плюс horizon_h часов
-    (pred.run.as_of + pred.forecast.horizon_h). Положительный запас = заявка
-    превентивная: успеваем до отказа.
 
-    Возвращает None, если сравнивать нечем: нет срока, нет прогноза или нет
-    прогона. Это не «ноль часов запаса», а «утверждать нечего», и различать
-    эти два случая обязательно — ноль ещё можно принять за границу.
+def warnings_without_order(open_, keys):
+    """Открытые предупреждения, у которых нет заявки со своим ключом.
 
-    Сравнение живёт здесь, а не в SQL: одна методика в двух реализациях
-    расходится молча, а самопроверке ниже нужна та же самая функция.
+    open_ — [(pfx, opened_at, строка открытия)], keys — source_key автозаявок.
+    Ключ заявки по предупреждению — warn:<pfx>:<открытие>:<участок>; участков
+    у предупреждения бывает несколько, поэтому сверяем начало ключа.
     """
-    if due_at is None or as_of is None or horizon_h is None:
-        return None
-    return (as_of + timedelta(hours=horizon_h) - due_at).total_seconds() / 3600
+    return [
+        (pfx, opened)
+        for pfx, opened, строка in open_
+        if not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
+    ]
 
 
-def is_preventive(due_at, as_of, horizon_h):
-    """Срок работ наступает СТРОГО раньше прогнозируемого отказа (М-13).
+def orders_per_warning(open_, orders, top):
+    """Лишние заявки и заявки без одного наряда у открытых предупреждений.
 
-    Ровно в момент отказа — не превентивно: работы, начатые в час аварии,
-    аварию не предотвращают.
+    orders — [(source_key, нарядов)] автозаявок warn:…; top — потолок участков
+    на предупреждение (ref.app_setting.order_top_sections_per_object).
+    Возвращает (предупреждения с числом заявок вне 1…top, ключи заявок, у
+    которых нарядов не ровно один). Второе ловит «INSERT … SELECT без наряда»:
+    нет кода вида работ в справочнике — заявка есть, наряда нет, ошибки нет.
     """
-    lead = lead_hours(due_at, as_of, horizon_h)
-    return lead is not None and lead > 0
+    вне = []
+    for pfx, opened, строка in open_:
+        n = sum(1 for k, _ in orders if k.startswith(f"warn:{pfx}:{строка}:"))
+        if n and not 1 <= n <= top:
+            вне.append((pfx, n))
+    не_один = [k for k, нарядов in orders if нарядов != 1]
+    return вне, не_один
+
+
+def collectors_without_order(open_, bridge, last_order):
+    """Справочно: коллекторы под предупреждением без автозаявки после открытия.
+
+    Так М-10 судила до 22.09.2026, и так засчитывалась заявка, которую родил
+    порог вероятности, а не предупреждение: у префикса 418 (коллектор 11)
+    «заявкой» считалась 4490 на участке 477:4 с p = 0,650 > 0,63.
+    """
+    return sorted(
+        {
+            bridge.get(pfx)
+            for pfx, opened, _ in open_
+            if not (
+                bridge.get(pfx) in last_order and last_order[bridge.get(pfx)] >= opened
+            )
+        },
+        key=str,
+    )
+
+
+def share_after(leads, reaction_h):
+    """Доля пойманных отказов, случившихся СТРОГО позже срока работ."""
+    return sum(1 for x in leads if x > reaction_h) / len(leads) if leads else 0.0
+
+
+async def упреждение(conn, score):
+    """Упреждения пойманных отказов, ч — методикой М-18…М-20a (MOS-167).
+
+    Эпизоды цели модели по контракту failure.v3, склейка контракта по коллектору,
+    окно ОКНО_ОТ…ОКНО_ДО, evaluate_alerts(…, 0, ВЕРХ_ОКНА_Ч). На стенде 22.09.2026:
+    716 эпизодов -> 169 инцидентов, 170 предупреждений на коллекторах, 128
+    попаданий, медиана 16,7 ч — то же, что check_metrics_report.py в PR #4.
+    Возвращает (метрики evaluate_alerts, число инцидентов).
+    """
+    к = model_failure.загрузить_контракт()
+    от = datetime.fromisoformat(ОКНО_ОТ).replace(tzinfo=МОСКВА)
+    до = datetime.fromisoformat(ОКНО_ДО).replace(tzinfo=МОСКВА)
+    rows = await conn.fetch(
+        model_failure.ЭПИЗОДЫ_МОДЕЛИ,
+        от,
+        до,
+        к["failure_values"],
+        к["episode"]["min_duration_seconds"],
+        к["model_version"],
+    )
+    коллектор_канала = {
+        r["channel_id"]: r["collector_id"]
+        for r in rows
+        if r["collector_id"] is not None
+    }
+    инциденты = [
+        (k, t)
+        for k, t in model_failure.инциденты(
+            [(r["channel_id"], r["started_at"]) for r in rows],
+            коллектор_канала,
+            к["incident"]["merge_minutes"],
+        )
+        if от < t < до
+    ]
+    префикс = {}
+    for r in await conn.fetch(ПРЕФИКС_КОЛЛЕКТОРЫ):
+        префикс.setdefault(r["pfx"], set()).add(r["collector_id"])
+    на_коллекторах = [
+        (f"obj:{c}", t) for p, t in score["alerts"] for c in sorted(префикс.get(p, ()))
+    ]
+    return evaluate_alerts(на_коллекторах, инциденты, 0, ВЕРХ_ОКНА_Ч), len(инциденты)
 
 
 # ------------------------------------------------------------------ проверки
@@ -121,8 +254,98 @@ async def check_m09(conn):
     )
 
 
-async def check_m10(conn):
-    """Заявку заводит расчёт, а не диспетчер."""
+async def check_m10(conn, score):
+    """Открытое предупреждение модели превращается в заявку без диспетчера.
+
+    Условие — у КАЖДОГО открытого предупреждения (pfx, момент открытия) из
+    score.json есть автозаявка с его ключом warn:<pfx>:<открытие>:… Прежняя
+    проверка считала только source_system='forecast' и непустой forecast_id,
+    а следующая за ней — заявку на коллекторе; обе засчитывали заявку, которую
+    родил порог вероятности, а не предупреждение. Счёт по коллектору печатается
+    справочно: разница двух чисел — ровно то, что чинит MOS-180.
+    """
+    base_ok, base_text = await _m10_source(conn)
+    if not base_ok:
+        return False, base_text
+    if score is None:
+        return False, (
+            f"{base_text}; открытые предупреждения сверить не с чем — "
+            "не задан SCORE_JSON (check-all.sh берёт его со стенда по STAND_SSH)"
+        )
+    if not score["open"]:
+        return False, (
+            f"{base_text}; в score.json 0 открытых предупреждений — "
+            "проверять превращение в заявку не на чем"
+        )
+    orders = [
+        (r["source_key"], r["нарядов"])
+        for r in await conn.fetch(
+            "SELECT n.source_key, (SELECT count(*) FROM maint.work_order w "
+            "                       WHERE w.notification_id = n.id) AS нарядов "
+            "FROM maint.notification n "
+            "WHERE n.source_system = 'forecast' AND n.source_key LIKE 'warn:%'"
+        )
+    ]
+    keys = [k for k, _ in orders]
+    потери = warnings_without_order(score["open"], keys)
+    top = await conn.fetchval(
+        "SELECT value FROM ref.app_setting WHERE key = 'order_top_sections_per_object'"
+    )
+    if top is None:
+        return (
+            False,
+            "нет настройки order_top_sections_per_object: сколько заявок на предупреждение, не сказано",
+        )
+    вне, не_один = orders_per_warning(score["open"], orders, int(top))
+
+    bridge = {
+        r["pfx"]: r["collector_id"]
+        for r in await conn.fetch("SELECT pfx, collector_id FROM pred.pfx_collector")
+    }
+    # Только заявки от прогнозов ЭТОЙ модели: заявки заглушки stub-0.1 от
+    # 17…21.09.2026 несут настоящее сентябрьское reported_at, и оно «позже»
+    # любого июньского открытия.
+    last_order = {
+        r["collector_id"]: r["last"]
+        for r in await conn.fetch(
+            f"SELECT sc.collector_id, max(n.reported_at) AS last "
+            f"FROM maint.notification n "
+            f"JOIN pred.forecast f ON f.forecast_id = n.forecast_id "
+            f"JOIN pred.run r ON r.run_id = f.run_id "
+            f"JOIN ({УЧАСТКИ_КОЛЛЕКТОРА}) sc ON sc.section_id = f.section_id "
+            f"WHERE n.source_system = 'forecast' AND r.model_version = $1 "
+            f"GROUP BY sc.collector_id",
+            score["model"],
+        )
+    }
+    коллекторов = len({bridge.get(p) for p, _, _ in score["open"]})
+    без_коллектора = collectors_without_order(score["open"], bridge, last_order)
+    суть = (
+        f"модель {score['model']}: по предупреждению без заявки {len(потери)} из "
+        f"{len(score['open'])} (ключ warn:<pfx>:<открытие>, заявок с таким ключом "
+        f"{len(keys)}); справочно по коллектору {len(без_коллектора)} из {коллекторов}"
+    )
+    суть += (
+        f"; заявок на предупреждение вне 1…{int(top)}: {len(вне)}, заявок warn: "
+        f"не с одним нарядом: {len(не_один)}"
+    )
+    беды = []
+    if потери:
+        беды.append(
+            "без заявки: "
+            + ", ".join(f"{p} открыто {t:%d.%m %H:%M}" for p, t in потери)
+        )
+    if вне:
+        беды.append("вне 1…top: " + ", ".join(f"{p} — {n}" for p, n in вне))
+    if не_один:
+        беды.append("не с одним нарядом: " + ", ".join(не_один[:5]))
+    if беды:
+        return False, f"{суть}; {'; '.join(беды)}"
+    return True, f"{суть}; {base_text}"
+
+
+async def _m10_source(conn):
+    """Заявки в базе вообще заводит расчёт, а не человек."""
     row = await conn.fetchrow(
         "SELECT count(*) AS total, "
         "count(*) FILTER (WHERE source_system = 'forecast') AS forecast_src, "
@@ -219,30 +442,94 @@ async def check_m12(conn):
     )
 
 
-async def check_m13(conn):
-    """Заявка превентивная: срок работ раньше прогнозируемого отказа."""
-    rows = await conn.fetch(
-        "SELECT n.id, n.due_at, r.as_of, f.horizon_h "
-        "FROM maint.notification n "
-        "LEFT JOIN pred.forecast f ON f.forecast_id = n.forecast_id "
-        "LEFT JOIN pred.run r ON r.run_id = f.run_id "
-        "WHERE n.source_system = 'forecast'"
+def _сроки(rows, score, медиана, leads):
+    """Беды и сводка по одной группе заявок: горизонт, просрочка с рождения, медиана."""
+    реакция = [(r["due_at"] - r["as_of"]).total_seconds() / 3600 for r in rows]
+    худшая = max(реакция)
+    чужой = [r["horizon_h"] for r in rows if r["horizon_h"] != score["horizon_h"]]
+    просрочены = sum(1 for x in реакция if x <= 0)
+    суть = (
+        f"{len(rows)} заявок: срок через {min(реакция):.1f}…{худшая:.1f} ч после as_of "
+        f"прогона, отказ позже худшего срока у {sum(1 for x in leads if x > худшая)} "
+        f"из {len(leads)} — {share_after(leads, худшая):.1%}"
     )
-    if not rows:
-        return False, "0 автозаявок: сравнивать срок не с чем"
-    leads = [lead_hours(r["due_at"], r["as_of"], r["horizon_h"]) for r in rows]
-    good = [x for x in leads if x is not None and x > 0]
-    if len(good) != len(rows):
-        unknown = sum(1 for x in leads if x is None)
-        return False, (
-            f"из {len(rows)} автозаявок превентивны только {len(good)}: "
-            f"{len(rows) - len(good) - unknown} со сроком не раньше отказа, "
-            f"{unknown} сравнить нечем (нет срока, прогноза или прогона)"
+    беды = []
+    if чужой:
+        беды.append(
+            f"горизонт в прогнозе {sorted(set(чужой))} ч у {len(чужой)} из {len(rows)}, "
+            f"а модель прогнозирует на {score['horizon_h']} ч — срок посчитан от чужого числа"
         )
-    return True, (
-        f"{len(good)} из {len(rows)} автозаявок со сроком раньше прогнозируемого "
-        f"отказа, запас от {min(good):.1f} ч, медиана {median(good):.1f} ч"
+    if просрочены:
+        беды.append(
+            f"срок не позже as_of прогона у {просрочены} из {len(rows)}: "
+            "заявка родилась просроченной"
+        )
+    if худшая > медиана:
+        беды.append(
+            f"худший срок {худшая:.1f} ч позже медианы {медиана} ч: "
+            "бригада чаще приходит к уже случившемуся отказу"
+        )
+    return беды, суть
+
+
+async def check_m13(conn, score):
+    """Срок работ наступает раньше настоящего отказа, а не раньше формулы.
+
+    Судим автозаявки по предупреждению (ключ warn:…, MOS-180) от модели из
+    score.json. Срок меряем от as_of прогона, заведшего заявку, — от момента,
+    когда продукт узнал о риске.
+    1. Горизонт в прогнозе заявки равен горизонту модели. Иначе срок посчитан
+       от чужого числа: модель v3 обучена на 720 ч, а pred.forecast несёт 24.
+    2. Срок позже as_of прогона. Срок раньше — заявка родилась просроченной.
+    3. Худший срок (due_at − as_of) не позже медианы упреждения пойманных
+       отказов (упреждение(), методика М-18…М-20a). Отдельного порога нет.
+    Прежние заявки той же модели — по суточному порогу, до ключа warn: — не
+    судим, а печатаем справочно: их правило больше не работает, а сами они в
+    базе остаются. Без этого разделения строка краснела бы навсегда от 35 заявок
+    прогонов 489 и 501, которые правка уже не заводит. Удалять их или нет —
+    решение о данных, а не проверки.
+    """
+    if score is None:
+        return False, (
+            "горизонт модели и её предупреждения взять неоткуда — не задан "
+            "SCORE_JSON (check-all.sh берёт его со стенда по STAND_SSH)"
+        )
+    rows = await conn.fetch(
+        "SELECT n.due_at, n.source_key, r.as_of, f.horizon_h "
+        "FROM maint.notification n "
+        "JOIN pred.forecast f ON f.forecast_id = n.forecast_id "
+        "JOIN pred.run r ON r.run_id = f.run_id "
+        "WHERE n.source_system = 'forecast' AND r.model_version = $1",
+        score["model"],
     )
+    m0, инцидентов = await упреждение(conn, score)
+    if not m0["tp"]:
+        return False, (
+            f"ни одно из {len(score['alerts'])} предупреждений модели не поймало "
+            f"отказ из {инцидентов} — судить о сроке не по чему"
+        )
+    leads, медиана = m0["lead_hours"], m0["median_lead_hours"]
+    текущие = [r for r in rows if (r["source_key"] or "").startswith("warn:")]
+    прежние = [r for r in rows if r not in текущие]
+
+    голова = (
+        f"модель {score['model']}, медиана упреждения {медиана} ч ({m0['tp']} "
+        f"пойманных из {инцидентов} инцидентов, окно 0…{ВЕРХ_ОКНА_Ч} ч, методика "
+        f"М-18…М-20a)"
+    )
+    справка = ""
+    if прежние:
+        беды_п, суть_п = _сроки(прежние, score, медиана, leads)
+        справка = f"; справочно прежние (не warn:) {суть_п}" + (
+            f" — {'; '.join(беды_п)}" if беды_п else ""
+        )
+    if not текущие:
+        return False, f"{голова}; автозаявок по предупреждению (warn:) 0{справка}"
+    беды, суть = _сроки(текущие, score, медиана, leads)
+    текст = f"{голова}; по предупреждению {суть}"
+    if беды:
+        return False, f"{текст}; {'; '.join(беды)}{справка}"
+    return True, текст + справка
 
 
 CHECKS = (
@@ -252,20 +539,21 @@ CHECKS = (
     ("М-12", check_m12),
     ("М-13", check_m13),
 )
+NEEDS_SCORE = (check_m10, check_m13)
 
 
-async def run_checks(dsn):
+async def run_checks(dsn, score):
     conn = await asyncpg.connect(dsn)
     try:
         out = []
         for name, fn in CHECKS:
             try:
-                ok, text = await fn(conn)
+                ok, text = await (fn(conn, score) if fn in NEEDS_SCORE else fn(conn))
             except asyncpg.PostgresError as e:
                 # Нет таблицы или схемы — это СБОЙ конкретной строки, а не
                 # падение всей проверки: остальные четыре строки всё равно надо
                 # предъявить на приёмке.
-                ok, text = False, f"база отказала: {str(e).splitlines()[0]}"
+                ok, text = False, f"база отказала: {(str(e).splitlines() or [type(e).__name__])[0]}"
             out.append((name, ok, text))
         return out
     finally:
@@ -286,47 +574,51 @@ def fail_all(reason):
 
 
 def demo(verbose=True):
-    """Проверка логики М-13 без живой базы: сравнение срока с моментом отказа."""
-    from datetime import datetime, timezone
+    """Логика М-10 и М-13 без живой базы."""
+    t = datetime(2026, 6, 10, 12, tzinfo=МОСКВА)
+    h = timedelta(hours=1)
 
-    as_of = datetime(2026, 9, 17, 0, 0, tzinfo=timezone.utc)  # момент среза прогона
-    h = 24  # горизонт прогноза -> отказ ожидаем 18.09.2026 00:00
-
-    def due(day, hour):
-        return datetime(2026, 9, day, hour, tzinfo=timezone.utc)
-
-    # Работы за 6 часов до отказа — заявка превентивная.
-    assert lead_hours(due(17, 18), as_of, h) == 6.0
-    assert is_preventive(due(17, 18), as_of, h) is True
-
-    # Ровно в момент отказа: запас 0 — не превентивная, «строго раньше».
-    assert lead_hours(due(18, 0), as_of, h) == 0.0
-    assert is_preventive(due(18, 0), as_of, h) is False
-
-    # После отказа: запас отрицательный, ремонт уже аварийный, а не плановый.
-    assert lead_hours(due(18, 5), as_of, h) == -5.0
-    assert is_preventive(due(18, 5), as_of, h) is False
-
-    # Сравнивать нечем: заявка без срока, прогноз без прогона, прогноз без горизонта.
-    assert lead_hours(None, as_of, h) is None
-    assert lead_hours(due(17, 18), None, h) is None
-    assert lead_hours(due(17, 18), as_of, None) is None
-    assert is_preventive(None, as_of, h) is False
-
-    if not verbose:
-        return  # при обычном прогоне печатаем только пять строк приёмки
-    print(
-        "демо М-13: срок 17.09 18:00 при отказе 18.09 00:00 — запас 6,0 ч, превентивна"
+    # М-10: заявка по ключу своего предупреждения; чужой момент открытия и
+    # чужой префикс не в счёт, участков у предупреждения может быть несколько.
+    открытые = [("889", t, "2026-06-10T08:36:56"), ("15", t, "2026-06-17T23:59:59")]
+    ключи = [
+        "warn:889:2026-06-10T08:36:56:11",
+        "warn:889:2026-06-10T08:36:56:2477",
+        "warn:15:2026-06-01T00:00:00:401",
+        "warn:150:2026-06-17T23:59:59:9",
+    ]
+    assert warnings_without_order(открытые, ключи) == [("15", t)]
+    # Сколько заявок и нарядов: у 889 четыре заявки при потолке 3, у одной нет наряда.
+    заявки = [(k, 1) for k in ключи] + [
+        ("warn:889:2026-06-10T08:36:56:12", 1),
+        ("warn:889:2026-06-10T08:36:56:13", 0),
+    ]
+    вне, не_один = orders_per_warning(открытые, заявки, 3)
+    assert вне == [("889", 4)] and не_один == ["warn:889:2026-06-10T08:36:56:13"], (
+        вне,
+        не_один,
     )
-    print(
-        "демо М-13: срок 18.09 00:00 — запас 0,0 ч, НЕ превентивна (нужно строго раньше)"
-    )
-    print("демо М-13: срок без прогноза — запас не определён, НЕ превентивна")
-    print("OK")
+    # Справочно по коллектору: заявка до открытия не считается, префикс без моста — потеря.
+    bridge = {"15": 6, "257": 3355}
+    по_коллектору = [("15", t, ""), ("257", t, ""), ("999", t, "")]
+    assert collectors_without_order(по_коллектору, bridge, {6: t - h, 3355: t + h}) == [
+        6,
+        None,
+    ]
+
+    # М-13: отказ ровно в срок — не успели, «строго позже». Сами упреждения
+    # считает evaluate_alerts, её самопроверка — в code/predictive_metrics.py.
+    assert share_after([5.0, 12.0, 30.0], 12.0) == 1 / 3
+    assert share_after([], 12.0) == 0.0
+
+    if verbose:
+        print("демо М-10: ключ чужого открытия и чужого префикса не засчитан")
+        print("демо М-13: отказ ровно в срок не предотвращён")
+        print("OK")
 
 
 def main(argv):
-    # логика сравнения сроков обязана быть цела до любого похода в базу
+    # логика сравнения обязана быть цела до любого похода в базу
     demo(verbose="--demo" in argv)
     if "--demo" in argv:
         return 0
@@ -335,10 +627,15 @@ def main(argv):
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         return fail_all("не задана переменная DATABASE_URL, подключаться не к чему")
+    путь = os.environ.get("SCORE_JSON")
     try:
-        results = asyncio.run(run_checks(dsn))
+        score = read_score(путь) if путь else None
+    except (OSError, ValueError, KeyError) as e:
+        return fail_all(f"score.json не читается ({путь}): {e}")
+    try:
+        results = asyncio.run(run_checks(dsn, score))
     except (OSError, ValueError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
-        return fail_all(f"нет связи с базой: {str(e).splitlines()[0]}")
+        return fail_all(f"нет связи с базой: {(str(e).splitlines() or [type(e).__name__])[0]}")
     return report(results)
 
 

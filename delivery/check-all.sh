@@ -11,6 +11,8 @@
 # Запуск:
 #   bash delivery/check-all.sh                  # только то, что не требует сети
 #   BASE_URL=https://135.106.216.101 CURL_OPTS=-k bash delivery/check-all.sh
+# Полный прогон против стенда — ещё DATABASE_URL (туннель, docs/server.md),
+# STAND_SSH=root@135.106.216.101 (score.json для М-10, М-13), TLS_HOST, BACKEND_IMAGE.
 #
 # Код возврата 1, если упала хоть одна проверка. В bash здесь только латиница
 # в именах переменных: кириллица валит скрипт целиком (docs/server.md).
@@ -46,7 +48,27 @@ asyncio.run(m())
   fi
 fi
 
+# score.json — выдача модели v3 с открытыми предупреждениями и их историей. В базе
+# предупреждений нет, а М-10 и М-13 в code/check_orders.py без них не проверить.
+# Берём файл ИЗ КОНТЕЙНЕРА worker — ровно тот, что он читает (том score, путь
+# SCORE_V3_PATH), — а не из /srv/moskollektor/score-out: 22.09.2026 там лежал
+# другой файл, хеш не сошёлся с тем, что у worker.
+#   STAND_SSH=root@135.106.216.101
+if [ -z "${SCORE_JSON:-}" ] && [ -n "${STAND_SSH:-}" ]; then
+  SCORE_JSON=$(mktemp "${TMPDIR:-/tmp}/score.XXXXXX")
+  if ssh -o BatchMode=yes -o LogLevel=ERROR "$STAND_SSH" \
+       'docker exec moskollektor-worker-1 sh -c "cat \"\$SCORE_V3_PATH\""' > "$SCORE_JSON" \
+     && [ -s "$SCORE_JSON" ]; then
+    export SCORE_JSON
+  else
+    echo "ВНИМАНИЕ: score.json со стенда не забран ($STAND_SSH) — М-10 и М-13 будут в СБОЕ."
+    echo
+    SCORE_JSON=""
+  fi
+fi
+
 ok=0
+opened=0
 fail=0
 skip=0
 skip_state=0
@@ -66,6 +88,13 @@ run() {
     # ровно тогда, когда его уже никто не читает.
     printf '%s\n' "$out" | grep -F 'ВНИМАНИЕ' | sed 's/^/        /'
     ok=$((ok + 1))
+  elif [ $code -eq 2 ] && printf '%s\n' "$out" | grep -q '^М-[0-9]* ОТКРЫТА '; then
+    # Код 2 — строки приёмки не закрыты, но у каждой есть задача (check_minimum.py).
+    # Не OK и не УПАЛА: в «успешно» не идёт и прогон не валит. Код 2 без строк
+    # ОТКРЫТА — обычное падение: argparse тоже выходит с кодом 2.
+    printf 'ОТКРЫТА %-12s %s\n' "$rows" "$name"
+    printf '%s\n' "$out" | grep -E '^М-[0-9]+ ОТКРЫТА ' | cut -c1-160 | sed 's/^/        /'
+    opened=$((opened + 1))
   else
     printf 'УПАЛА %-14s %s\n' "$rows" "$name"
     printf '%s\n' "$out" | tail -5 | sed 's/^/        /'
@@ -139,6 +168,16 @@ run "—"            "порядок миграций"        "$PY" code/check_s
 # тега меняют smvu.channel.section_id, и пример разойдётся с базой молча.
 # Сверяются все три поля, а не состав channel_id: подменённый smvu_key при том же
 # наборе каналов хеш одной колонки пропускает, сверка троек ловит.
+# Хеши миграций в origin/master против public.schema_migration стенда — ДО сборки
+# migrate. 22.09.2026 правка комментария в накатанных 034 и 035 уронила накат,
+# api и worker три минуты не поднимались, /api/risks отвечал 502. Сравнивает
+# origin/master: перед прогоном сделайте git fetch, коммит печатается в итоге.
+if [ -n "${DATABASE_URL:-}" ]; then
+  run "—"          "хеши миграций = журнал наката" "$PY" code/check_migration_hashes.py
+else
+  skip_msg "—"     "хеши миграций — задайте DATABASE_URL"
+fi
+
 if [ -n "${DATABASE_URL:-}" ]; then
   run "—"          "пример привязки к участку" "$PY" code/check_section_xref.py
 else
@@ -504,6 +543,18 @@ else
   run "НФ-92"       "доступность таблиц"     env BASE_URL="$BASE_URL" BUNDLE=stand node delivery/check-a11y.mjs
 fi
 
+# М-05, экранная половина (22.09.2026): до этого дня её делал человек, и сводка
+# печатала РУЧНАЯ. Браузер открывает /map со стенда и по каждому коллектору
+# считает метки против sections.json, класс риска у каждой и метки, стоящие друг
+# на друге; кликает по метке и сверяет карточку. Обвязка та же, что у НФ-92.
+if [ -z "${BASE_URL:-}" ]; then
+  skip_msg "М-05" "экран схемы браузером — задайте BASE_URL"
+elif ! command -v node >/dev/null 2>&1; then
+  skip_msg "М-05" "экран схемы браузером — нет node"
+else
+  run "М-05"        "экран схемы браузером"   env BASE_URL="$BASE_URL" node delivery/check-map.mjs
+fi
+
 if [ -n "${TLS_HOST:-}" ]; then
   run "НФ-75"       "версии TLS и шифры"     sh deploy/check-tls.sh "$TLS_HOST"
 else
@@ -536,8 +587,10 @@ else
 fi
 
 echo
-echo "итого: успешно $ok, упало $fail, пропущено $((skip + skip_state)) — из них $skip по настройкам, $skip_state по состоянию данных стенда"
+echo "итого: успешно $ok, открыто $opened, упало $fail, пропущено $((skip + skip_state)) — из них $skip по настройкам, $skip_state по состоянию данных стенда"
 if [ $fail -gt 0 ]; then
   echo "упали:$failed_list"
   exit 1
 fi
+[ $opened -gt 0 ] && exit 2
+exit 0
