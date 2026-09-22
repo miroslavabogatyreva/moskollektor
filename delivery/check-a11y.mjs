@@ -174,11 +174,19 @@ async function поднятьChrome(порт, профиль) {
   const п = spawn(CHROME, [`--remote-debugging-port=${порт}`, `--user-data-dir=${профиль}`,
     '--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--window-size=1400,1000', '--force-device-scale-factor=1', 'about:blank'], { stdio: 'ignore' })
+  // spawn сообщает о ненайденном файле событием, а не исключением: без этого
+  // обработчика запуск с неверным CHROME вываливал голый «spawn … ENOENT»
+  // стеком Node, и docs/install.md обещал сообщение, которого не было.
+  let сбойЗапуска = null
+  п.on('error', (e) => { сбойЗапуска = e })
   for (let i = 0; i < 100; i++) {
+    if (сбойЗапуска)
+      throw new Error(`Chrome не запустился: ${сбойЗапуска.code} по пути ${CHROME}. `
+        + `Путь задаётся переменной CHROME=, например CHROME=/usr/bin/google-chrome`)
     try { if ((await fetch(`http://127.0.0.1:${порт}/json/version`)).ok) return п } catch {}
     await new Promise((о) => setTimeout(о, 100))
   }
-  throw new Error(`Chrome не поднялся за 10 секунд (искал по пути ${CHROME}, задать можно через CHROME=)`)
+  throw new Error(`Chrome не ответил за 10 секунд (путь ${CHROME}, задаётся переменной CHROME=)`)
 }
 
 class Вкладка {

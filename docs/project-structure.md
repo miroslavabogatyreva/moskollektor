@@ -172,7 +172,10 @@ backend/app/
                     объяснение прогноза (explain.py)
 frontend/src/screens/{dashboard, map, log, orders}
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
-delivery/           check-all.sh — один прогон всех проверок; презентация и страница сдачи
+delivery/           check-all.sh — один прогон всех проверок;
+                    check-a11y.mjs — доступность таблиц настоящим браузером (НФ-92),
+                    единственная проверка, которая не живёт внутри образа api;
+                    презентация и страница сдачи
 ```
 
 ## Четыре правила, которые легко нарушить
