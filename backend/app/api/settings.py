@@ -17,7 +17,7 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
-# Правило на каждый ключ, который сеют миграции 020, 026, 028, 032, 035. Находки 58
+# Правило на каждый ключ, который сеют миграции 020, 026, 028, 032, 035, 037. Находки 58
 # и 57: без границ PUT принимал горизонт 0 и −5. Ключа нет в правилах — 422, а не
 # KeyError и 500: так падали 10 ключей из 16 (MOS-159, вопрос Николая в PR #5).
 # Новая настройка без правила через API не правится, пока правило не заведут.
@@ -27,6 +27,8 @@ router = APIRouter(prefix="/api")
 #             пульс ≥ 1 мин — при нуле publish.py пишет журнал на каждом прогоне
 #   "flag"  — 0 или 1
 #   "pos"   — строго больше нуля: alpha = 0 обнуляет долю участков без отказов
+#   "open"  — открытый интервал (low, high): потолок срока автозаявки (0, 720) ч —
+#             больше нуля и не дальше горизонта модели (037, MOS-179)
 _RULES = {
     "forecast_horizon_h": ("int", Decimal(24)),
     "forecast_heartbeat_min": ("int", Decimal(1)),
@@ -42,6 +44,7 @@ _RULES = {
     "risk_class_hysteresis": ("frac", None),
     "forecast_spread_enabled": ("flag", None),
     "forecast_weight_alpha": ("pos", None),
+    "order_preventive_cap_h": ("open", (Decimal(0), Decimal(720))),
 }
 
 # Окно истории отказов для веса участка (032_section_weight_window.sql, MOS-159):
@@ -95,6 +98,8 @@ def _validation_error(key: str, value: Decimal) -> str | None:
         return f"{key}: 0 или 1"
     if kind == "pos" and value <= 0:
         return f"{key}: значение должно быть больше 0"
+    if kind == "open" and not (low[0] < value < low[1]):
+        return f"{key}: значение должно быть в интервале ({low[0]}, {low[1]})"
     return None
 
 

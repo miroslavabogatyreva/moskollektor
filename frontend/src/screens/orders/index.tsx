@@ -47,7 +47,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
       <table class="w-full text-sm" style="border-collapse:collapse">
         <thead>
           <tr>
-            {['№', 'Объект', 'Вид работ', 'Срок', 'Запас', 'Статус'].map((h) => (
+            {['№', 'Объект', 'Вид работ', 'Срок', 'Реакция', 'Статус'].map((h) => (
               <th
                 key={h}
                 class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -74,7 +74,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
               </td>
               <td class="px-2 py-2">{o.work_type_name}</td>
               <td class="px-2 py-2 num">{formatDateTime(o.due_at)}</td>
-              <td class="px-2 py-2 num">{o.lead_hours.toFixed(1)} ч</td>
+              <td class="px-2 py-2 num">{o.deadline_hours.toFixed(1)} ч</td>
               <td class="px-2 py-2">
                 {o.status}{' '}
                 <span style="color:var(--text-muted)">
