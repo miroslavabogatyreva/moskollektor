@@ -177,35 +177,38 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-13" 34 \
 check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний день)" 0 \
     -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1/readings?from=2025-10-12&to=2025-10-12"
 
-# Отказы по каналам участка (MOS-151, Q5.25, М-05) — не прогноз, факт из
-# smvu.fault_episode. Два живых участка из примера задачи: 674 (ключ СМВУ
-# 257:269) — наибольшее число отказов в парке, восемь каналов сыплются и два
-# исправны; 2598 (890:5) — отказов нет вовсе, все девять каналов обязаны
-# вернуться со строкой «faults_cnt=0», а не пропасть из списка.
-check "GET /api/objects/674/channels (dispatcher1)"         200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/674/channels"
+# Отказы по каналам участка (MOS-151, Q5.25, М-05) — не прогноз, факт журнала.
+# С 038 (MOS-153) карточка считает отказы D5 по smvu.model_failure_event от начала
+# окна веса (2022-04-01) до конца архива. Участок 409 (ключ 15:12) — наибольшее
+# число отказов D5 в парке, 70; 2598 (890:5) — отказов нет вовсе, все девять каналов
+# обязаны вернуться со строкой «faults_cnt=0», а не пропасть из списка.
+# Участок 674 (257:269) из примера задачи MOS-151 больше не годится: все его
+# 277 экранных эпизодов — «Неопределен» тепловых датчиков, эпизодов D5 у него 0,
+# и после 038 все 20 каналов законно показывают 0 (замер на стенде 22.09.2026).
+check "GET /api/objects/409/channels (dispatcher1)"         200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels"
 check "GET /api/objects/999999999/channels (участка нет)"   404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/999999999/channels"
 
-check_channel_faults_674() {
-    label="GET /api/objects/674/channels — числа участка 257:269 из задачи MOS-151"
-    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/674/channels")
+check_channel_faults_top() {
+    label="GET /api/objects/409/channels — отказы D5 участка 15:12, наибольшие в парке"
+    body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels")
     echo "$body" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 items = d.get('items', [])
-# 20 каналов на участке всего, восемь с отказами (пятёрка из примера задачи —
-# верхушка этой восьмёрки) и двенадцать без единого отказа за всё время —
-# посчитано по базе напрямую 21.09.2026, таблица в задаче показывает только
-# два образца нулевых из двенадцати, а не итоговый счёт.
-assert d.get('total') == 20, f\"total: {d.get('total')!r}\"
+# 34 канала, семь с отказами, 27 без, всего 70 отказов D5. Посчитано 22.09.2026
+# дважды: запросом по smvu.model_failure_event с предикатом карточки
+# (начало эпизода не раньше pred.weight_window().date_from) и ответом этого метода.
+assert d.get('total') == 34, f\"total: {d.get('total')!r}\"
 top5 = [c['faults_cnt'] for c in items[:5]]
-assert top5 == [42, 41, 39, 34, 33], f'top5: {top5!r}'
+assert top5 == [18, 16, 15, 8, 5], f'top5: {top5!r}'
 ненулевых = sum(1 for c in items if c['faults_cnt'] > 0)
 нулевых = sum(1 for c in items if c['faults_cnt'] == 0)
-assert ненулевых == 8, f'ненулевых: {ненулевых}'
-assert нулевых == 12, f'нулевых: {нулевых}'
+assert ненулевых == 7, f'ненулевых: {ненулевых}'
+assert нулевых == 27, f'нулевых: {нулевых}'
+assert sum(c['faults_cnt'] for c in items) == 70, 'сумма'
 " && { echo "OK          $label"; } || { echo "РАСХОЖДЕНИЕ $label"; mismatch=1; }
 }
-check_channel_faults_674
+check_channel_faults_top
 
 check_channel_faults_no_faults() {
     label="GET /api/objects/2598/channels — участок 890:5 без отказов, девять каналов, не пустой список"
