@@ -85,7 +85,7 @@ moskollektor/
 │   └── books/                разбор литературы, 80 находок с номерами страниц;
 │                              сами PDF с 15.09.2026 на сервере, в git не идут
 ├── db/              8   миграции базы — первый продуктовый каталог
-│   ├── migrations/           001_assets … 025_forecast_current_as_of, по возрастанию.
+│   ├── migrations/           001_assets … 031_channel_location_kind, по возрастанию.
 │   │                          010_orders — справочники ТОиР, синтетический реестр
 │   │                          объектов из ref.object_xref и уникальность автозаявки;
 │   │                          022_channel_daily — суточная свёртка по каналу,
@@ -101,16 +101,19 @@ moskollektor/
 │   └── app/
 │       ├── migrate.py        накат миграций по журналу public.schema_migration
 │       └── ingest/           заливка выгрузки СМВУ и разбор тега на участок;
-│                              эпизоды отказа экрана и эпизоды по словарю модели
-│                          backend/tests/ и code/tests/ — pytest чистых функций
-│                          без базы: python3 -m pytest backend/tests code/tests
+│                              эпизоды отказа экрана (fault_episodes.py) и эпизоды
+│                              по словарю модели v3 (model_failure_episodes.py);
+│                              место канала — channel_place.py и kind_names.py
+├── backend/tests/       pytest чистых функций без базы, вместе с code/tests/:
+│                        python3 -m pytest backend/tests code/tests — 35 тестов.
+│                        requirements-dev.txt ставит pytest, в образ он не идёт
 ├── ml-stub/         3   заглушка модели: отвечает по контракту, пока модели нет
 ├── contracts/       7   граница с ML: признаки, схема сообщений, примеры,
 │                        определение отказа модели v3 (failure.v3.json);
 │                        examples/orders/ — карточка заявки и строка списка,
 │                        по ним пишутся экран заявок и GET /api/orders
 ├── deploy/          6   стенд: docker-compose, nginx, сертификат, проверка TLS
-├── code/           31   прототипы и считалки: то, по чему пишется продукт
+├── code/           32   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
