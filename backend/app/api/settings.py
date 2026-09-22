@@ -17,14 +17,31 @@ from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
-# Границы по ключу — находка 58 и 57: без них PUT принимал горизонт 0 и −5.
-# forecast_horizon_h целый и ≥ 24 (постановка: горизонт прогноза не меньше
-# 24 часов); пороги и уровень риска — доля в открытом интервале (0, 1).
-_BOUNDS = {
-    "forecast_horizon_h": (Decimal(24), None),
-    "precision_min": (Decimal(0), Decimal(1)),
-    "recall_min": (Decimal(0), Decimal(1)),
-    "risk_threshold_high": (Decimal(0), Decimal(1)),
+# Правило на каждый ключ, который сеют миграции 020, 026, 028, 032, 035. Находки 58
+# и 57: без границ PUT принимал горизонт 0 и −5. Ключа нет в правилах — 422, а не
+# KeyError и 500: так падали 10 ключей из 16 (MOS-159, вопрос Николая в PR #5).
+# Новая настройка без правила через API не правится, пока правило не заведут.
+#   "prob"  — вероятность, открытый интервал (0, 1): пороги Precision/Recall, риска, заявок
+#   "frac"  — доля [0, 1): мёртвая зона и гистерезис, ноль значит «выключено»
+#   "int"   — целое не меньше нижней границы; горизонт ≥ 24 ч по постановке,
+#             пульс ≥ 1 мин — при нуле publish.py пишет журнал на каждом прогоне
+#   "flag"  — 0 или 1
+#   "pos"   — строго больше нуля: alpha = 0 обнуляет долю участков без отказов
+_RULES = {
+    "forecast_horizon_h": ("int", Decimal(24)),
+    "forecast_heartbeat_min": ("int", Decimal(1)),
+    "risk_class_hold_min": ("int", Decimal(0)),
+    "order_top_sections_per_object": ("int", Decimal(0)),
+    "precision_min": ("prob", None),
+    "recall_min": ("prob", None),
+    "risk_threshold_high": ("prob", None),
+    "order_threshold_a": ("prob", None),
+    "order_threshold_b": ("prob", None),
+    "order_threshold_c": ("prob", None),
+    "forecast_deadband": ("frac", None),
+    "risk_class_hysteresis": ("frac", None),
+    "forecast_spread_enabled": ("flag", None),
+    "forecast_weight_alpha": ("pos", None),
 }
 
 # Окно истории отказов для веса участка (032_section_weight_window.sql, MOS-159):
@@ -65,14 +82,19 @@ def _validation_error(key: str, value: Decimal) -> str | None:
         if _as_date(value) is None:
             return f"{key}: дата числом ГГГГММДД, например 20220401"
         return None
-    if key == "forecast_horizon_h":
-        low, _ = _BOUNDS[key]
-        if value != value.to_integral_value() or value < low:
-            return f"forecast_horizon_h: целое число часов, не меньше {low}"
-        return None
-    low, high = _BOUNDS[key]
-    if not (low < value < high):
-        return f"{key}: значение должно быть в интервале ({low}, {high})"
+    if key not in _RULES:
+        return f"{key}: для настройки нет правила проверки, правка через API закрыта"
+    kind, low = _RULES[key]
+    if kind == "int" and (value != value.to_integral_value() or value < low):
+        return f"{key}: целое число, не меньше {low}"
+    if kind == "prob" and not (0 < value < 1):
+        return f"{key}: значение должно быть в интервале (0, 1)"
+    if kind == "frac" and not (0 <= value < 1):
+        return f"{key}: значение должно быть в интервале [0, 1)"
+    if kind == "flag" and value not in (0, 1):
+        return f"{key}: 0 или 1"
+    if kind == "pos" and value <= 0:
+        return f"{key}: значение должно быть больше 0"
     return None
 
 

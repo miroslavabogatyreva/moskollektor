@@ -57,3 +57,48 @@ def test_other_keys_unchanged():
     assert _validation_error("precision_min", Decimal("0.7")) is None
     assert _validation_error("precision_min", Decimal("1")) is not None
     assert _validation_error("forecast_horizon_h", Decimal("24")) is None
+
+
+def _seeded_keys():
+    """Ключи, которые миграции кладут в ref.app_setting и не удаляют."""
+    import re
+    from pathlib import Path
+
+    вставлены, удалены = set(), set()
+    for f in sorted((Path(__file__).resolve().parents[2] / "db" / "migrations").glob("*.sql")):
+        # Комментарии долой: в них бывает «;», и блок INSERT обрезался бы на полуслове.
+        текст = re.sub(r"--[^\n]*", "", f.read_text(encoding="utf-8"))
+        for блок in re.findall(r"INSERT INTO ref\.app_setting.*?;", текст, re.S):
+            вставлены |= set(re.findall(r"\(\s*'([a-z_]+)',\s*[0-9.]+", блок))
+        удалены |= set(re.findall(r"DELETE FROM ref\.app_setting WHERE key = '([a-z_]+)'", текст))
+    return вставлены - удалены
+
+
+def test_every_seeded_key_has_a_rule():
+    # Без правила PUT отвечал 500 (KeyError) на 10 ключей из 16 — вопрос Николая в PR #5.
+    keys = _seeded_keys()
+    assert len(keys) == 16, sorted(keys)
+    без_правила = [k for k in keys if "нет правила" in (_validation_error(k, Decimal("0.5")) or "")]
+    assert без_правила == []
+
+
+@pytest.mark.parametrize(
+    "key, good, bad",
+    [
+        ("forecast_deadband", "0", "1"),
+        ("risk_class_hysteresis", "0.02", "-0.01"),
+        ("forecast_heartbeat_min", "60", "0"),
+        ("risk_class_hold_min", "0", "2.5"),
+        ("order_top_sections_per_object", "3", "-1"),
+        ("order_threshold_a", "0.97", "1"),
+        ("forecast_spread_enabled", "1", "2"),
+        ("forecast_weight_alpha", "1.0", "0"),
+    ],
+)
+def test_rules_for_previously_unchecked_keys(key, good, bad):
+    assert _validation_error(key, Decimal(good)) is None
+    assert _validation_error(key, Decimal(bad)) is not None
+
+
+def test_key_without_rule_is_422_not_500():
+    assert "нет правила" in _validation_error("forecast_new_knob", Decimal("1"))
