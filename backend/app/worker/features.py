@@ -293,6 +293,11 @@ SELECT c.collector, count(*) AS отказов
   JOIN smvu.channel c ON c.channel_id = e.channel_id
  WHERE e.started_at > $1::timestamptz - interval '7 days' AND e.started_at <= $1::timestamptz
    AND c.collector IS NOT NULL
+   -- С 21.09.2026 коллектор стоит и у каналов без участка (охранные зоны, здания
+   -- диспетчерских). Условие на участок держит признак таким, каким он был до этого:
+   -- считаются только отказы каналов на участках коллектора. Считать ли зоны и
+   -- здания соседями — решение по модели, а не по загрузчику.
+   AND c.section_id IS NOT NULL
  GROUP BY c.collector
 """
 
