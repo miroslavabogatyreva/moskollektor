@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import { fetchRisks } from './api'
-import type { RiskRow } from './types'
+import { fetchDataStatus, fetchRisks } from './api'
+import type { DataStatus, RiskRow } from './types'
 
 /* Дашборд рисков — задача 5.2 (MOS-49). Плитки и ранжированный список по риску
    из GET /api/risks (MOS-40 + MOS-32). Цветовая шкала риска (critical/high/…)
@@ -14,11 +14,19 @@ import type { RiskRow } from './types'
 export function DashboardScreen(_props: Record<string, unknown>) {
   const [rows, setRows] = useState<RiskRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /* Состояние данных отдельным запросом и отдельной ошибкой: край выгрузки
+     не выводится из прогнозов (MOS-148), и его недоступность не должна гасить
+     список рисков — это две разные беды, и на экране они выглядят по-разному. */
+  const [status, setStatus] = useState<DataStatus | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchRisks()
       .then(setRows)
       .catch((e) => setError(String(e)))
+    fetchDataStatus()
+      .then(setStatus)
+      .catch((e) => setStatusError(String(e)))
   }, [])
 
   const sorted = useMemo(
@@ -29,16 +37,12 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   const stats = useMemo(() => {
     if (!rows || rows.length === 0) return null
     const stale = rows.filter((r) => r.is_stale).length
-    const computedAtMax = rows.reduce(
-      (max, r) => (r.as_of > max ? r.as_of : max),
-      rows[0].as_of,
-    )
     const horizons = new Set(rows.map((r) => r.horizon_h))
     const horizonLabel =
       horizons.size === 1
         ? `${[...horizons][0]} ч`
         : `${Math.min(...horizons)}–${Math.max(...horizons)} ч`
-    return { total: rows.length, stale, computedAtMax, horizonLabel }
+    return { total: rows.length, stale, horizonLabel }
   }, [rows])
 
   return (
@@ -62,11 +66,7 @@ export function DashboardScreen(_props: Record<string, unknown>) {
                 : 'все свежие'
             }
           />
-          <Tile
-            label="Данные по состоянию на"
-            value={new Date(stats.computedAtMax).toLocaleDateString('ru-RU')}
-            sub="конец выгрузки заказчика, не время расчёта"
-          />
+          <DataEdgeTile status={status} error={statusError} />
           <Tile label="Горизонт прогноза" value={stats.horizonLabel} />
         </div>
       )}
@@ -112,7 +112,59 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   )
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/* Край выгрузки и момент расчёта — два разных числа под двумя разными подписями
+   (MOS-148). Раньше здесь стояло одно: дашборд брал max(as_of) по строкам ответа
+   и подписывал его концом выгрузки. Пока срез назначает планировщик, эти числа
+   совпадают; прогон, запущенный руками с другим срезом, показывал на этой плитке
+   дату, которой в данных нет — снято на стенде 22.09.2026, прогон 501. */
+function DataEdgeTile({ status, error }: { status: DataStatus | null; error: string | null }) {
+  if (error) {
+    return (
+      <Tile
+        label="Данные по состоянию на"
+        value="—"
+        sub={`не удалось спросить у сервера: ${error}`}
+      />
+    )
+  }
+  if (!status) {
+    return <Tile label="Данные по состоянию на" value="…" sub="спрашиваем сервер" />
+  }
+  if (!status.data_edge) {
+    /* Пустое место здесь читается как ноль, поэтому говорим словами. */
+    return (
+      <Tile
+        label="Данные по состоянию на"
+        value="неизвестно"
+        sub="суточная свёртка пуста, краю выгрузки взяться неоткуда"
+      />
+    )
+  }
+  return (
+    <Tile
+      label="Данные по состоянию на"
+      value={new Date(status.data_edge).toLocaleDateString('ru-RU')}
+      sub="конец выгрузки заказчика"
+      note={
+        status.computed_at
+          ? `расчёт от ${new Date(status.computed_at).toLocaleString('ru-RU')}`
+          : 'расчёта ещё не было'
+      }
+    />
+  )
+}
+
+function Tile({
+  label,
+  value,
+  sub,
+  note,
+}: {
+  label: string
+  value: string
+  sub?: string
+  note?: string
+}) {
   return (
     <article
       class="p-3 rounded flex flex-col gap-1"
@@ -127,6 +179,11 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
       {sub && (
         <div class="text-xs" style="color:var(--text-secondary)">
           {sub}
+        </div>
+      )}
+      {note && (
+        <div class="text-xs" style="color:var(--text-muted)">
+          {note}
         </div>
       )}
     </article>
