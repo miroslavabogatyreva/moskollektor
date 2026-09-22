@@ -24,6 +24,8 @@ _BOUNDS = {
     "precision_min": (Decimal(0), Decimal(1)),
     "recall_min": (Decimal(0), Decimal(1)),
     "risk_threshold_high": (Decimal(0), Decimal(1)),
+    # Потолок срока автозаявки, ч (037, MOS-179): больше нуля и не дальше горизонта модели.
+    "order_preventive_cap_h": (Decimal(0), Decimal(720)),
 }
 
 
