@@ -75,9 +75,9 @@ def _seeded_keys():
 
 
 def test_every_seeded_key_has_a_rule():
-    # Без правила PUT отвечал 500 (KeyError) на 10 ключей из 16 — вопрос Николая в PR #5.
+    # Без правила PUT отвечал 500 (KeyError) на 10 ключей из 16 — вопрос Николая в PR #5; с 037 ключей 17.
     keys = _seeded_keys()
-    assert len(keys) == 16, sorted(keys)
+    assert len(keys) == 17, sorted(keys)
     без_правила = [k for k in keys if "нет правила" in (_validation_error(k, Decimal("0.5")) or "")]
     assert без_правила == []
 
@@ -93,6 +93,8 @@ def test_every_seeded_key_has_a_rule():
         ("order_threshold_a", "0.97", "1"),
         ("forecast_spread_enabled", "1", "2"),
         ("forecast_weight_alpha", "1.0", "0"),
+        ("order_preventive_cap_h", "16", "720"),
+        ("order_preventive_cap_h", "719.5", "0"),
     ],
 )
 def test_rules_for_previously_unchecked_keys(key, good, bad):
