@@ -325,6 +325,8 @@ run "—"            "запросы выключаются при уходе" "
 # ехать вместе с новыми порогами в backend/app/domain/order_rules.py.
 if [ -n "${DATABASE_URL:-}" ]; then
   run "М-04, М-05 частично" "разнос вероятности по участкам" "$PY" code/check_spread.py
+  # Карточка участка считает тот же отказ D5, что вес, плюс отказы после окна (038, MOS-153).
+  run "М-05 частично" "карточка участка = вес + свежие отказы" env PYTHONPATH=backend "$PY" code/check_card_weight.py
 else
   skip_msg "М-04, М-05 частично" "разнос вероятности — задайте DATABASE_URL"
 fi
