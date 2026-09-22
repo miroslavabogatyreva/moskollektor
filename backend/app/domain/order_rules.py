@@ -238,7 +238,20 @@ def худшие_по_коллектору(кандидаты: list, веса: d
     return итог
 
 
-async def завести(conn, run_id: int, direction: str = "sensor_failure") -> dict:
+def по_предупреждениям(кандидаты: list, ключи: dict[int, str], уже: set[str]) -> list:
+    """Участки под предупреждением модели, по которому заявки ещё не заводились.
+
+    `ключи` — `{section_id: ключ предупреждения}` из run_v3.ключи_предупреждений,
+    `уже` — ключи, под которыми заявки уже лежат в maint.notification. Порог
+    вероятности здесь не участвует: решение «выдавать или нет» модель уже приняла,
+    открыв предупреждение, и её Precision посчитана именно для этого момента.
+    """
+    return [к for к in кандидаты
+            if к["section_id"] in ключи and ключи[к["section_id"]] not in уже]
+
+
+async def завести(conn, run_id: int, direction: str = "sensor_failure",
+                  ключи_предупреждений: dict[int, str] | None = None) -> dict:
     """Стадия автозаявок: по прогнозам прогона завести заявки и заказы ТОиР.
 
     Возвращает три числа, которые нужны в отчёте о прогоне: сколько участков
@@ -253,8 +266,16 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure") -
     работ, и приёмочная строка М-11 её не засчитает.
     """
     кандидаты = await conn.fetch(ОТБОР, run_id, direction)
-    п = await пороги(conn)
-    выше_порога = [к for к in кандидаты if нужна_заявка(к["probability"], к["crit"], п)]
+    if ключи_предупреждений is None:
+        # Прежний путь (заглушка, feat.v1): суточный порог по вероятности участка.
+        п = await пороги(conn)
+        выше_порога = [к for к in кандидаты if нужна_заявка(к["probability"], к["crit"], п)]
+    else:
+        уже = {r["source_key"] for r in await conn.fetch(
+            "SELECT DISTINCT source_key FROM maint.notification "
+            "WHERE source_system = $1 AND source_key = ANY($2::text[])",
+            ИСТОЧНИК, sorted(set(ключи_предупреждений.values())))}
+        выше_порога = по_предупреждениям(кандидаты, ключи_предупреждений, уже)
     сколько_худших = await _сколько_худших(conn)
     отсечено_отбором = 0
     if сколько_худших:
@@ -280,7 +301,8 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure") -
                 к["as_of"],
                 due_at,
                 ИСТОЧНИК,
-                str(к["forecast_id"]),
+                # По ключу предупреждения узнаём, что заявки на него уже заведены.
+                (ключи_предупреждений or {}).get(к["section_id"], str(к["forecast_id"])),
                 к["forecast_id"],
                 ПРИОРИТЕТ[крит],
             )
@@ -301,6 +323,7 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure") -
             заведено += 1
 
     return {
+        "правило": "порог" if ключи_предупреждений is None else "открытие предупреждения",
         "участков": len(кандидаты),
         "выше_порога": len(выше_порога),
         "отсечено_отбором": отсечено_отбором,
