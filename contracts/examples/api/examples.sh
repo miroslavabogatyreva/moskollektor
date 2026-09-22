@@ -96,6 +96,12 @@ check "GET /api/risks без входа"                            401 "$BASE_U
 
 # Роль диспетчера видит риски и прогнозы, но не журнал аудита (НФ-44).
 check "GET /api/risks (dispatcher1)"                        200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks"
+# risk_class (MOS-106, М-05): без него схема коллектора красит все 3 173 значка
+# серым. Проверяем наличие поля, а не его значение: на класс high участок выходит
+# или нет по порогу из ref.app_setting, и порог правит администратор через API
+# (PUT /api/settings/risk_threshold_high). Условие на "high" краснело бы на
+# исправном коде на следующий же день после того, как порог подняли.
+check_contains "GET /api/risks отдаёт risk_class" '"risk_class"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks"
 check "GET /api/forecasts (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts"
 # Состояние данных (MOS-148, М-04). Метод обязан быть открыт диспетчеру: под ним
 # ходит дашборд (frontend/src/screens/dashboard/api.ts). Проверяем не только код,
