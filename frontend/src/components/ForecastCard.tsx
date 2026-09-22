@@ -33,20 +33,31 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
 
   useEffect(() => {
     if (!forecastId) return
+    // Флажок отмены — та же гонка, что ab нашла в ObjectCard.tsx (22.09.2026):
+    // без него ответ прошлого forecastId, пришедший позже ответа нового, тихо
+    // подменяет карточку — на экране целый прогноз, но не тот, что в адресе.
+    let отменено = false
     setData(null)
     setNotFound(false)
     setError(null)
     fetch(`/api/forecasts/${forecastId}`, { headers: { 'X-User-Login': API_LOGIN } })
       .then((r) => {
         if (r.status === 404) {
-          setNotFound(true)
+          if (!отменено) setNotFound(true)
           return null
         }
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<ForecastDetail>
       })
-      .then((d) => d && setData(d))
-      .catch((e) => setError(errorMessage(e)))
+      .then((d) => {
+        if (!отменено && d) setData(d)
+      })
+      .catch((e) => {
+        if (!отменено) setError(errorMessage(e))
+      })
+    return () => {
+      отменено = true
+    }
   }, [forecastId])
 
   if (notFound) {

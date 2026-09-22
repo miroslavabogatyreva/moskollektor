@@ -3,6 +3,7 @@ import { route } from 'preact-router'
 import { fetchOrders } from './api'
 import { PRIORITY_LABEL, type OrderListItem } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
+import { rowLink, SkipTable } from '../../lib/a11y'
 
 /* Экран заявок — задача 6.7 (MOS-62), постраничность — 4.13 (MOS-117). Данные
    читаются из GET /api/orders, форма ответа — contracts/examples/orders/order-list.json
@@ -42,10 +43,11 @@ export function OrdersScreen(_props: Record<string, unknown>) {
 
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
 
+      <SkipTable targetId="orders-table-end" />
       <table class="w-full text-sm" style="border-collapse:collapse">
         <thead>
           <tr>
-            {['Объект', 'Вид работ', 'Срок', 'Запас', 'Статус'].map((h) => (
+            {['№', 'Объект', 'Вид работ', 'Срок', 'Запас', 'Статус'].map((h) => (
               <th
                 key={h}
                 class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -60,9 +62,10 @@ export function OrdersScreen(_props: Record<string, unknown>) {
           {items?.map((o) => (
             <tr
               key={o.id}
-              onClick={() => route(`/orders/${o.id}`)}
+              {...rowLink(() => route(`/orders/${o.id}`))}
               style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${PRIORITY_BORDER[o.priority_code] ?? 'transparent'}; cursor:pointer`}
             >
+              <td class="px-2 py-2 num">{o.id}</td>
               <td class="px-2 py-2">
                 {o.object_name}{' '}
                 <span style="color:var(--text-muted)" class="num">
@@ -82,6 +85,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
           ))}
         </tbody>
       </table>
+      <div id="orders-table-end" tabindex={-1} />
 
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && items.length === 0 && (
