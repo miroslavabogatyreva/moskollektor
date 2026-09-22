@@ -9,7 +9,7 @@ export interface OrderListItem {
   smvu_key: string
   work_type_name: string
   due_at: string // ISO, +03:00
-  lead_hours: number
+  deadline_hours: number // due_at − reported_at самой заявки
   status: string
   priority_code: string
 }
@@ -72,8 +72,6 @@ export interface OrderForecastRef {
   horizon_h: number
   probability: number
   risk_rank: number
-  predicted_failure_at: string
-  lead_hours: number
 }
 
 export interface OrderDetail {
@@ -86,6 +84,13 @@ export interface OrderDetail {
   subject: string
   reported_at: string
   due_at: string
+  // Срок самой заявки, ч: due_at − reported_at. Рядом — норматив priority.response_hours;
+  // у заявок до миграции 037 они расходятся (backend/app/api/orders.py).
+  deadline_hours: number
+  // null у заявки прежнего пути — у неё не было предупреждения модели
+  warning_opened_at: string | null
+  // Конец окна риска прогноза, а не предсказанный момент отказа (MOS-179)
+  risk_window_end: string | null
   object: OrderObject
   work_type: OrderWorkType
   work_order: OrderWorkOrder | null
