@@ -174,7 +174,14 @@ git update-ref refs/heads/master $COMMIT $(git rev-parse HEAD)
    а срез всех.
 2. **Образ — только после «принято» и только из закоммиченного.** Контекст сборки
    на сервере получают не из дерева, а из origin:
-   `git archive origin/master backend db contracts deploy/docker-compose.yml deploy/nginx/nginx.conf | ssh root@стенд "tar -x -C /srv/moskollektor"`.
+   `git archive origin/master backend db contracts code deploy/docker-compose.yml deploy/nginx/nginx.conf | ssh root@стенд "tar -x -C /srv/moskollektor"`.
+   **Четыре каталога, и все четыре обязательны:** `backend/Dockerfile` копирует
+   `backend/app`, `db/migrations`, `contracts` и `code`, и пропуск любого не роняет
+   сборку — он кладёт в образ вчерашнее. 22.09.2026 на этом встала приёмочная
+   команда: выложили `backend db code` без `contracts`, `docker build` прошёл,
+   а `python code/check_metrics.py --selfcheck` внутри образа упал
+   `FileNotFoundError: /app/contracts/failure.v3.json`. Что списки не разъедутся
+   снова, проверяет `code/check_deploy_set.py` в `delivery/check-all.sh`.
    Каталог `deploy/` целиком в архив не кладут: `deploy/nginx/html/index.html` в git —
    заглушка «Стенд поднят» из блока Q1, а nginx монтирует ровно этот каталог, куда
    `rsync` кладёт собранный фронт. 17.09.2026 оркестратор написал в команде `deploy`
