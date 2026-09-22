@@ -110,9 +110,17 @@ services:
       TZ: ${TZ}
       SCHEDULER_INTERVAL_MIN: ${SCHEDULER_INTERVAL_MIN:-4}
       SCHEDULER_REFRESH_INTERVAL_MIN: ${SCHEDULER_REFRESH_INTERVAL_MIN:-5}
+      # Пусто — расчёт идёт прежним путём, своими 22 признаками feat.v1.
+      # Задано — worker берёт вероятности и 42 признака из выдачи модели v3
+      # (backend/app/worker/run_v3.py). Файл кладёт образ ml-score по расписанию.
+      SCORE_V3_PATH: ${SCORE_V3_PATH:-}
+      SCORE_V3_MAX_AGE_H: ${SCORE_V3_MAX_AGE_H:-1.5}
     volumes:
       - parquet:/srv/parquet
       - uploads:/srv/uploads
+      # Только на чтение: пишет сюда ml-score, worker читает. Права на запись
+      # у читателя — это способ однажды затереть выдачу модели своей ошибкой.
+      - score:/score:ro
     depends_on:
       db:
         condition: service_healthy
@@ -182,3 +190,7 @@ volumes:
   parquet:
   uploads:
   backups:
+  # Сюда образ ml-score кладёт score.json — выдачу модели v3 на момент среза
+  # (контракт score.v3, docs/ml-v3-hld.md). Том, а не каталог на хосте: путь
+  # на сервере заказчика мы не знаем, а имя тома одинаково везде.
+  score:
