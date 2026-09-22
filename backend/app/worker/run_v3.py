@@ -40,12 +40,25 @@ from app.worker import score_v3
 
 # Участки коллектора. Тот же путь «канал -> узел -> коллектор», что в 029,
 # только в обратную сторону и без каналов: нам нужны участки, а не датчики.
+#
+# DISTINCT ON, а не DISTINCT, и это не украшение. Участок 1490 («798:0», пикет 0
+# префикса 798) принадлежит ДВУМ коллекторам сразу: 13 его каналов висят на объекте
+# Зита, 3 — на объекте Бета. Простой DISTINCT дал 3 174 участка при 3 173 в справочнике,
+# и запись прогноза упала на UniqueViolationError по ключу (run_id, section_id) —
+# поймано первым же прогоном на стенде 22.09.2026.
+#
+# Относим участок к коллектору, где у него больше каналов: то же правило большинства,
+# что в мосте ключей (миграция 033), и по той же причине — отдать участок обоим
+# значило бы показать один пикет в двух местах с разным риском.
 УЧАСТКИ_КОЛЛЕКТОРА = """
-SELECT DISTINCT c.section_id, p.object_id AS collector_id
+SELECT DISTINCT ON (c.section_id)
+       c.section_id, p.object_id AS collector_id, count(*) AS каналов
   FROM smvu.channel c
   JOIN smvu.object_tree n ON n.object_id = c.object_id
   JOIN smvu.object_tree p ON p.object_id = n.parent_id AND p.level = 2
  WHERE c.is_active AND c.section_id IS NOT NULL
+ GROUP BY c.section_id, p.object_id
+ ORDER BY c.section_id, каналов DESC, p.object_id
 """
 
 
