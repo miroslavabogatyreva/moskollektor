@@ -42,7 +42,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.auth.deps import require
+from app.auth.deps import require, видимые_участки
 from app.db import КРАЙ_ДАННЫХ, get_conn
 
 МСК = ZoneInfo("Europe/Moscow")
@@ -60,21 +60,33 @@ router = APIRouter(prefix="/api")
 }
 
 _MERGED_CTE = """
-WITH in_range AS (
+WITH bounds AS (
+    -- $1/$2 приходят как date, а не timestamptz: asyncpg иначе превратил бы
+    -- их в полночь по часовому поясу ПРОЦЕССА api, а не по 'Europe/Moscow'
+    -- (нашла 5e, MOS-42) — на стенде экспертов контейнер может стоять в UTC.
+    -- AT TIME ZONE здесь считает сервер, независимо от TZ процесса.
+    SELECT ($1::date AT TIME ZONE 'Europe/Moscow') AS от,
+           ($2::date AT TIME ZONE 'Europe/Moscow') AS до
+),
+in_range AS (
     SELECT r.journal_id, r.read_time, r.channel_id, r.section_id, r.value_text,
            true AS is_alarm
-      FROM smvu.reading r
-     WHERE r.is_alarm = true AND r.read_time >= $1 AND r.read_time < $2
+      FROM smvu.reading r, bounds
+     WHERE r.is_alarm = true AND r.read_time >= bounds.от AND r.read_time < bounds.до
 ),
 paired_normal AS (
-    SELECT nxt.journal_id, nxt.read_time, nxt.channel_id, nxt.section_id, nxt.value_text,
+    -- DISTINCT: если у канала подряд две тревоги, а следующая только одна
+    -- Норма, LATERAL находит её для ОБЕИХ — без DISTINCT она попала бы
+    -- в журнал дважды (нашла 5e, MOS-42: за 10.06.2026 11 Норм из 2735
+    -- показывались бы дважды, total завышен на 11).
+    SELECT DISTINCT nxt.journal_id, nxt.read_time, nxt.channel_id, nxt.section_id, nxt.value_text,
            false AS is_alarm
-      FROM in_range a
+      FROM in_range a, bounds
       JOIN LATERAL (
           SELECT r.journal_id, r.read_time, r.channel_id, r.section_id, r.value_text
             FROM smvu.reading r
            WHERE r.channel_id = a.channel_id AND r.is_alarm = false
-             AND r.read_time > a.read_time AND r.read_time < $2
+             AND r.read_time > a.read_time AND r.read_time < bounds.до
            ORDER BY r.read_time ASC
            LIMIT 1
       ) nxt ON true
@@ -97,6 +109,7 @@ _ОТ_MERGED = """
    AND ($4::text IS NULL OR (CASE WHEN m.is_alarm THEN 'Предупреждение' ELSE 'Норма' END) = $4)
    AND ($5::text IS NULL OR l.name ILIKE '%' || $5 || '%')
    AND ($6::text IS NULL OR m.value_text ILIKE '%' || $6 || '%')
+   AND ($7::int[] IS NULL OR x.section_id = ANY($7))
 """
 
 СЧЁТ_SQL = f"{_MERGED_CTE}SELECT count(*) {_ОТ_MERGED}"
@@ -130,7 +143,7 @@ async def list_tech_events(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("tech_events.read")),
+    user=Depends(require("tech_events.read")),
 ):
     if sort not in СОРТИРОВКА:
         raise HTTPException(422, f"sort должен быть одним из: {', '.join(СОРТИРОВКА)}")
@@ -147,6 +160,7 @@ async def list_tech_events(
         )
 
     to_exclusive = to + timedelta(days=1)
+    участки = await видимые_участки(user, conn)
 
     async with conn.transaction():
         # Живёт только в этой транзакции (docstring выше — цифры замера).
@@ -159,19 +173,21 @@ async def list_tech_events(
             event_type,
             object,
             value_text,
+            участки,
         )
         # Второй ключ сортировки — m.journal_id: у read_time бывают повторы
         # (несколько каналов пишут в одну секунду), без второго ключа offset
         # на разных проходах вернул бы разный набор строк (нашла 98, MOS-223,
         # тот же дефект уже был у /api/orders).
         rows = await conn.fetch(
-            f"{ВЫБОРКА_SQL} ORDER BY {СОРТИРОВКА[sort]} {order.upper()}, m.journal_id {order.upper()} LIMIT $7 OFFSET $8",
+            f"{ВЫБОРКА_SQL} ORDER BY {СОРТИРОВКА[sort]} {order.upper()}, m.journal_id {order.upper()} LIMIT $8 OFFSET $9",
             from_,
             to_exclusive,
             sensor_kind,
             event_type,
             object,
             value_text,
+            участки,
             limit,
             offset,
         )

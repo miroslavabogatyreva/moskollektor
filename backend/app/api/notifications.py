@@ -24,7 +24,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.auth.deps import get_current_user, require
+from app.auth.deps import get_current_user, require, видимые_участки, проверить_участок
 from app.db import get_conn, get_pool
 
 router = APIRouter(prefix="/api")
@@ -32,6 +32,7 @@ router = APIRouter(prefix="/api")
 ПИНГ_С = 20  # HLD разд. 4.3: пинг раз в 20 с, иначе nginx рвёт по своему таймауту
 ОПРОС_С = 5
 
+# Область видимости (MOS-107) — тот же x.section_id, что и у risks/forecasts/orders.
 FROM_SQL = """
   FROM maint.notification n
   JOIN asset.func_location l ON l.id = n.func_location_id
@@ -41,6 +42,7 @@ FROM_SQL = """
   LEFT JOIN ref.app_user au  ON au.user_id = n.acked_by
  WHERE n.source_system = 'forecast'
    AND ($1::boolean IS NULL OR (n.acked_at IS NOT NULL) = $1)
+   AND ($2::int[] IS NULL OR x.section_id = ANY($2))
 """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
@@ -50,13 +52,15 @@ SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
        f.probability, f.horizon_h, r.as_of,
        n.acked_at, au.login AS acked_by
 {FROM_SQL}
- ORDER BY n.reported_at DESC
- LIMIT $2 OFFSET $3
+ ORDER BY n.reported_at DESC, n.id DESC
+ LIMIT $3 OFFSET $4
 """
 
 # Поток отдаёт то же самое, но по id больше последнего показанного (курсор
 # Last-Event-ID), без пагинации и без фильтра acked — новая заявка идёт
 # в полосу независимо от того, квитирована ли она уже кем-то другим.
+# Область видимости — тем же участком, что и у списка: техник в потоке
+# не должен увидеть чужой коллектор раньше, чем откроет список.
 СОБЫТИЯ_SQL = """
 SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
        f.probability, f.horizon_h, r.as_of
@@ -66,6 +70,7 @@ SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
  WHERE n.source_system = 'forecast' AND n.id > $1
+   AND ($2::int[] IS NULL OR x.section_id = ANY($2))
  ORDER BY n.id ASC
  LIMIT 100
 """
@@ -93,10 +98,11 @@ async def list_notifications(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("notifications.read")),
+    user=Depends(require("notifications.read")),
 ):
-    total = await conn.fetchval(COUNT_SQL, acked)
-    rows = await conn.fetch(LIST_SQL, acked, limit, offset)
+    участки = await видимые_участки(user, conn)
+    total = await conn.fetchval(COUNT_SQL, acked, участки)
+    rows = await conn.fetch(LIST_SQL, acked, участки, limit, offset)
     return {
         "total": total,
         "items": [
@@ -120,7 +126,23 @@ async def ack(
     UPDATE … WHERE acked_at IS NULL ловит это атомарно: при гонке двух
     диспетчеров второй просто не находит строку для обновления и получает
     в ответе отметку первого, а не свою.
+
+    Область видимости проверяется ДО UPDATE, тем же порядком, что у
+    GET /api/orders/{id} (403 раньше 404 — иначе по разнице кодов техник
+    узнал бы, есть ли чужое уведомление).
     """
+    найдено = await conn.fetchrow(
+        """
+        SELECT n.id, x.section_id FROM maint.notification n
+          LEFT JOIN ref.object_xref x ON x.func_location_id = n.func_location_id
+         WHERE n.id = $1
+        """,
+        notification_id,
+    )
+    await проверить_участок(user, conn, найдено["section_id"] if найдено else None)
+    if найдено is None:
+        raise HTTPException(404, "уведомление не найдено")
+
     row = await conn.fetchrow(
         """
         UPDATE maint.notification SET acked_by = $1, acked_at = now()
@@ -135,8 +157,6 @@ async def ack(
             "SELECT acked_by, acked_at FROM maint.notification WHERE id = $1",
             notification_id,
         )
-        if row is None:
-            raise HTTPException(404, "уведомление не найдено")
     login = None
     if row["acked_by"] is not None:
         login = await conn.fetchval(
@@ -156,11 +176,14 @@ async def alerts_stream(request: Request, x_user_login: str | None = Header(None
     async with pool.acquire() as conn:
         user = await get_current_user(x_user_login=x_user_login, conn=conn)
         await checker(user=user, conn=conn)
+        участки = await видимые_участки(user, conn)
 
         last_event_id = request.headers.get("last-event-id")
-        if last_event_id is not None:
-            последний = int(last_event_id)
-        else:
+        try:
+            последний = int(last_event_id) if last_event_id is not None else None
+        except ValueError:
+            последний = None  # мусор в заголовке — не 500, начинаем как без заголовка
+        if последний is None:
             последний = await conn.fetchval(ПОСЛЕДНИЙ_ID_SQL) or 0
 
     async def события():
@@ -170,7 +193,7 @@ async def alerts_stream(request: Request, x_user_login: str | None = Header(None
         молчим_с = asyncio.get_event_loop().time()
         while not await request.is_disconnected():
             async with pool.acquire() as conn:
-                rows = await conn.fetch(СОБЫТИЯ_SQL, текущий)
+                rows = await conn.fetch(СОБЫТИЯ_SQL, текущий, участки)
             сейчас = asyncio.get_event_loop().time()
             if rows:
                 for r in rows:
