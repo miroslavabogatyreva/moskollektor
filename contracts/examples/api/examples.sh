@@ -206,6 +206,12 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний д
 check "GET /api/objects/409/channels (dispatcher1)"         200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels"
 check "GET /api/objects/999999999/channels (участка нет)"   404 -H "X-User-Login: ods1" "$BASE_URL/api/objects/999999999/channels"
 
+# MOS-45, Ф-81: геометрия участков. Формат — ?geometry=, а не ?format= (тот занят XML).
+# Участок 1490 («798:0») — коллектор «объект Зита», чужой для tech1 (коллектор 6).
+check "GET /api/geo/sections?section_id=1490 (ods1, GeoJSON)"          200 -H "X-User-Login: ods1" "$BASE_URL/api/geo/sections?section_id=1490"
+check "GET /api/geo/sections?geometry=wkt&section_id=1490 (ods1, WKT)" 200 -H "X-User-Login: ods1" "$BASE_URL/api/geo/sections?geometry=wkt&section_id=1490"
+check "GET /api/geo/sections?section_id=1490 (tech1, чужой участок)"   403 -H "X-User-Login: tech1" "$BASE_URL/api/geo/sections?section_id=1490"
+
 check_channel_faults_top() {
     label="GET /api/objects/409/channels — отказы D5 участка 15:12, наибольшие в парке"
     body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels")
