@@ -64,9 +64,14 @@ WITH bounds AS (
     -- $1/$2 приходят как date, а не timestamptz: asyncpg иначе превратил бы
     -- их в полночь по часовому поясу ПРОЦЕССА api, а не по 'Europe/Moscow'
     -- (нашла 5e, MOS-42) — на стенде экспертов контейнер может стоять в UTC.
-    -- AT TIME ZONE здесь считает сервер, независимо от TZ процесса.
-    SELECT ($1::date AT TIME ZONE 'Europe/Moscow') AS от,
-           ($2::date AT TIME ZONE 'Europe/Moscow') AS до
+    -- ::timestamp ПЕРЕД AT TIME ZONE обязателен (нашла 5e, второй заход):
+    -- у date своего AT TIME ZONE нет, и без явного ::timestamp Postgres сам
+    -- приводит date к timestamptz по TimeZone СЕАНСА, а уже потом AT TIME ZONE
+    -- от timestamptz отдаёт naive время — тот же сеансовый пояс входит дважды.
+    -- ::timestamp — чистый календарь, без пояса вовсе; AT TIME ZONE 'Europe/Moscow'
+    -- после него — единственное место, где пояс вообще участвует.
+    SELECT ($1::date::timestamp AT TIME ZONE 'Europe/Moscow') AS от,
+           ($2::date::timestamp AT TIME ZONE 'Europe/Moscow') AS до
 ),
 in_range AS (
     SELECT r.journal_id, r.read_time, r.channel_id, r.section_id, r.value_text,
