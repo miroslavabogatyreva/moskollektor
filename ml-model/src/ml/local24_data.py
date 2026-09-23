@@ -87,6 +87,20 @@ class Local24Data:
         self.con.close()
         self.tempdir.cleanup()
 
+    def _prepare_events(self):
+        c = self.con
+        # Repeat flags use all qualified warm-up history, before calendar filtering.
+        # Event identity is channel+onset; confirmation needs strictly >3600 seconds.
+        c.execute(f'''CREATE TABLE events AS WITH qualified AS (
+            SELECT ch AS channel_id,section_id,collector_id,t_start,t_end,
+                   t_start + INTERVAL 1 HOUR + INTERVAL 1 SECOND AS confirmed_at,
+                   concat(ch,':',strftime(t_start,'%Y-%m-%dT%H:%M:%S')) AS event_id
+            FROM ep WHERE coalesce(t_end,TIMESTAMP '{self.cutoff}') > t_start + INTERVAL 1 HOUR)
+            , marked AS (SELECT *, min(t_start) OVER(PARTITION BY section_id)<t_start AS is_repeat,
+                min(t_start) OVER(PARTITION BY channel_id)<t_start AS channel_is_repeat
+            FROM qualified)
+            SELECT * FROM marked WHERE t_start >= DATE '{ORIGIN.date()}' ''')
+
     def _prepare(self):
         c = self.con
         c.execute('''CREATE TABLE section_status AS SELECT section_id,
@@ -102,16 +116,7 @@ class Local24Data:
             CASE WHEN e.t_end <= TIMESTAMP '{self.cutoff}' THEN e.t_end END AS t_end
             FROM episodes_input e JOIN mapping m USING(ch)
             WHERE e.t_start >= DATE '2022-01-01' AND e.t_start <= TIMESTAMP '{self.cutoff}' ''')
-        # Event identity is channel+onset; confirmation needs strictly >3600 seconds.
-        c.execute(f'''CREATE TABLE events AS WITH selected AS (
-            SELECT ch AS channel_id,section_id,collector_id,t_start,t_end,
-                   t_start + INTERVAL 1 HOUR + INTERVAL 1 SECOND AS confirmed_at,
-                   concat(ch,':',strftime(t_start,'%Y-%m-%dT%H:%M:%S')) AS event_id
-            FROM ep WHERE t_start >= DATE '{ORIGIN.date()}'
-              AND coalesce(t_end,TIMESTAMP '{self.cutoff}') > t_start + INTERVAL 1 HOUR)
-            SELECT *, min(t_start) OVER(PARTITION BY section_id)<t_start AS is_repeat,
-                min(t_start) OVER(PARTITION BY channel_id)<t_start AS channel_is_repeat
-            FROM selected''')
+        self._prepare_events()
         c.execute('''CREATE TABLE daily AS SELECT m.section_id,d.d,sum(n) AS n_rows,
             sum(n_alarm) AS n_alarm,sum(n_bad) AS n_bad,sum(n_undef) AS n_undef,
             sum(n_numeric) AS n_numeric,sum(n_obes) AS n_obes,sum(n_batt) AS n_batt,
