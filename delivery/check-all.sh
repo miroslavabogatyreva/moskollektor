@@ -503,6 +503,16 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
+# backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
+# что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
+# в JSON на /api/risks целиком и /api/forecasts?limit=1000.
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-80"        "XML = JSON, лист за листом"  env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_xml_response.py
+else
+  skip_msg "Ф-80" "XML = JSON, лист за листом — задайте BASE_URL"
+fi
+
 # Пять экранных строк стояли закрытыми на разовом curl от 16.09.2026, и ни одна
 # не была привязана сюда. Способ доказательства при этом не работал: nginx отдаёт
 # try_files $uri $uri/ /index.html, то есть КОД 200 НА ЛЮБОЙ ПУТЬ без /api/
