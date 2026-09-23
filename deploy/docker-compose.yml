@@ -30,13 +30,15 @@ services:
     # Postgres лежит в анонимном mmap, /dev/shm им не пользуется вовсе.
     # /dev/shm занимает SHOW dynamic_shared_memory_type = posix — это память
     # ПАРАЛЛЕЛЬНЫХ воркеров (общая хеш-таблица parallel hash join, общие
-    # тюпл-очереди gather merge), и её бюджет действительно от work_mem.
-    # SHOW work_mem = 64MB, SHOW max_parallel_workers = 8 (потолок воркеров
-    # НА ВЕСЬ ЭКЗЕМПЛЯР сразу, не на один запрос) — 64 МБ × 8 = 512 МБ,
+    # тюпл-очереди gather merge). Бюджет parallel hash join — не сам work_mem,
+    # а work_mem × hash_mem_multiplier (нашёл оркестратор, первая прикидка
+    # была занижена вдвое): SHOW work_mem = 64MB, SHOW hash_mem_multiplier = 2
+    # (умолчание с PG15), SHOW max_parallel_workers = 8 (потолок воркеров НА
+    # ВЕСЬ ЭКЗЕМПЛЯР сразу, не на один запрос) — 64 МБ × 2 × 8 = 1024 МБ,
     # худший случай, когда все восемь воркеров разом держат параллельный
-    # hash join. Хост даёт 5,9 ГБ на /dev/shm (df -h, 23.09.2026), 512 МБ —
-    # меньше десятой доли, запас есть.
-    shm_size: 512m
+    # hash join. Хост даёт 5,9 ГБ на /dev/shm (df -h, 23.09.2026), 1 ГиБ —
+    # шестая доля, запас есть.
+    shm_size: 1024m
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
