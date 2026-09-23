@@ -526,7 +526,10 @@ fi
 # привязан к коллектору 6 «объект Бета» (db/seed/rbac.sql) и обязан получить
 # строго меньше строк /api/risks, чем ods1, 403 на чужой участок, чужую заявку
 # и чужой прогноз. С DATABASE_URL сверяет ещё и точное число — участки
-# коллекторов из ref.user_scope техника по УЧАСТКИ_КОЛЛЕКТОРА. НФ-44 — 403
+# коллекторов из ref.user_scope техника по УЧАСТКИ_КОЛЛЕКТОРА, и число района:
+# dispatcher1 с узлом 5773 видит ровно столько участков, сколько строк
+# в pred.forecast_current. Несуществующий объект технику — 403, а не 404:
+# иначе по разнице кодов он узнал бы, есть ли чужой объект. НФ-44 — 403
 # диспетчеру на /api/settings.
 check_scope() {
   BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
@@ -553,6 +556,8 @@ def denied(path, login):
 
 ods = {r["section_id"] for r in ok("/api/risks", "ods1")}
 tech = {r["section_id"] for r in ok("/api/risks", "tech1")}
+district = {r["section_id"] for r in ok("/api/risks", "dispatcher1")}
+assert district == ods, f"район: dispatcher1 {len(district)}, ods1 {len(ods)} — район в выгрузке один, числа обязаны совпасть"
 assert 0 < len(tech) < len(ods), f"риски: tech1 {len(tech)}, ods1 {len(ods)} — подрезка не работает"
 assert tech <= ods, f"tech1 видит участки, которых нет у ods1: {sorted(tech - ods)[:5]}"
 
@@ -566,16 +571,21 @@ if os.environ.get("DATABASE_URL"):
             SELECT section_id FROM u
              WHERE collector_id IN (SELECT object_id FROM ref.user_scope WHERE login = $1)
         """, "tech1")
+        n_current = await c.fetchval("SELECT count(*) FROM pred.forecast_current")
         await c.close()
-        return {r["section_id"] for r in rows}
-    exp = asyncio.run(expected())
+        return {r["section_id"] for r in rows}, n_current
+    exp, n_current = asyncio.run(expected())
     assert tech == exp, f"tech1 видит {len(tech)}, по УЧАСТКИ_КОЛЛЕКТОРА {len(exp)}"
+    assert len(district) == n_current, f"dispatcher1 видит {len(district)}, в pred.forecast_current {n_current}"
 
 own, foreign = min(tech), min(ods - tech)
 ok(f"/api/objects/{own}", "tech1")
 for path in (f"/api/objects/{foreign}", f"/api/objects/{foreign}/channels",
-             f"/api/objects/{foreign}/readings?from=2026-06-30&to=2026-06-30"):
+             f"/api/objects/{foreign}/readings?from=2026-06-30&to=2026-06-30",
+             "/api/objects/999999999", "/api/orders/999999999", "/api/forecasts/999999999"):
     denied(path, "tech1")
+code, _ = get("/api/objects/999999999", "ods1")
+assert code == 404, f"ods1 /api/objects/999999999: {code}, ждали 404"
 
 orders_ods = ok("/api/orders?limit=1000", "ods1")
 orders_tech = ok("/api/orders?limit=1000", "tech1")
@@ -593,7 +603,7 @@ if alien_fc != "—":
     denied(f"/api/forecasts/{alien_fc}", "tech1")
 
 denied("/api/settings", "dispatcher1")
-print(f"риски: tech1 {len(tech)} из {len(ods)}; заявки: tech1 {n_tech} из {n_ods}; "
+print(f"риски: tech1 {len(tech)}, dispatcher1 {len(district)}, ods1 {len(ods)}; заявки: tech1 {n_tech} из {n_ods}; "
       f"403: участок {foreign}, заявка {alien_order}, прогноз {alien_fc}, /api/settings")
 '
 }

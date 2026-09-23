@@ -139,9 +139,9 @@ async def get_order(
     user=Depends(require("orders.read")),
 ):
     row = await conn.fetchrow(DETAIL_SQL, order_id)
+    await проверить_участок(user, conn, row["section_id"] if row else None)
     if row is None:
         raise HTTPException(404, "заявка не найдена")
-    await проверить_участок(user, conn, row["section_id"])
 
     collector, picket = row["smvu_key"].split(":")
     criticality_reason = row["criticality_reason"] or (

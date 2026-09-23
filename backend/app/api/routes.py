@@ -264,7 +264,7 @@ async def get_forecast(
         """,
         forecast_id,
     )
+    await проверить_участок(user, conn, row["section_id"] if row else None)
     if row is None:
         raise HTTPException(404, "прогноз не найден")
-    await проверить_участок(user, conn, row["section_id"])
     return dict(row)

@@ -33,6 +33,7 @@ async def get_object(
     conn: asyncpg.Connection = Depends(get_conn),
     user=Depends(require("objects.read")),
 ):
+    await проверить_участок(user, conn, section_id)
     # last_reading_at — из smvu.reading, а не из feat.section_daily: свёртка
     # покрывает только 2025-07-01…2026-06-30, а у семи участков (554, 559, 564,
     # 567, 570, 574, 579) последнее показание — 03.03.2025, раньше этого окна.
@@ -50,7 +51,6 @@ async def get_object(
     )
     if passport is None:
         raise HTTPException(404, "объект не найден")
-    await проверить_участок(user, conn, section_id)
 
     channels = await conn.fetch(
         """
@@ -130,10 +130,10 @@ async def get_object_readings(
     строгое: так «from=to=сегодня» отдаёт весь сегодняшний день, а не пустоту
     (та же ошибка на границе, что нашли в GET /api/forecasts, здесь исправлена сразу).
     """
+    await проверить_участок(user, conn, section_id)
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "объект не найден")
-    await проверить_участок(user, conn, section_id)
 
     to_exclusive = to + timedelta(days=1)
     rows = await conn.fetch(
@@ -203,10 +203,10 @@ async def list_object_channels(
     пропустить его вовсе. Проверяющая 21.09.2026 нашла 1 268 участков с такой
     группой неразличимых каналов, крупнейшая — 81 канал на участке 2204.
     """
+    await проверить_участок(user, conn, section_id)
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "участок не найден")
-    await проверить_участок(user, conn, section_id)
 
     total = await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE section_id = $1", section_id)
     rows = await conn.fetch(
