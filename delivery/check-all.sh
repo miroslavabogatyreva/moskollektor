@@ -530,7 +530,9 @@ fi
 # dispatcher1 с узлом 5773 видит ровно столько участков, сколько строк
 # в pred.forecast_current. Несуществующий объект технику — 403, а не 404:
 # иначе по разнице кодов он узнал бы, есть ли чужой объект. НФ-44 — 403
-# диспетчеру на /api/settings.
+# диспетчеру на /api/settings. Сложение областей — tech2 с двумя коллекторами
+# (6 и 4068): объединение строго больше, чем у tech1, и строго меньше всего
+# парка; пара «техник + район» дала бы весь парк и прошла бы вхолостую.
 check_scope() {
   BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
 import json, os, ssl, urllib.error, urllib.request
@@ -557,6 +559,8 @@ def denied(path, login):
 ods = {r["section_id"] for r in ok("/api/risks", "ods1")}
 tech = {r["section_id"] for r in ok("/api/risks", "tech1")}
 district = {r["section_id"] for r in ok("/api/risks", "dispatcher1")}
+tech2 = {r["section_id"] for r in ok("/api/risks", "tech2")}
+assert tech < tech2 < ods, f"сложение областей: tech1 {len(tech)}, tech2 {len(tech2)}, ods1 {len(ods)} — ждали tech1 < tech2 < ods1"
 assert district == ods, f"район: dispatcher1 {len(district)}, ods1 {len(ods)} — район в выгрузке один, числа обязаны совпасть"
 assert 0 < len(tech) < len(ods), f"риски: tech1 {len(tech)}, ods1 {len(ods)} — подрезка не работает"
 assert tech <= ods, f"tech1 видит участки, которых нет у ods1: {sorted(tech - ods)[:5]}"
@@ -566,16 +570,21 @@ if os.environ.get("DATABASE_URL"):
     from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
     async def expected():
         c = await asyncpg.connect(os.environ["DATABASE_URL"])
-        rows = await c.fetch(f"""
-            WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
-            SELECT section_id FROM u
-             WHERE collector_id IN (SELECT object_id FROM ref.user_scope WHERE login = $1)
-        """, "tech1")
+        per_login = {}
+        for login in ("tech1", "tech2"):
+            rows = await c.fetch(f"""
+                WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+                SELECT section_id FROM u
+                 WHERE collector_id IN (SELECT object_id FROM ref.user_scope WHERE login = $1)
+            """, login)
+            per_login[login] = {r["section_id"] for r in rows}
         n_current = await c.fetchval("SELECT count(*) FROM pred.forecast_current")
         await c.close()
-        return {r["section_id"] for r in rows}, n_current
+        return per_login, n_current
     exp, n_current = asyncio.run(expected())
-    assert tech == exp, f"tech1 видит {len(tech)}, по УЧАСТКИ_КОЛЛЕКТОРА {len(exp)}"
+    for login, got in (("tech1", tech), ("tech2", tech2)):
+        want = exp[login]
+        assert got == want, f"{login} видит {len(got)}, по УЧАСТКИ_КОЛЛЕКТОРА {len(want)}"
     assert len(district) == n_current, f"dispatcher1 видит {len(district)}, в pred.forecast_current {n_current}"
 
 own, foreign = min(tech), min(ods - tech)
@@ -603,7 +612,7 @@ if alien_fc != "—":
     denied(f"/api/forecasts/{alien_fc}", "tech1")
 
 denied("/api/settings", "dispatcher1")
-print(f"риски: tech1 {len(tech)}, dispatcher1 {len(district)}, ods1 {len(ods)}; заявки: tech1 {n_tech} из {n_ods}; "
+print(f"риски: tech1 {len(tech)}, tech2 {len(tech2)}, dispatcher1 {len(district)}, ods1 {len(ods)}; заявки: tech1 {n_tech} из {n_ods}; "
       f"403: участок {foreign}, заявка {alien_order}, прогноз {alien_fc}, /api/settings")
 '
 }
