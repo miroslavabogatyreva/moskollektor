@@ -1,0 +1,220 @@
+{
+  "schema_version": "local24.history20192020.canonicalshort.v1",
+  "status": "validated_for_predeclared_training_history_ablation_only",
+  "horizon_h": 24,
+  "origin": "2019-01-01 00:00:00",
+  "archive_cutoff": "2020-12-31 23:59:59",
+  "timezone": "Europe/Moscow naive archive wall time",
+  "feature_names": [
+    "n_rows_1d",
+    "n_rows_7d",
+    "n_rows_28d",
+    "n_alarm_1d",
+    "n_alarm_7d",
+    "n_alarm_28d",
+    "n_bad_1d",
+    "n_bad_7d",
+    "n_bad_28d",
+    "n_undef_1d",
+    "n_undef_7d",
+    "n_undef_28d",
+    "n_numeric_1d",
+    "n_numeric_7d",
+    "n_numeric_28d",
+    "n_obes_1d",
+    "n_obes_7d",
+    "n_obes_28d",
+    "n_batt_1d",
+    "n_batt_7d",
+    "n_batt_28d",
+    "n_reporting_1d",
+    "n_reporting_7d",
+    "n_reporting_28d",
+    "confirmed_7d",
+    "confirmed_28d",
+    "confirmed_90d",
+    "confirmed_365d",
+    "short_7d",
+    "short_28d",
+    "observed_days_7d",
+    "observed_days_28d",
+    "known_channels",
+    "known_smoke",
+    "known_gas",
+    "known_temperature",
+    "days_since_reading",
+    "days_since_confirmation",
+    "weekday",
+    "day_of_year"
+  ],
+  "row_file": "dataset.parquet",
+  "event_file": "events.parquet",
+  "mapping_file": "mapping.parquet",
+  "coverage_file": "coverage.parquet",
+  "forecast_calendar_file": "forecast_days.parquet",
+  "counts": {
+    "candidate_rows": 2315560,
+    "eligible_rows": 892218,
+    "positive_rows": 614,
+    "eligible_events": 1944,
+    "no_exposure": 1414941,
+    "ongoing_d5": 3362,
+    "unknown_past_coverage": 22204,
+    "incomplete_target_coverage": 22204
+  },
+  "exclusion_counts_overlap": true,
+  "eligible_as_of_bounds": [
+    "2019-01-09 00:00:00",
+    "2020-12-30 00:00:00"
+  ],
+  "events_by_year": [
+    {
+      "year": 2019,
+      "events": 400
+    },
+    {
+      "year": 2020,
+      "events": 2422
+    }
+  ],
+  "daily_by_year": [
+    {
+      "year": 2019,
+      "channel_days": 533049,
+      "readings": 20993328.0
+    },
+    {
+      "year": 2020,
+      "channel_days": 686322,
+      "readings": 28172398.0
+    }
+  ],
+  "chronology": [
+    {
+      "year": 2019,
+      "duplicate_order_key_groups": 1491,
+      "conflicting_d5_boolean_groups": 0,
+      "journal_rows": 20993328
+    },
+    {
+      "year": 2020,
+      "duplicate_order_key_groups": 0,
+      "conflicting_d5_boolean_groups": 0,
+      "journal_rows": 28172398
+    }
+  ],
+  "prefix_checks": [
+    {
+      "as_of": "2019-07-01",
+      "sections": 12,
+      "features": 40,
+      "raw_daily_counter_mismatches": 0,
+      "feature_values_exactly_equal": true,
+      "method": "Raw journal prefix rebuild versus full historical archive; static mapping held fixed."
+    },
+    {
+      "as_of": "2020-07-01",
+      "sections": 12,
+      "features": 40,
+      "raw_daily_counter_mismatches": 0,
+      "feature_values_exactly_equal": true,
+      "method": "Raw journal prefix rebuild versus full historical archive; static mapping held fixed."
+    }
+  ],
+  "failure_values": [
+    "Неисправен",
+    "Батарея неисправна",
+    "Много неисправных устройств",
+    "Не определено"
+  ],
+  "episode_order": "ts, ev",
+  "target": "New observed D5 onset in (t,t+24h], duration strictly >1h; confirmation onset+3601s; journal-defined, not verified physical failure.",
+  "short_features": "Censor ends; exact tuple dedup; require 0<observed closed duration<=1h. Same canonical short definition as sensor-v3 control, kept under short_7d/short_28d names.",
+  "identity_limit": "Current September2026 product channel→picket→collector mapping assumed historically stable; no effective-dated registry. Unknown/no-picket/ambiguous channels excluded.",
+  "gap_policy": "Only raw 2019 and 2020 read. No 2021 rows, episodes, warmup, or state bridge. Canonical 2022+ control remains separate and unchanged.",
+  "left_boundary": "No pre2019 history available; first observation does not prove installation date or physical fault onset. Same exposure and past archive coverage gates as Local24.",
+  "right_boundary": "Ends censored at2020-12-31 23:59:59; target+25h completeness rejects the tail before the excluded2021 gap.",
+  "resources": {
+    "threads": 4,
+    "memory_limit": "8GB"
+  },
+  "code_sha256": {
+    "scripts/ml_local24_history_build.py": "4f15e59082a2a7f3a8092cff390df6b5b0fff89efde93de5c9605753b4aa834a",
+    "src/ml/local24_data.py": "df05979bb9243532e39574e8d48242fdb7b665d4aaba04f66b37af99696a5436",
+    "src/ml/failure_defs.py": "04b1ad2ddd00999ce6c1b1faf14412738609472e9b04c49bc5c955415a2d2eff",
+    "src/ml/daily.py": "8c8501f39ff9198392b0174020dffce927882e7ea32f849fb11da4f8eb6a13fd"
+  },
+  "source_sha256": {
+    "mapping": "12423b2b633918e8ba1418bd6c5fc86d9b9148984dbd3820b6aa256886f92b58",
+    "daily_cache": "3088b40ff856eeeb1c78538e6f200aef74621e0e98eaef65f2c03253eb0eda3a"
+  },
+  "artifact_sha256": {
+    "chanday.parquet": "c1a99a579da6e65a6655a636f1b6e1a1d7b202ea0ec56ebcdde69733cd160de3",
+    "coverage.parquet": "ba0dadc16ac8bac460a3eb49d80335f02062117f08547edac4d8930d3a805686",
+    "dataset.parquet": "8f6e5106fe2f68e68b4e09f12d076bac70b1d8165fd7f5274c997cb269cb247a",
+    "episodes_d5.parquet": "f35059b404ec10e5a9a7957a91110b2334f962caee8311446b375c281979eb15",
+    "events.parquet": "3f4a978e5b4a6ec268fb5cedac39982616825ed1f09c5b64a4b3cb6ae6b4287d",
+    "forecast_days.parquet": "4c72695424e6ddf1ea24d233cef553f33314e0078f08447146bded66ed5e58af",
+    "mapping.parquet": "12423b2b633918e8ba1418bd6c5fc86d9b9148984dbd3820b6aa256886f92b58"
+  },
+  "post_build_verification": {
+    "feature_names_exactly_match_original40": true,
+    "column_order_exactly_matches_original": true,
+    "yearly_rows": [
+      {
+        "year": 2019,
+        "rows_count": 376149,
+        "positive_section_days": 204,
+        "eligible_events": 250,
+        "sections": 1139,
+        "collectors": 14
+      },
+      {
+        "year": 2020,
+        "rows_count": 516069,
+        "positive_section_days": 410,
+        "eligible_events": 1694,
+        "sections": 1457,
+        "collectors": 14
+      }
+    ],
+    "keys_and_tail": {
+      "duplicate_keys": 0,
+      "rows2021": 0,
+      "incomplete_target_rows": 0,
+      "label_inconsistencies": 0
+    },
+    "long_event_mapping_coverage": [
+      {
+        "year": 2019,
+        "mapping_reason": "no_picket",
+        "events": 84
+      },
+      {
+        "year": 2019,
+        "mapping_reason": "resolved",
+        "events": 400
+      },
+      {
+        "year": 2019,
+        "mapping_reason": "unknown_channel",
+        "events": 154
+      },
+      {
+        "year": 2020,
+        "mapping_reason": "no_picket",
+        "events": 200
+      },
+      {
+        "year": 2020,
+        "mapping_reason": "resolved",
+        "events": 2422
+      },
+      {
+        "year": 2020,
+        "mapping_reason": "unknown_channel",
+        "events": 227
+      }
+    ]
+  }
+}
