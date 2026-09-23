@@ -1,0 +1,66 @@
+[
+  {
+    "path": "src/ml/local24_data.py",
+    "sha256": "7b84ea5ecddb63ae61d904c74e8fcceb45ff67c82336bda55394130c21fd7230"
+  },
+  {
+    "path": "src/ml/local24_eval.py",
+    "sha256": "e8af4b84460fc591557c5da9809e227adc15068bf67eef02d326c524d7e88f1b"
+  },
+  {
+    "path": "src/ml/local24_engineering.py",
+    "sha256": "9ce45f567240d5552d5c38d2eaa92456caa5bc8e2bca3c6c5d53490db9d7a174"
+  },
+  {
+    "path": "src/ml/serving/local24_bag.py",
+    "sha256": "23faeba5c45324383b6dcf8090bea54439f186ee74819fdc6e81d335523ca326"
+  },
+  {
+    "path": "src/ml/serving/app.py",
+    "sha256": "01bbd1ac6338cf90e348e4a530d73392760ad73281739c333624bae9158a4850"
+  },
+  {
+    "path": "src/ml/serving/model_store.py",
+    "sha256": "951567f16a2390fb48b654aa5e43baea914e5af0a90735bbd7bf7b019fc1d5a6"
+  },
+  {
+    "path": "src/ml/serving/schemas.py",
+    "sha256": "06cd936486d90870ef492c17a7af9f21b4fb38d960891c8fc66ae817570e7aaa"
+  },
+  {
+    "path": "scripts/ml_local24_research.py",
+    "sha256": "139bf6f9652e5bc061830fd86fd1e598e41cc372f20a8316f3bb6a925f34b10e"
+  },
+  {
+    "path": "scripts/ml_local24_score.py",
+    "sha256": "e7a4ea670c85d759890e50840d4ff16877f4815448d0a0f62fa2a32e6da85713"
+  },
+  {
+    "path": "scripts/ml_local24_package.py",
+    "sha256": "4582d2dd97c2e83bc322c0f5f826c54b9cdb552e8a53b290179f4e0481652582"
+  },
+  {
+    "path": "requirements/local24-runtime.txt",
+    "sha256": "39cd75261f8192c8bbbed80cd0716f06b3184ef711a16755bc5d43ce008c2333"
+  },
+  {
+    "path": "Dockerfile.local24",
+    "sha256": "d4f6b2381fb683d39895194dce73c3363e7d0eefd8fba599b480a8eba4177948"
+  },
+  {
+    "path": "tests/ml/test_local24_data.py",
+    "sha256": "a0298d0d27652f5851984cea834c9ddea80cfcbd9c6e2b3e3edc7cb57c8bebb4"
+  },
+  {
+    "path": "tests/ml/test_local24_eval.py",
+    "sha256": "b4656bfa27c8031ad05013db77d0f4c6e1bd301fbe8169375893df3dc8b9bdc8"
+  },
+  {
+    "path": "tests/ml/test_local24_engineering.py",
+    "sha256": "5b2c38ec82d8dffd76250225196ba00ff86807a39ca3295941ec9b18dd3e2f72"
+  },
+  {
+    "path": "tests/ml/test_local24_score.py",
+    "sha256": "684c7887f7bbb36676a8130b655f29c55adc6338e083412f31cfc8f4e810ada2"
+  }
+]

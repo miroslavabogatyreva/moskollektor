@@ -1,0 +1,10 @@
+{
+  "archive_sha256": "d8a46f845c240cae15293598591a2e4620b8b9de9af33612b06e393af2c7c27d",
+  "verified_files": 30,
+  "sections": 3110,
+  "container_native_max_error": 4.336808689942018e-19,
+  "container_seconds": 6.597555210988503,
+  "horizon_h": 24,
+  "object_level": "section",
+  "feature_arrays_equal": true
+}

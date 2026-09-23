@@ -1,0 +1,4 @@
+# Causal archived feature reconstruction; training is not needed at inference.
+duckdb==1.4.3
+pandas==2.3.3
+pyarrow==22.0.0
