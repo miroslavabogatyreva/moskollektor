@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { rowLink, SkipTable } from '../../lib/a11y'
-import { fetchDataStatus, fetchRisks, fetchSections } from './api'
+import { fetchDataStatus, fetchRisks, fetchSections, fetchForecastMethod } from './api'
 import { errorMessage } from '../../lib/format'
 import { отставание } from './lag'
 import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
 import type { SectionRef } from './rows'
-import type { DataStatus, RiskRow } from './types'
+import type { DataStatus, RiskRow, ForecastMethod } from './types'
 
 /* Дашборд рисков — задача 5.2 (MOS-49). Плитки и ранжированный список по риску
    из GET /api/risks (MOS-40 + MOS-32). Цветовая шкала риска (critical/high/…)
@@ -27,9 +27,18 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   /* Справочник участков — чтобы назвать объект словами (MOS-127). Его отказ
      не гасит ни список, ни плитки: без него в столбце «Объект» останется
      номер участка, и таблица работает дальше. */
+  const [method, setMethod] = useState<ForecastMethod | null>(null)
+  const [methodError, setMethodError] = useState<string | null>(null)
+  const local24 =
+    method?.score_metadata?.schema_version === 'score.local24.v1' &&
+    method.score_metadata.object_level === 'section' &&
+    method.score_metadata.horizon_h === 24
   const [sections, setSections] = useState<SectionRef[] | null>(null)
 
   useEffect(() => {
+    fetchForecastMethod()
+      .then(setMethod)
+      .catch((e) => setMethodError(errorMessage(e)))
     fetchRisks()
       .then(setRows)
       .catch((e) => setError(errorMessage(e)))
@@ -65,6 +74,26 @@ export function DashboardScreen(_props: Record<string, unknown>) {
         Дашборд рисков
       </h1>
 
+      {local24 && (
+        <section
+          aria-label="Локальный прогноз"
+          class="p-3"
+          style="border:1px solid var(--border-subtle)"
+        >
+          <p>Архивная проверка: локальный прогноз на 24 часа</p>
+          <p>Первые 10 участков для проверки; это ранг, а не высокий класс риска.</p>
+          <p>
+            Экспериментальная модель. Превосходство над простыми правилами не подтверждено.
+            Автозаявки отключены.
+          </p>
+          <p>
+            Срез: {method?.as_of}. Модель: {method?.model_version}.
+          </p>
+        </section>
+      )}
+      {methodError && (
+        <p style="color:var(--state-warning)">Метод расчёта не подтверждён: {methodError}</p>
+      )}
       {error && <p style="color:var(--state-error)">Не удалось загрузить риски: {error}</p>}
       {!rows && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
@@ -93,7 +122,13 @@ export function DashboardScreen(_props: Record<string, unknown>) {
           <table class="w-full text-sm" style="border-collapse:collapse">
             <thead>
               <tr>
-                {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
+                {[
+                  'Ранг',
+                  'Объект',
+                  'Риск',
+                  local24 ? 'Вероятность участка за 24 ч' : 'Вероятность',
+                  ...(local24 ? ['Выбор для проверки'] : []),
+                ].map((h) => (
                   <th
                     key={h}
                     class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -108,6 +143,8 @@ export function DashboardScreen(_props: Record<string, unknown>) {
               {sorted.map((r) => (
                 <tr
                   key={r.section_id}
+                  data-section-id={r.section_id}
+                  data-local24-selected={local24 && r.risk_rank <= 10 ? 'true' : 'false'}
                   {...rowLink(() => route(`/objects/${r.section_id}`))}
                   style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
                 >
@@ -118,13 +155,19 @@ export function DashboardScreen(_props: Record<string, unknown>) {
                       · {r.section_id}
                     </span>
                   </td>
-                  <td class="px-2 py-2">
+                  <td class="px-2 py-2" data-risk-class={r.risk_class ?? ''}>
                     {словоРиска(r.risk_class)}
                     {r.is_stale && (
-                      <span style="color:var(--state-warning)"> · расчёт не прошёл, показан прошлый</span>
+                      <span style="color:var(--state-warning)">
+                        {' '}
+                        · расчёт не прошёл, показан прошлый
+                      </span>
                     )}
                   </td>
-                  <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
+                  <td class="px-2 py-2 num" data-local24-probability={local24 ? 'true' : undefined}>
+                    {r.probability.toFixed(local24 ? 6 : 4)}
+                  </td>
+                  {local24 && <td class="px-2 py-2">{r.risk_rank <= 10 ? 'В первых 10' : '—'}</td>}
                 </tr>
               ))}
             </tbody>

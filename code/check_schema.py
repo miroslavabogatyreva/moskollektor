@@ -18,7 +18,7 @@
   5. Порядок накатывания: файлы идут по возрастанию номера, и ни один REFERENCES
      или ALTER TABLE не смотрит на таблицу, которой к этому месту ещё нет.
   6. Типы совпадают: колонка ключа и колонка, на которую он смотрит, одного
-     семейства (bigint против integer, text против uuid — это поломка).
+     совместимого семейства (целочисленные int2/int4/int8 совместимы; text против uuid — нет).
   7. Колонки, похожие на внешний ключ (*_id, а также *_code/*_no/*_key, если
      есть таблица с таким именем), но без REFERENCES — либо в списке
      INTENTIONAL с причиной, либо это находка.
@@ -166,8 +166,9 @@ RE_PARTITION = re.compile(r'PARTITION\s+BY\s+(?:RANGE|LIST|HASH)\s*\(\s*([a-z_]+
 CONSTRAINT_WORDS = ("PRIMARY KEY", "UNIQUE", "CHECK", "EXCLUDE", "CONSTRAINT", "FOREIGN")
 
 # Семейства типов: внутри семейства ключ работает, между семействами — нет.
-FAMILY = {"bigserial": "bigint", "serial": "integer", "int": "integer",
-          "int4": "integer", "int8": "bigint", "varchar": "text",
+FAMILY = {"bigserial": "integer", "smallserial": "integer", "serial": "integer",
+          "smallint": "integer", "bigint": "integer", "int": "integer",
+          "int2": "integer", "int4": "integer", "int8": "integer", "varchar": "text",
           "character varying": "text", "character": "char", "bpchar": "char"}
 
 
@@ -430,7 +431,9 @@ def _selfcheck():
         code varchar(4) NOT NULL UNIQUE,
         CHECK (id > 0)""")
     assert pk == ["id"] and uniq == {"code"} and refs == [("run_id", "pred.run", None)], (pk, uniq, refs)
-    assert family("bigserial") == "bigint" and family("varchar(30)") == "text" != family("char(2)")
+    assert all(family(t) == "integer" for t in ("smallint", "integer", "bigint", "int2", "int4", "int8", "smallserial", "serial", "bigserial"))
+    assert family("varchar(30)") == "text" != family("char(2)")
+    assert family("integer") != family("uuid") != family("text")
     m = RE_ALTER_FK.search("ALTER TABLE a.b\n    ADD CONSTRAINT x FOREIGN KEY (c) REFERENCES d.e(f);")
     assert m and m.groups() == ("a.b", "c", "d.e", "f")
     # MOS-116: та же ALTER FK в одну строку — раньше литеральные пробелы между
@@ -457,6 +460,17 @@ def _selfcheck():
     assert strip_comments("name text DEFAULT 'тире -- внутри'") == \
         "name text DEFAULT 'тире -- внутри'"
     assert strip_comments("-- строка целиком комментарий") == ""
+
+    # PostgreSQL accepts cross-width integer FKs (041 is already applied).
+    # Verify the checker still rejects genuinely different key families.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for source_type, expected_error in (("bigint", False), ("smallint", False), ("text", True), ("uuid", True)):
+            (root / "001_fk.sql").write_text(
+                "CREATE SCHEMA foo; CREATE TABLE foo.parent (id integer PRIMARY KEY);"
+                f"CREATE TABLE foo.child (id integer PRIMARY KEY, parent_id {source_type} REFERENCES foo.parent(id));")
+            _, _, issues = check(root)
+            assert any("типы не совпадают" in issue for issue in issues) == expected_error, issues
 
     # MOS-114: схема, объявленная в более ранней миграции, — не находка (017/smvu
     # из 004); схема, не объявленная нигде, — по-прежнему находка. Проверка проверки:

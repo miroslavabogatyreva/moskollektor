@@ -1,0 +1,7 @@
+Captured before the UI change against the live isolated API and original dashboard.
+US-01 сц. 5: первые десять участков имеют локальный прогноз на 24 часа
+Locator: getByText('Архивная проверка: локальный прогноз на 24 часа')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+1 failed (5.4s test duration)

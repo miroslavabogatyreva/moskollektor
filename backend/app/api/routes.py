@@ -65,6 +65,20 @@ async def list_risks(
     return [dict(r) for r in rows]
 
 
+@router.get("/forecast-method")
+async def forecast_method(
+    conn: asyncpg.Connection = Depends(get_conn),
+    _user=Depends(require("risks.read")),
+):
+    """Provenance of the currently published run, not the most recent failed attempt."""
+    row = await conn.fetchrow("""
+        SELECT r.run_id,r.model_version,r.as_of,r.score_metadata
+        FROM pred.run r JOIN (SELECT DISTINCT run_id FROM pred.forecast_current) c USING(run_id)
+        ORDER BY r.run_id DESC LIMIT 1
+    """)
+    return dict(row) if row else None
+
+
 @router.get("/data-status")
 async def data_status(
     conn: asyncpg.Connection = Depends(get_conn),

@@ -1,5 +1,5 @@
 import type { SectionRef } from './rows'
-import type { DataStatus, RiskRow } from './types'
+import type { DataStatus, RiskRow, ForecastMethod } from './types'
 
 // ponytail: вход без пароля, личность берётся из X-User-Login (backend/app/auth/deps.py).
 // Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
@@ -23,6 +23,12 @@ export async function fetchDataStatus(): Promise<DataStatus> {
 // The live customer-tree mapping is shared with the collector map.
 export async function fetchSections(): Promise<SectionRef[]> {
   const r = await fetch('/api/objects', { headers: { 'X-User-Login': API_LOGIN } })
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  return r.json()
+}
+
+export async function fetchForecastMethod(): Promise<ForecastMethod | null> {
+  const r = await fetch('/api/forecast-method', { headers: { 'X-User-Login': API_LOGIN } })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   return r.json()
 }

@@ -227,7 +227,7 @@ async def записать(conn, run_id: int, as_of, horizon_h: int, direction: 
                    участки: list[int], вероятности: list[float],
                    факторы: list[list[dict]],
                    тексты: list[str | None] | None = None,
-                   *, full_log: bool = False, сейчас=None,
+                   *, full_log: bool = False, сейчас=None, spread_enabled: bool = True,
                    политика_записи: dict | None = None,
                    обязательно: frozenset[int] = frozenset()) -> dict:
     """Стадии 6 и 7: прогноз в историю, свёртка в текущее, NOTIFY.
@@ -250,7 +250,7 @@ async def записать(conn, run_id: int, as_of, horizon_h: int, direction: 
     # Ранги считаются ПОСЛЕ разноса: место участка по риску задают разнесённые
     # числа, а не исходные, иначе порядок на дашборде останется объектным.
     пропущено: dict[int, int] = {}
-    if (вес := await веса_участков(conn)):
+    if spread_enabled and (вес := await веса_участков(conn)):
         индексы, вероятности, пропущено = разнести(участки, вероятности, вес)
         участки = [участки[i] for i in индексы]
         факторы = [факторы[i] for i in индексы]
