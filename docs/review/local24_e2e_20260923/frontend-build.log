@@ -1,0 +1,16 @@
+
+> moskollektor-frontend@1.0.0 build
+> tsc -p tsconfig.json --noEmit && vite build
+
+vite v8.3.0 building client environment for production...
+transforming...
+✓ 35 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                     0.74 kB │ gzip:  0.50 kB
+dist/assets/source-sans-3-cyrillic-BMDVbyM7.woff2  18.49 kB
+dist/assets/source-sans-3-latin-BqRLTx4X.woff2     28.74 kB
+dist/assets/index-CGYq9rD8.css                     13.19 kB │ gzip:  3.87 kB
+dist/assets/index-BSM9XA4C.js                      67.32 kB │ gzip: 19.81 kB
+
+✓ built in 168ms

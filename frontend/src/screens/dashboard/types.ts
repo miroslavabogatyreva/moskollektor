@@ -25,3 +25,17 @@ export interface DataStatus {
   // оно описано, чтобы тип не расходился с ответом метода.
   lag_days: number | null
 }
+
+export interface ForecastMethod {
+  run_id: number
+  model_version: string
+  as_of: string
+  score_metadata: {
+    schema_version?: string
+    object_level?: string
+    horizon_h?: number
+    archive?: boolean
+    recommended_budget?: number
+    orders_enabled?: boolean
+  } | null
+}

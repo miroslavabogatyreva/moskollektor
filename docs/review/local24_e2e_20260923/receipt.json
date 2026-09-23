@@ -1,0 +1,96 @@
+{
+  "status": "passed_local_integration_not_quality_acceptance",
+  "pipeline": {
+    "run_id": 5,
+    "status": "done",
+    "sections": 3110,
+    "as_of": "2026-06-15T00:00:00+03:00",
+    "model_version": "lgbm-section-24h-2026.09.23",
+    "probability_parity_max_error": 0.0,
+    "orders_enabled": false,
+    "spread_enabled": false,
+    "publication": {
+      "журнал": 3110,
+      "участков": 3110,
+      "причины": {
+        "full": 3110
+      },
+      "разнос_пропущен": {}
+    },
+    "db_max_error": 0.0,
+    "api_max_error": 0.0,
+    "orders_before_after": {
+      "notifications": 352,
+      "orders": 352
+    },
+    "distinct_probabilities_by_collector": {
+      "5": 54,
+      "6": 63,
+      "7": 145,
+      "8": 84,
+      "9": 53,
+      "11": 114,
+      "12": 81,
+      "15": 44,
+      "3218": 38,
+      "3355": 93,
+      "3359": 67,
+      "3828": 155,
+      "4068": 9,
+      "4356": 40,
+      "4573": 42,
+      "5327": 136
+    },
+    "api_metadata_verified": true
+  },
+  "tests": {
+    "backend_passed": 90,
+    "backend_skipped": 0,
+    "browser_passed": 1,
+    "schema_problems": 0,
+    "unit_metric_tests_passed": 12
+  },
+  "limitations": [
+    "Archived daily section forecast; not production deployment.",
+    "First candidate has not demonstrated superiority to the stronger simple baseline.",
+    "Q2 was previously observed development data, not an independent holdout.",
+    "No customer names, raw rows, credentials, weights or screenshots are included."
+  ],
+  "evidence": [
+    {
+      "file": "acceptance-selfcheck.log",
+      "sha256": "ade63ed72e9dfecca4a7bc04a73e55da5390164b0f25fa77528bbbb1f17e74d8",
+      "bytes": 32
+    },
+    {
+      "file": "backend-tests.log",
+      "sha256": "dd7de77187e5a771926613eba18803636bf40d599cd574d5f9d04920a389dcdc",
+      "bytes": 179
+    },
+    {
+      "file": "browser-green.log",
+      "sha256": "3809be222e5920579e4cae7f577204d91e012fca60bdd3d16e59696e07e6013e",
+      "bytes": 385
+    },
+    {
+      "file": "browser-red.log",
+      "sha256": "604a2fabe438aa09dbbabb63a2189f8cca96813f68cd44ac8d194a6c695b485f",
+      "bytes": 404
+    },
+    {
+      "file": "frontend-build.log",
+      "sha256": "628a4f57b43159697bd60f8789cd0a9229a878e91ab3d732b11fdaa4d41dc3f9",
+      "bytes": 606
+    },
+    {
+      "file": "pipeline.log",
+      "sha256": "47a758dc5dca57a165caaaa12fbd0b0f20819b7928310cb257ab021e830e46f5",
+      "bytes": 710
+    },
+    {
+      "file": "schema.log",
+      "sha256": "fe361081a2dbf8d5051a9c8fd6309cec156ad8ab834f5ff8af18e454f6600d42",
+      "bytes": 139
+    }
+  ]
+}
