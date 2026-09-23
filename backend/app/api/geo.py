@@ -9,8 +9,8 @@ backend/app/ingest/synthetic_geometry.py, здесь только выдача. 
 Формат выбирает `?geometry=geojson|wkt`, а не `?format=`: имя `format` занято
 под `?format=xml` (MOS-44, Ф-80), и XML этот метод отдаёт так же, как остальные.
 GeoJSON уходит с типом application/geo+json, WKT — application/json вида
-`{crs, geometry_source, items: [{section_id, smvu_key, wkt}]}`. В openapi описан
-GeoJSON (формат по умолчанию) — по нему проверка контракта сверяет ключи.
+`{crs, geometry_source, items: [{section_id, smvu_key, wkt}]}`. В openapi описаны
+обе формы, моделями GeoSections и WktSections.
 
 Оба формата отдают одни и те же координаты: у ST_AsGeoJSON по умолчанию девять
 знаков после запятой, у ST_AsText пятнадцать, поэтому точность задана обоим
@@ -62,13 +62,31 @@ class SectionFeature(BaseModel):
 
 
 class GeoSections(BaseModel):
+    """?geometry=geojson — FeatureCollection, тип application/geo+json."""
+
     type: str
     crs: str
     geometry_source: str
     features: list[SectionFeature]
 
 
-@router.get("/geo/sections", response_model=GeoSections)
+class WktSection(BaseModel):
+    section_id: int
+    smvu_key: str
+    wkt: str
+
+
+class WktSections(BaseModel):
+    """?geometry=wkt — строка WKT на участок, тип application/json."""
+
+    crs: str
+    geometry_source: str
+    items: list[WktSection]
+
+
+# Обе формы в /openapi.json: объединение, а не одна модель — у двух форматов
+# разные ключи верхнего уровня (features против items).
+@router.get("/geo/sections", response_model=GeoSections | WktSections)
 async def geo_sections(
     geometry: str = Query(
         "geojson", pattern="^(geojson|wkt)$", description="geojson или wkt"
