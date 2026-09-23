@@ -1202,6 +1202,11 @@ CREATE TABLE ref.object_xref (
                             ref.feedback_reason: пять причин ложного
                             прогноза, как в строке приёмки Ф-35;
                             удалена model_error «Модель ошиблась»
+040_data_outage_reason.sql  smvu.data_outage.reason: export_gap — тишина
+                            выгрузки, vendor_migration — 2021 год по
+                            Москве, заказчик просит исключить из анализа.
+                            spans_outage ставится только по export_gap
+                            (строка плана 2.12, MOS-87)
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
