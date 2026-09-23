@@ -131,7 +131,7 @@ def _selfcheck():
         conn = _FakeConn(
             users={"disp1": u("disp1", "dispatcher")},
             grants={("dispatcher", "risks.read"), ("admin", "audit.read")},
-            scope={"tech1": [10, 11], "disp1": [10, 11, 12]},
+            scope={"tech1": [10, 11], "tech2": [10, 11, 20], "disp1": [10, 11, 12, 20, 21]},
         )
 
         try:
@@ -188,6 +188,14 @@ def _selfcheck():
             assert e.status_code == 403
         else:
             raise AssertionError("чужой участок должен дать 403")
+
+        # Два узла у одного техника: объединение, строго между tech1 и всем парком.
+        # Само объединение делает SQL (EXISTS по ref.user_scope) — здесь проверяется
+        # только проводка; на живой базе его меряет check_scope в delivery/check-all.sh
+        # (tech2: 79 + 9 = 88 при 3 173).
+        tech2 = await видимые_участки(u("tech2", "technician"), conn)
+        assert set(await видимые_участки(tech, conn)) < set(tech2) < set(await видимые_участки(u("disp1", "dispatcher"), conn))
+        await проверить_участок(u("tech2", "technician"), conn, 20)
 
         # Несуществующий объект: технику 403, как чужой; видящему всё — молчание (404 даст метод).
         try:

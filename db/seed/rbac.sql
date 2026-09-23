@@ -42,13 +42,15 @@ INSERT INTO ref.role_permission (role_code, permission_code) VALUES
 
 ON CONFLICT (role_code, permission_code) DO NOTHING;
 
--- Четыре тестовые записи, по одной на роль. analyst1 и engineer1 из прежнего
+-- Четыре тестовые записи, по одной на роль, и пятая — tech2 для проверки сложения
+-- областей видимости. analyst1 и engineer1 из прежнего
 -- сида 044 отключила (is_active = false), строки остались ради внешних ключей.
 INSERT INTO ref.app_user (login, full_name, auth_source) VALUES
     ('dispatcher1', 'Тестовый диспетчер',     'local'),
     ('ods1',        'Тестовый диспетчер ОДС', 'local'),
     ('tech1',       'Тестовый техник',        'local'),
-    ('admin1',      'Тестовый администратор', 'local')
+    ('admin1',      'Тестовый администратор', 'local'),
+    ('tech2',       'Тестовый техник двух коллекторов', 'local')
 
 ON CONFLICT (login) DO UPDATE SET
     full_name   = excluded.full_name,
@@ -58,15 +60,22 @@ INSERT INTO ref.user_role (login, role_code) VALUES
     ('dispatcher1', 'dispatcher'),
     ('ods1',        'ods_dispatcher'),
     ('tech1',       'technician'),
-    ('admin1',      'admin')
+    ('admin1',      'admin'),
+    ('tech2',       'technician')
 
 ON CONFLICT DO NOTHING;
 
 -- Область видимости. Район в выгрузке один (5773 «Район по эксплуатации»), поэтому
 -- диспетчер района видит все 3 173 участка. Техник — коллектор 6 «объект Бета»:
 -- 79 участков по УЧАСТКИ_КОЛЛЕКТОРА и 11 заявок из 303 на 23.09.2026.
+-- tech2 — два узла, коллекторы 6 «объект Бета» и 4068 «объект Сигма»: объединение
+-- обязано дать 79 + 9 = 88 участков — строго больше, чем у tech1, и строго меньше
+-- 3 173. Пара «техник + диспетчер района» дала бы 3 173 и прошла бы проверку
+-- даже при сломанном объединении, потому что район в выгрузке один.
 INSERT INTO ref.user_scope (login, object_id) VALUES
     ('dispatcher1', 5773),
-    ('tech1',       6)
+    ('tech1',       6),
+    ('tech2',       6),
+    ('tech2',       4068)
 
 ON CONFLICT DO NOTHING;
