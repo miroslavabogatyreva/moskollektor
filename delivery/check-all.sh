@@ -503,6 +503,18 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-223 (Q4.17), нашла 98 при сверке хешей для MOS-221: ORDER BY n.due_at
+# у /api/orders без второго ключа отдавал разный набор id на странице у
+# заявок с одинаковым сроком. Проверка проходит страницы orders/forecasts/
+# audit/channels и требует множество id без повторов (у forecasts — без
+# повторов внутри первых пяти страниц, весь день без этого стоил бы 108
+# запросов на каждый прогон).
+if [ -n "${BASE_URL:-}" ]; then
+  run "М-06, М-16"  "постраничность без повторов и пропусков" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_stable_paging.py
+else
+  skip_msg "М-06, М-16" "постраничность без повторов и пропусков — задайте BASE_URL"
+fi
+
 # MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
 # backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
 # что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
