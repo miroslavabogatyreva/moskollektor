@@ -657,6 +657,77 @@ else
   skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
 fi
 
+# Геометрия участков в GeoJSON и WKT (MOS-45, Q4.8). Ф-81 просит геометрию одного
+# участка в обоих форматах, совпадение координат и названную систему координат.
+# Координаты сверяем разбором обоих ответов, а не глазами. Участков с геометрией
+# ods1 получает столько же, сколько строк /api/risks, tech1 — только свои.
+# С DATABASE_URL: geo_object_id у всех участков ref.object_xref, 16 коллекторов
+# и 32 части MultiLineString, длина каждого участка отличается от 10 м по пикетам
+# не больше чем на 1 %.
+check_geo() {
+  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" -c '
+import json, os, re, ssl, urllib.error, urllib.request
+base = os.environ["BASE_URL"].rstrip("/")
+ctx = ssl._create_unverified_context() if "-k" in os.environ["CURL_OPTS"].split() else None
+
+def get(path, login):
+    req = urllib.request.Request(base + path, headers={"X-User-Login": login})
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=120) as r:
+            return r.status, r.headers.get("Content-Type", ""), json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, "", None
+
+code, ctype, gj = get("/api/geo/sections?format=geojson&section_id=1490", "ods1")
+assert code == 200, f"geojson: {code}"
+assert ctype.startswith("application/geo+json"), f"geojson: тип {ctype}"
+code, _, wk = get("/api/geo/sections?format=wkt&section_id=1490", "ods1")
+assert code == 200, f"wkt: {code}"
+for name, body in (("geojson", gj), ("wkt", wk)):
+    crs, src = body.get("crs"), body.get("geometry_source")
+    assert crs == "EPSG:4326", f"{name}: crs {crs}"
+    assert src == "synthetic", f"{name}: geometry_source {src}"
+a = [x for pt in gj["features"][0]["geometry"]["coordinates"] for x in pt]
+b = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", wk["items"][0]["wkt"])]
+assert a == b, f"координаты разошлись: geojson {a}, wkt {b}"
+
+n_risks = len(get("/api/risks", "ods1")[2])
+n_geo = len(get("/api/geo/sections?format=geojson", "ods1")[2]["features"])
+assert n_geo == n_risks, f"геометрия у {n_geo} участков, рисков {n_risks}"
+n_tech = len(get("/api/geo/sections?format=wkt", "tech1")[2]["items"])
+n_tech_risks = len(get("/api/risks", "tech1")[2])
+assert n_tech == n_tech_risks < n_geo, f"tech1: геометрия {n_tech}, риски {n_tech_risks}, всего {n_geo}"
+extra = ""
+if os.environ.get("DATABASE_URL"):
+    import asyncio, asyncpg
+    async def db():
+        c = await asyncpg.connect(os.environ["DATABASE_URL"])
+        r = await c.fetchrow("""
+            SELECT (SELECT count(*) FROM ref.object_xref WHERE geo_object_id IS NULL) AS без_геометрии,
+                   (SELECT count(*) FROM geo.geo_object WHERE kind_code = $1) AS коллекторов,
+                   (SELECT sum(ST_NumGeometries(geom)) FROM geo.geo_object WHERE kind_code = $1) AS частей,
+                   (SELECT max(abs(ST_Length(geom::geography) - 10) / 10 * 100)
+                      FROM geo.geo_object WHERE kind_code = $2) AS худшее
+        """, "collector", "collector_section")
+        await c.close()
+        return r
+    r = asyncio.run(db())
+    bez, kol, chast, hud = r["без_геометрии"], r["коллекторов"], r["частей"], r["худшее"]
+    assert bez == 0, f"без геометрии {bez} участков"
+    assert kol == 16 and chast == 32, f"коллекторов {kol}, частей {chast}"
+    assert hud <= 1, f"длина участка разошлась с пикетами на {hud:.4f} %"
+    extra = f"; коллекторов {kol}, частей {chast}, худшее отклонение длины {hud:.4f} %"
+print(f"участок 1490: координаты GeoJSON = WKT ({len(a) // 2} точки), EPSG:4326, synthetic; "
+      f"геометрия у {n_geo} участков из {n_risks}, tech1 {n_tech}{extra}")
+'
+}
+
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-81"        "геометрия GeoJSON = WKT" check_geo
+else
+  skip_msg "Ф-81" "геометрия GeoJSON и WKT — задайте BASE_URL"
+fi
+
 # Доступность таблиц (НФ-92, часть III). Проверяет не нажатия, а дерево
 # доступности: заголовков columnheader столько же, сколько <th> в <thead>;
 # строк row столько же, сколько строк <tbody> плюс шапка; ячеек больше нуля;
