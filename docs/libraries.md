@@ -98,11 +98,13 @@ JS без метаданных пакета, заглянуть внутрь г�
 оттуда нечем, поэтому здесь предмет проверки — дерево `npm ci` (сама стадия
 сборки, `docs/HLD.md` разд. 7.4), а не то, что получает заказчик.
 
-`dependencies` и `devDependencies` вместе, 100 пакетов. В шипуемый бандл
+`dependencies` и `devDependencies` вместе, 103 пакета. В шипуемый бандл
 (`frontend/dist`, копируется в образ `nginx` — `docs/HLD.md` разд. 7.4) из них
 попадают только **`preact`** и **`preact-router`**: остальное — инструменты сборки
 (Babel, Rolldown, esbuild-цепочка Vite, TypeScript, Tailwind, Prettier),
-транспилируют и бандлят код, в собранные файлы сами не попадают — та же логика,
+транспилируют и бандлят код, в собранные файлы сами не попадают; `@playwright/test`
+с `playwright` и `playwright-core` (Apache-2.0, с 22.09.2026) гоняют E2E-тесты
+из `frontend/e2e/` и в сборку не входят вовсе — та же логика,
 что у `ruff`/`prettier` в `docs/HLD.md` разд. 7.1.2.
 
 Одна лицензия семейства копилефт — `lightningcss` и его нативный биндинг,
@@ -139,6 +141,7 @@ GPL, LGPL и AGPL — MPL-2.0 в него не входит, и правило �
 | @jridgewell/sourcemap-codec | 1.6.0 | MIT |
 | @jridgewell/trace-mapping | 0.3.31 | MIT |
 | @oxc-project/types | 0.149.0 | MIT |
+| @playwright/test | 1.63.0 | Apache-2.0 |
 | @preact/preset-vite | 2.10.6 | MIT |
 | @prefresh/babel-plugin | 0.5.4 | MIT |
 | @prefresh/core | 1.5.11 | MIT |
@@ -193,6 +196,8 @@ GPL, LGPL и AGPL — MPL-2.0 в него не входит, и правило �
 | nth-check | 2.1.1 | BSD-2-Clause |
 | picocolors | 1.1.1 | ISC |
 | picomatch | 4.0.7 | MIT |
+| playwright | 1.63.0 | Apache-2.0 |
+| playwright-core | 1.63.0 | Apache-2.0 |
 | postcss | 8.5.28 | MIT |
 | preact | 10.29.8 | MIT |
 | preact-router | 4.1.2 | MIT |
