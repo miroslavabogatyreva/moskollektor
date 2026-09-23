@@ -12,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 
 from app.api.audit import router as audit_router
+from app.api.geo import router as geo_router
 from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
@@ -25,6 +26,7 @@ app.include_router(orders_router)
 app.include_router(audit_router)
 app.include_router(objects_router)
 app.include_router(settings_router)
+app.include_router(geo_router)
 
 
 @app.get("/health")
