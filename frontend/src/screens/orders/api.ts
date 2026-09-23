@@ -36,7 +36,8 @@ export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
 
 export async function fetchOrder(orderId: string): Promise<OrderDetail | null> {
   const r = await fetch(`/api/orders/${orderId}`, { headers: { 'X-User-Login': API_LOGIN } })
-  if (r.status === 404) return null
+  // 403 — чужая заявка или id вне области видимости (MOS-107), для экрана то же, что 404.
+  if (r.status === 404 || r.status === 403) return null
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()
   if (!ожидаетсяКарточка(body)) {
