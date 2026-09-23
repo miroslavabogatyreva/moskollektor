@@ -17,15 +17,22 @@ n.due_at` без второго ключа: у заявок с одинаков�
 Стабильная сортировка даёт множество размером ровно `total` при любом числе
 проходов.
 
-**Пять методов, а не пять из задачи Jira — другой состав.** `GET
-/api/orders`, `GET /api/forecasts`, `GET /api/audit`, `GET
-/api/objects/{id}/channels`, `GET /api/tech-events` (MOS-42) — у всех есть
-`limit`/`offset`. **`GET /api/objects/{id}/readings` в задаче названа
+**Четыре метода, а не пять из задачи.** `GET /api/orders`, `GET
+/api/forecasts`, `GET /api/audit`, `GET /api/objects/{id}/channels` — у всех
+есть `limit`/`offset`. **`GET /api/objects/{id}/readings` в задаче названа
 пятой ошибочно: у метода нет ни `limit`, ни `offset` вовсе** (`from`/`to` —
 обязательные даты окна, не постраничность) — grep по
 `backend/app/api/objects.py` подтверждает, страницы у неё нет и стабилизировать
-нечего; `tech-events` встал на её место. `GET /api/risks` тоже не в списке:
-она отдаёт всё целиком, без параметров.
+нечего. `GET /api/risks` тоже не в списке: она отдаёт всё целиком, без
+параметров.
+
+**`GET /api/tech-events` (MOS-42, 50) сюда не входит нарочно.** Та же
+болезнь там есть и уже починена в ветке `fix/mos42-alerts` — `ORDER BY
+read_time` без второго ключа, у read_time бывают повторы (несколько каналов
+пишут в одну секунду), правка — `m.journal_id` вторым ключом. Но пока эта
+ветка не слита, строка про неё в общем `check-all.sh` красит прогон каждой
+другой задачи `KeyError`/404, и её быстро перестанут читать (нашёл
+оркестратор). Метод добавит 50 в своей ветке.
 
 `GET /api/forecasts` и `GET /api/audit` берутся с фиксированным `to` в
 прошлом — иначе журнал растёт за секунды многостраничного прохода (пульс раз
@@ -76,10 +83,6 @@ ROWS = "М-06, М-16"
     # (см. MOS-151 в backend/app/api/objects.py): маленький список не
     # заставит метод отдать больше одной страницы.
     ("/api/objects/2204/channels", "items", "channel_id", 10, "admin1", None),
-    # MOS-42 (50): тот же дефект нашла и починила сама — ORDER BY read_time
-    # без второго ключа, у read_time бывают повторы (несколько каналов пишут
-    # в одну секунду). Второй ключ — m.journal_id, он же ключ id здесь.
-    ("/api/tech-events", "items", "journal_id", 10, "admin1", None),
 ]
 
 
@@ -106,12 +109,19 @@ def множество_без_повторов(total, ids, частично):
     return True, f"{total} id, все разные, повторов и пропусков нет"
 
 
+class ОтветНеOK(Exception):
+    """Код ответа не 200 — печатаем код, а не трассу KeyError на отсутствующем total."""
+
+
 def curl(url, login):
-    cmd = ["curl", "-s"]
+    cmd = ["curl", "-s", "-o", "-", "-w", "\n%{http_code}"]
     cmd += os.environ.get("CURL_OPTS", "").split()
     cmd += ["-H", f"X-User-Login: {login}", url]
     out = subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout
-    return json.loads(out)
+    body, _, код = out.rpartition("\n")
+    if код != "200":
+        raise ОтветНеOK(f"код {код}")
+    return json.loads(body)
 
 
 def пройти_все_страницы(base, path, items_key, id_key, limit, login, max_pages):
@@ -170,6 +180,10 @@ def main():
     for path, items_key, id_key, limit, login, max_pages in МЕТОДЫ:
         try:
             total, ids, частично = пройти_все_страницы(base, path, items_key, id_key, limit, login, max_pages)
+        except ОтветНеOK as e:
+            print(f"{ROWS} СБОЙ {path}: {e}")
+            всё_ок = False
+            continue
         except Exception as e:
             print(f"{ROWS} СБОЙ {path}: не прошли страницы — {type(e).__name__}: {e}")
             всё_ок = False
