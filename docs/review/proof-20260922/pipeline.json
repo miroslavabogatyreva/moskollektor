@@ -1,0 +1,14 @@
+{
+  "score_s": 35.318,
+  "worker_s": 2.887,
+  "score_worker_api_s": 38.306,
+  "sections": 3172,
+  "collectors": 16,
+  "warnings": 176,
+  "new_orders": 352,
+  "horizon_h": 720,
+  "model_version": "lgbm-v3-collector-2026.09.22",
+  "all_api_values_match_score": true,
+  "under_300s": true,
+  "scope": "Local real archive score; PostgreSQL all June readings; scheduling and ingest excluded"
+}
