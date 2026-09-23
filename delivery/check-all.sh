@@ -661,27 +661,41 @@ fi
 # участка в обоих форматах, совпадение координат и названную систему координат.
 # Координаты сверяем разбором обоих ответов, а не глазами. Участков с геометрией
 # ods1 получает столько же, сколько строк /api/risks, tech1 — только свои.
-# С DATABASE_URL: geo_object_id у всех участков ref.object_xref, 16 коллекторов
-# и 32 части MultiLineString, длина каждого участка отличается от 10 м по пикетам
-# не больше чем на 1 %.
+# Формат — ?geometry=, а ?format=xml и Accept: application/xml отдают XML (Ф-80).
+# С DATABASE_URL: geo_object_id у всех участков ref.object_xref; коллекторов
+# и частей MultiLineString столько, сколько дают данные — коллекторы участков
+# по УЧАСТКИ_КОЛЛЕКТОРА и пары «коллектор, префикс» (сегодня 16 и 32); длина
+# каждого участка отличается от 10 м по пикетам не больше чем на 1 %.
 check_geo() {
-  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" -c '
+  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
 import json, os, re, ssl, urllib.error, urllib.request
 base = os.environ["BASE_URL"].rstrip("/")
 ctx = ssl._create_unverified_context() if "-k" in os.environ["CURL_OPTS"].split() else None
 
-def get(path, login):
-    req = urllib.request.Request(base + path, headers={"X-User-Login": login})
+def raw(path, login, accept=None):
+    h = {"X-User-Login": login}
+    if accept:
+        h["Accept"] = accept
+    req = urllib.request.Request(base + path, headers=h)
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=120) as r:
-            return r.status, r.headers.get("Content-Type", ""), json.load(r)
+            return r.status, r.headers.get("Content-Type", ""), r.read()
     except urllib.error.HTTPError as e:
-        return e.code, "", None
+        return e.code, "", b""
 
-code, ctype, gj = get("/api/geo/sections?format=geojson&section_id=1490", "ods1")
+def get(path, login):
+    code, ctype, body = raw(path, login)
+    return code, ctype, json.loads(body) if code == 200 else None
+
+code, ctype, gj = get("/api/geo/sections?geometry=geojson&section_id=1490", "ods1")
 assert code == 200, f"geojson: {code}"
 assert ctype.startswith("application/geo+json"), f"geojson: тип {ctype}"
-code, _, wk = get("/api/geo/sections?format=wkt&section_id=1490", "ods1")
+for path, accept in (("/api/geo/sections?section_id=1490&format=xml", None),
+                     ("/api/geo/sections?section_id=1490", "application/xml")):
+    code, ctype, body = raw(path, "ods1", accept)
+    assert code == 200 and ctype.startswith("application/xml") and b"FeatureCollection" in body, \
+        f"XML {path} Accept={accept}: {code} {ctype}"
+code, _, wk = get("/api/geo/sections?geometry=wkt&section_id=1490", "ods1")
 assert code == 200, f"wkt: {code}"
 for name, body in (("geojson", gj), ("wkt", wk)):
     crs, src = body.get("crs"), body.get("geometry_source")
@@ -692,16 +706,23 @@ b = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", wk["items"][0]["wkt"])]
 assert a == b, f"координаты разошлись: geojson {a}, wkt {b}"
 
 n_risks = len(get("/api/risks", "ods1")[2])
-n_geo = len(get("/api/geo/sections?format=geojson", "ods1")[2]["features"])
+n_geo = len(get("/api/geo/sections?geometry=geojson", "ods1")[2]["features"])
 assert n_geo == n_risks, f"геометрия у {n_geo} участков, рисков {n_risks}"
-n_tech = len(get("/api/geo/sections?format=wkt", "tech1")[2]["items"])
+n_tech = len(get("/api/geo/sections?geometry=wkt", "tech1")[2]["items"])
 n_tech_risks = len(get("/api/risks", "tech1")[2])
 assert n_tech == n_tech_risks < n_geo, f"tech1: геометрия {n_tech}, риски {n_tech_risks}, всего {n_geo}"
 extra = ""
 if os.environ.get("DATABASE_URL"):
     import asyncio, asyncpg
+    from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
     async def db():
         c = await asyncpg.connect(os.environ["DATABASE_URL"])
+        ждём = await c.fetchrow(f"""
+            WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+            SELECT count(DISTINCT u.collector_id) AS коллекторов,
+                   count(DISTINCT (u.collector_id, split_part(x.smvu_key, $1, 1))) AS частей
+              FROM u JOIN ref.object_xref x USING (section_id)
+        """, ":")
         r = await c.fetchrow("""
             SELECT (SELECT count(*) FROM ref.object_xref WHERE geo_object_id IS NULL) AS без_геометрии,
                    (SELECT count(*) FROM geo.geo_object WHERE kind_code = $1) AS коллекторов,
@@ -710,11 +731,12 @@ if os.environ.get("DATABASE_URL"):
                       FROM geo.geo_object WHERE kind_code = $2) AS худшее
         """, "collector", "collector_section")
         await c.close()
-        return r
-    r = asyncio.run(db())
+        return r, ждём
+    r, ждём = asyncio.run(db())
     bez, kol, chast, hud = r["без_геометрии"], r["коллекторов"], r["частей"], r["худшее"]
+    ж_kol, ж_chast = ждём["коллекторов"], ждём["частей"]
     assert bez == 0, f"без геометрии {bez} участков"
-    assert kol == 16 and chast == 32, f"коллекторов {kol}, частей {chast}"
+    assert (kol, chast) == (ж_kol, ж_chast), f"коллекторов {kol}, частей {chast}; по данным {ж_kol} и {ж_chast}"
     assert hud <= 1, f"длина участка разошлась с пикетами на {hud:.4f} %"
     extra = f"; коллекторов {kol}, частей {chast}, худшее отклонение длины {hud:.4f} %"
 print(f"участок 1490: координаты GeoJSON = WKT ({len(a) // 2} точки), EPSG:4326, synthetic; "
