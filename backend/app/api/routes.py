@@ -211,7 +211,7 @@ async def list_forecasts(
         FROM pred.forecast f
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
-        ORDER BY r.started_at DESC, f.risk_rank
+        ORDER BY r.started_at DESC, f.risk_rank, f.forecast_id
         LIMIT $4 OFFSET $5
         """,
         from_, to_exclusive, участки, limit, offset,

@@ -50,7 +50,7 @@ LIST_SQL = f"""
 SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
- ORDER BY n.due_at
+ ORDER BY n.due_at, n.id, wo.id
  LIMIT $2 OFFSET $3
 """
 
