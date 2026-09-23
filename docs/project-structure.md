@@ -187,7 +187,10 @@ frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на ис�
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
 delivery/           check-all.sh — один прогон всех проверок;
                     check-a11y.mjs — доступность таблиц настоящим браузером (НФ-92),
-                    единственная проверка, которая не живёт внутри образа api;
+                    check-map.mjs — экран схемы тем же браузером (М-05);
+                    обе не живут внутри образа api;
+                    check-api-contract.py — условия готовности Q4 по каждому GET
+                    из живого /openapi.json: отказ без входа, схема, пустота, журнал;
                     презентация и страница сдачи
 ```
 
