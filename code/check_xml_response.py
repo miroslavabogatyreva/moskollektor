@@ -24,9 +24,28 @@ import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 ROWS = "Ф-80"
-ЭНДПОИНТЫ = ["/api/risks", "/api/forecasts?limit=1000"]
+МСК = ZoneInfo("Europe/Moscow")
+
+# /api/forecasts без границы по времени мигает: JSON и XML берутся двумя
+# отдельными запросами, и если между ними worker запишет прогон, вторая
+# выборка окажется на строку длиннее первой (нашла 59, MOS-44). Фиксируем
+# окно параметром to на вчера — worker пишет только на now(), в прошлое
+# задним числом не дописывает, так что вчерашнее окно между двумя запросами
+# не шелохнётся. Дата — по московскому времени сервера, а не по часовому
+# поясу того, кто запускает проверку.
+_ВЧЕРА = (datetime.now(МСК).date() - timedelta(days=1)).isoformat()
+# 3146 — участок с inventory_no IS NULL (проверено на стенде 23.09.2026):
+# без него самопроверка правила null никогда не встречает настоящий null
+# и остаётся зелёной, даже сломай кто-нибудь nil="true" целиком (нашла 59).
+ЭНДПОИНТЫ = [
+    "/api/risks",
+    f"/api/forecasts?limit=1000&to={_ВЧЕРА}",
+    "/api/objects/3146",
+]
 
 
 def найти_ребёнка(элемент, ключ):
@@ -39,42 +58,48 @@ def найти_ребёнка(элемент, ключ):
 
 
 def сравнить(элемент, значение, путь):
-    """Возвращает (число сверенных листьев, список расхождений)."""
+    """Возвращает (число сверенных листьев, из них null-листьев, расхождения)."""
     if isinstance(значение, dict):
-        листьев, ошибки = 0, []
+        листьев, null_листьев, ошибки = 0, 0, []
         for ключ, вложенное in значение.items():
             ребёнок = найти_ребёнка(элемент, ключ)
             if ребёнок is None:
                 ошибки.append(f"{путь}: нет элемента для ключа {ключ!r}")
                 continue
-            n, e = сравнить(ребёнок, вложенное, f"{путь}.{ключ}")
+            n, nn, e = сравнить(ребёнок, вложенное, f"{путь}.{ключ}")
             листьев += n
+            null_листьев += nn
             ошибки += e
-        return листьев, ошибки
+        return листьев, null_листьев, ошибки
     if isinstance(значение, list):
         дети = [ч for ч in элемент if ч.tag == "item"]
         if len(дети) != len(значение):
-            return 0, [
-                f"{путь}: в JSON {len(значение)} элементов, в XML {len(дети)} <item>"
-            ]
-        листьев, ошибки = 0, []
+            return (
+                0,
+                0,
+                [f"{путь}: в JSON {len(значение)} элементов, в XML {len(дети)} <item>"],
+            )
+        листьев, null_листьев, ошибки = 0, 0, []
         for i, (ч, v) in enumerate(zip(дети, значение)):
-            n, e = сравнить(ч, v, f"{путь}[{i}]")
+            n, nn, e = сравнить(ч, v, f"{путь}[{i}]")
             листьев += n
+            null_листьев += nn
             ошибки += e
-        return листьев, ошибки
+        return листьев, null_листьев, ошибки
     if значение is None:
         if элемент.get("nil") != "true":
-            return 0, [
-                f'{путь}: JSON null, а в XML нет nil="true" (текст {элемент.text!r})'
-            ]
-        return 1, []
+            return (
+                0,
+                0,
+                [f'{путь}: JSON null, а в XML нет nil="true" (текст {элемент.text!r})'],
+            )
+        return 1, 1, []
     ожидаем = (
         "true" if значение is True else "false" if значение is False else str(значение)
     )
     if (элемент.text or "") != ожидаем:
-        return 0, [f"{путь}: JSON {значение!r}, а в XML текст {элемент.text!r}"]
-    return 1, []
+        return 0, 0, [f"{путь}: JSON {значение!r}, а в XML текст {элемент.text!r}"]
+    return 1, 0, []
 
 
 def _selfcheck():
@@ -83,20 +108,21 @@ def _selfcheck():
         '<response><a>1</a><b nil="true"/><c><item>1</item><item>2</item></c>'
         '<field name="3bad">x</field></response>'
     )
-    n, e = сравнить(xml_ok, json_ok, "response")
+    n, nn, e = сравнить(xml_ok, json_ok, "response")
     assert e == [], f"верный документ не должен давать расхождений: {e}"
     assert n == 5, f"пять листьев: a, b, c[0], c[1], field/3bad — получили {n}"
+    assert nn == 1, f"из них один null (b) — получили {nn}"
 
     xml_dropped_field = ET.fromstring("<response><a>1</a></response>")
-    n, e = сравнить(xml_dropped_field, {"a": 1, "b": 2}, "response")
+    n, nn, e = сравнить(xml_dropped_field, {"a": 1, "b": 2}, "response")
     assert e and "b" in e[0], "потерянный ключ обязан попасть в список расхождений"
 
     xml_bad_null = ET.fromstring("<response><a>x</a></response>")
-    n, e = сравнить(xml_bad_null, {"a": None}, "response")
+    n, nn, e = сравнить(xml_bad_null, {"a": None}, "response")
     assert e, 'null в JSON без nil="true" в XML — расхождение'
 
     xml_bad_list = ET.fromstring("<response><c><item>1</item></c></response>")
-    n, e = сравнить(найти_ребёнка(xml_bad_list, "c"), [1, 2], "response.c")
+    n, nn, e = сравнить(найти_ребёнка(xml_bad_list, "c"), [1, 2], "response.c")
     assert e, "разное число элементов списка — расхождение"
 
     print("самопроверка ok: совпадение, потерянный ключ, битый null, битый список")
@@ -119,7 +145,7 @@ def main():
         print(f"{ROWS} СБОЙ: не задан BASE_URL")
         return 1
 
-    всего_листьев, все_ошибки = 0, []
+    всего_листьев, всего_null, все_ошибки = 0, 0, []
     for путь_запроса in ЭНДПОИНТЫ:
         url = f"{base}{путь_запроса}"
         тело_json = curl(url, "application/json")
@@ -132,10 +158,14 @@ def main():
                 f"{путь_запроса}: ответ не разобрался — {type(e).__name__}: {e}"
             )
             continue
-        листьев, ошибки = сравнить(корень, значение, путь_запроса)
+        листьев, null_листьев, ошибки = сравнить(корень, значение, путь_запроса)
         всего_листьев += листьев
+        всего_null += null_листьев
         все_ошибки += [f"{путь_запроса}: {ош}" for ош in ошибки]
-        print(f"  {путь_запроса}: {листьев} листьев сверено, {len(ошибки)} расхождений")
+        print(
+            f"  {путь_запроса}: {листьев} листьев сверено "
+            f"(из них {null_листьев} null), {len(ошибки)} расхождений"
+        )
 
     if все_ошибки:
         print(
@@ -147,7 +177,14 @@ def main():
     if всего_листьев == 0:
         print(f"{ROWS} СБОЙ: сверять было нечего — 0 листьев")
         return 1
-    print(f"{ROWS} OK: {всего_листьев} листьев сверено, 0 расхождений")
+    if всего_null == 0:
+        print(
+            f'{ROWS} СБОЙ: 0 null-листьев — правило про nil="true" на живых данных не проверено'
+        )
+        return 1
+    print(
+        f"{ROWS} OK: {всего_листьев} листьев сверено, из них {всего_null} null, 0 расхождений"
+    )
     return 0
 
 

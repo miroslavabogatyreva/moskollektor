@@ -16,7 +16,7 @@ from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
-from app.api.xml import to_xml
+from app.api.xml import to_xml, wants_xml
 from app.db import get_pool
 
 app = FastAPI(title="Москоллектор API")
@@ -84,8 +84,9 @@ async def convert_to_xml(request: Request, call_next):
     как есть.
     """
     response = await call_next(request)
-    wants_xml = request.query_params.get("format") == "xml" or "application/xml" in request.headers.get("accept", "")
-    if not wants_xml or "application/json" not in response.headers.get("content-type", ""):
+    if not wants_xml(request.headers.get("accept", ""), request.query_params.get("format")):
+        return response
+    if "application/json" not in response.headers.get("content-type", ""):
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
     xml_body = to_xml(json.loads(body))
