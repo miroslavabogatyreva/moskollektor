@@ -93,11 +93,17 @@ async def видимые_участки(user, conn) -> list[int] | None:
     return [r["section_id"] for r in await conn.fetch(ВИДИМЫЕ_УЧАСТКИ_SQL, user["login"])]
 
 
-async def проверить_участок(user, conn, section_id: int) -> None:
-    """403 на участок вне области видимости: карточка, прогноз, заявка."""
+async def проверить_участок(user, conn, section_id: int | None) -> None:
+    """403 на участок вне области видимости: карточка, прогноз, заявка.
+
+    Вызывать ДО ответа 404. section_id=None — объекта нет: тому, кто видит
+    не весь парк, это тоже 403, иначе по разнице 404 и 403 он узнал бы,
+    существует ли чужой объект. Тому, кто видит всё, функция молчит,
+    и 404 отвечает вызывающий.
+    """
     участки = await видимые_участки(user, conn)
-    if участки is not None and section_id not in участки:
-        raise HTTPException(403, f"участок {section_id} вне области видимости {user['login']}")
+    if участки is not None and (section_id is None or section_id not in участки):
+        raise HTTPException(403, f"объект вне области видимости {user['login']}")
 
 
 def _selfcheck():
@@ -182,6 +188,15 @@ def _selfcheck():
             assert e.status_code == 403
         else:
             raise AssertionError("чужой участок должен дать 403")
+
+        # Несуществующий объект: технику 403, как чужой; видящему всё — молчание (404 даст метод).
+        try:
+            await проверить_участок(tech, conn, None)
+        except HTTPException as e:
+            assert e.status_code == 403
+        else:
+            raise AssertionError("несуществующий объект у техника должен дать 403, а не 404")
+        await проверить_участок(u("ods1", "ods_dispatcher"), conn, None)
 
         # dispatcher и technician без строк в ref.user_scope видят пусто, а не всё.
         assert await видимые_участки(u("lost", "dispatcher"), conn) == []
