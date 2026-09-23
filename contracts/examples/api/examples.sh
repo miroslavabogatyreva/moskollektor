@@ -102,6 +102,18 @@ check "GET /api/risks (dispatcher1)"                        200 -H "X-User-Login
 # (PUT /api/settings/risk_threshold_high). Условие на "high" краснело бы на
 # исправном коде на следующий же день после того, как порог подняли.
 check_contains "GET /api/risks отдаёт risk_class" '"risk_class"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks"
+
+# Ф-80 (MOS-44): выбор формата вызывающей системой — заголовком Accept
+# и параметром ?format=xml, оба на любом GET-методе, который отвечает JSON
+# (backend/app/api/main.py, middleware convert_to_xml). Здесь — код ответа
+# и форма; листовая сверка значений XML против JSON — code/check_xml_response.py.
+check "GET /api/risks (Accept: application/xml)"            200 -H "X-User-Login: dispatcher1" -H "Accept: application/xml" "$BASE_URL/api/risks"
+check_contains "GET /api/risks Accept:xml отдаёт XML" '<risk_class>' -H "X-User-Login: dispatcher1" -H "Accept: application/xml" "$BASE_URL/api/risks"
+check_contains "GET /api/risks ?format=xml отдаёт XML" '<risk_class>' -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks?format=xml"
+# Ошибка тоже в XML, если её попросили: 401 без входа заворачивается тем же
+# middleware, а не только успешные ответы.
+check_contains "GET /api/risks без входа, Accept: application/xml" '<detail>' -H "Accept: application/xml" "$BASE_URL/api/risks"
+
 check "GET /api/forecasts (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts"
 # Состояние данных (MOS-148, М-04). Метод обязан быть открыт диспетчеру: под ним
 # ходит дашборд (frontend/src/screens/dashboard/api.ts). Проверяем не только код,
