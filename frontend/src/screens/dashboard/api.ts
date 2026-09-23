@@ -20,17 +20,9 @@ export async function fetchDataStatus(): Promise<DataStatus> {
   return r.json()
 }
 
-// Справочник участков — тот же файл, который читает схема коллектора
-// (screens/map/index.tsx). Нужен, чтобы назвать объект словами: `GET /api/risks`
-// отдаёт только section_id (MOS-127). Файл статический, лежит рядом с бандлом,
-// заголовок X-User-Login ему не нужен — он не метод API.
-//
-// Ошибку НЕ глушим до пустого списка молча: без справочника таблица покажет
-// «Участок 2477» вместо имени, и это осознанный запасной вид, а не поломка.
-// Отдельный запрос и отдельный отказ — по той же причине, что у data-status:
-// справочник не доехал и риски не доехали это две разные беды.
+// The live customer-tree mapping is shared with the collector map.
 export async function fetchSections(): Promise<SectionRef[]> {
-  const r = await fetch('/data/sections.json')
+  const r = await fetch('/api/objects', { headers: { 'X-User-Login': API_LOGIN } })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   return r.json()
 }

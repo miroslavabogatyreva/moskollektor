@@ -1,0 +1,57 @@
+{
+  "branch_scope": "Current master integration; lower-level lifecycle only. No accepted trained24h model;720h is rejected by production worker under MOS-219.",
+  "database": "127.0.0.1:15433/mk_pr_review_20260923",
+  "registry": {
+    "objects": 95,
+    "channels": 11485,
+    "sections": 3173
+  },
+  "test_configuration": {
+    "order_top_sections_per_object": 2,
+    "order_preventive_cap_h": 16,
+    "priority_response_hours": [
+      16,
+      48,
+      72
+    ]
+  },
+  "source_score": "/Users/Nik/Projects/lct-2026-task8/data/03_processed/v3_collector_20260922/score_development.json",
+  "first_run": {
+    "real_warnings": 176,
+    "real_orders": 352,
+    "concurrent_first_created": [
+      0,
+      352
+    ],
+    "concurrent_replay_created": [
+      0,
+      0
+    ]
+  },
+  "second_run": {
+    "created": 0,
+    "concurrent_first_created": [
+      0,
+      0
+    ],
+    "concurrent_replay_created": [
+      0,
+      0
+    ]
+  },
+  "passed": [
+    "original_onset_probability_features_expiry_API_readback",
+    "distinct_same_day_warnings",
+    "no_forecast_journal_dependency",
+    "missing_dictionary_rollback",
+    "skipped_work_order_insert_rollback",
+    "API_JSONB_codec"
+  ],
+  "unit_suite": "90 passed,0 skipped (real SMVU registries + CUSTOMER_DATA_ROOT)",
+  "invocation": "DATABASE_URL=<isolated-test-DSN> ML_URL=http://127.0.0.1:18100 PYTHONPATH=backend /usr/local/anaconda3/bin/python3 code/check_warning_replay.py <source_score>",
+  "caveats": [
+    "Only registry data in this fresh database; no reading journals.",
+    "Top2 is explicit test configuration, current migration default stays0.",
+    "The720h collector model is not accepted under MOS-219/MOS-217."
+  ]
+}

@@ -42,15 +42,18 @@ type Рамка = { x: number; y: number; width: number; height: number }
 // отрезается по-разному у разных значков.
 async function снимок(page: Page, r: Рамка) {
   await напечатать(page)
-  const x = Math.floor(r.x) - 1
-  const y = Math.floor(r.y) - 1
+  // A collector may have several lines plus an unresolved-location notice.
+  // Capture in document coordinates so the legend need not fit the viewport.
+  const scroll = await page.evaluate(() => ({ x: scrollX, y: scrollY }))
+  const x = Math.floor(r.x + scroll.x) - 1
+  const y = Math.floor(r.y + scroll.y) - 1
   const clip = {
     x,
     y,
-    width: Math.ceil(r.x + r.width) + 1 - x,
-    height: Math.ceil(r.y + r.height) + 1 - y,
+    width: Math.ceil(r.x + scroll.x + r.width) + 1 - x,
+    height: Math.ceil(r.y + scroll.y + r.height) + 1 - y,
   }
-  return (await page.screenshot({ clip })).toString('base64')
+  return (await page.screenshot({ clip, fullPage: true })).toString('base64')
 }
 
 // Считаем краску, которая выступает за краску другой картинки дальше 1 px. Кайму в 1 px

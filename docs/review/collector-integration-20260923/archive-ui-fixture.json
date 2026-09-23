@@ -1,0 +1,23 @@
+{
+  "fixture": "ARCHIVE UI TEST FIXTURE ONLY",
+  "source_database": "mk (read-only transaction)",
+  "target_database": "mk_pr_review_20260923",
+  "current_rows": 3172,
+  "forecast_rows": 3172,
+  "run_map": {
+    "5": 3
+  },
+  "model_versions": [
+    "lgbm-v3-collector-2026.09.22"
+  ],
+  "horizons": [
+    720
+  ],
+  "as_of": [
+    "2026-06-30T20:59:59+00:00"
+  ],
+  "max_probability": 0.902891993522644,
+  "high_risk_rows": 970,
+  "exact_snapshot_comparison": true,
+  "caveat": "No guardedworker called.720h candidate not accepted; no relabeling24h."
+}

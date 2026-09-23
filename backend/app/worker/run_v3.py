@@ -6,8 +6,7 @@
 пишет прямо, что «любая мелкая разница молча испортит прогноз». Поэтому признаки
 и вероятности приезжают готовым файлом от образа `ml-score`, а наша работа — три вещи:
 
-1. перевести ключ модели (`pfx`, 32 значения) на наш `collector_id` (16) —
-   `backend/app/worker/score_v3.py` и представление `pred.pfx_collector`;
+1. принять ключ collector_id из дерева объектов заказчика без перевода префиксов;
 2. спросить у образа `ml` вклады признаков, чтобы объяснить риск диспетчеру;
 3. разложить вероятность коллектора на его участки.
 
@@ -32,33 +31,20 @@
 import asyncio
 
 from app.mlclient import client
+from app.domain import explain
+from app.domain.section_map import SECTION_MAP_SQL, map_section
 from app.worker import score_v3
 
 СХЕМА_ПРИЗНАКОВ = "feat.v3"
 
 МОСТ = "SELECT pfx, collector_id FROM pred.pfx_collector"
 
-# Участки коллектора. Тот же путь «канал -> узел -> коллектор», что в 029,
-# только в обратную сторону и без каналов: нам нужны участки, а не датчики.
-#
-# DISTINCT ON, а не DISTINCT, и это не украшение. Участок 1490 («798:0», пикет 0
-# префикса 798) принадлежит ДВУМ коллекторам сразу: 13 его каналов висят на объекте
-# Зита, 3 — на объекте Бета. Простой DISTINCT дал 3 174 участка при 3 173 в справочнике,
-# и запись прогноза упала на UniqueViolationError по ключу (run_id, section_id) —
-# поймано первым же прогоном на стенде 22.09.2026.
-#
-# Относим участок к коллектору, где у него больше каналов: то же правило большинства,
-# что в мосте ключей (миграция 033), и по той же причине — отдать участок обоим
-# значило бы показать один пикет в двух местах с разным риском.
-УЧАСТКИ_КОЛЛЕКТОРА = """
-SELECT DISTINCT ON (c.section_id)
-       c.section_id, p.object_id AS collector_id, count(*) AS каналов
-  FROM smvu.channel c
-  JOIN smvu.object_tree n ON n.object_id = c.object_id
-  JOIN smvu.object_tree p ON p.object_id = n.parent_id AND p.level = 2
- WHERE c.is_active AND c.section_id IS NOT NULL
- GROUP BY c.section_id, p.object_id
- ORDER BY c.section_id, каналов DESC, p.object_id
+
+
+УЧАСТКИ_КОЛЛЕКТОРА = f"""
+SELECT section_id, collector_ids[1] AS collector_id
+FROM ({SECTION_MAP_SQL}) mapping
+WHERE cardinality(collector_ids)=1 AND unmapped_channels=0
 """
 
 
@@ -70,8 +56,10 @@ async def мост_ключей(conn) -> dict[str, int]:
 async def участки_коллекторов(conn) -> dict[int, list[int]]:
     """`{collector_id: [section_id, ...]}` — по чему раскладывается вероятность."""
     итог: dict[int, list[int]] = {}
-    for r in await conn.fetch(УЧАСТКИ_КОЛЛЕКТОРА):
-        итог.setdefault(r["collector_id"], []).append(r["section_id"])
+    for row in await conn.fetch(SECTION_MAP_SQL):
+        section = map_section(row)
+        if section["collector"] is not None:
+            итог.setdefault(section["collector"], []).append(section["section_id"])
     return итог
 
 
@@ -141,18 +129,32 @@ def заявки_разрешены(предел: int | None, откат: bool) 
     return not предел or откат
 
 
-# Участки префикса — по ключу участка «префикс:пикет». Это тот же префикс, по которому
-# модель открывает предупреждение (MOS-180): 30 префиксов в ref.object_xref против 32
-# в score.json 22.09.2026, недостающие 264 и 672 предупреждений не имели.
-УЧАСТКИ_ПРЕФИКСА = "SELECT section_id, smvu_key FROM ref.object_xref"
+def ключи_предупреждений(
+    по_коллекторам: dict[int, dict], участки_по_коллектору: dict[int, list[int]]
+) -> tuple[dict[int, str], list[int]]:
+    """`{section_id: ключ}` для участков коллекторов под открытым предупреждением модели.
 
+    **Зачем.** Модель судится правилом «одно открытое предупреждение на коллектор,
+    720 ч»: выдача — это момент ОТКРЫТИЯ, а не каждые сутки выше порога. Суточная
+    выдача на тех же скорах репетиции даёт Precision 0,475 против 0,799 (ML-репозиторий,
+    scripts/ml_v3_daily_rule.py, MOS-145). Ключ `warn:<коллектор>:<момент открытия>`
+    меняется только с новым предупреждением, поэтому по нему заявка заводится
+    один раз на предупреждение.
 
-async def участки_префиксов(conn) -> dict[str, list[tuple[int, str]]]:
-    """`{pfx: [(section_id, smvu_key), ...]}` — куда ведёт предупреждение модели."""
-    итог: dict[str, list[tuple[int, str]]] = {}
-    for r in await conn.fetch(УЧАСТКИ_ПРЕФИКСА):
-        итог.setdefault(r["smvu_key"].split(":")[0], []).append((r["section_id"], r["smvu_key"]))
-    return итог
+    Второй элемент — коллекторы, у которых предупреждение открыто, а момента открытия
+    в файле нет: ключа им не из чего собрать, диагностика называет их вслух.
+    """
+    ключи: dict[int, str] = {}
+    без_момента: list[int] = []
+    for к, з in по_коллекторам.items():
+        if not з.get("warning_open"):
+            continue
+        if not з.get("warning_opened_at"):
+            без_момента.append(к)
+            continue
+        for sid in участки_по_коллектору.get(к) or []:
+            ключи[sid] = f"warn:{к}:{з['warning_opened_at']}"
+    return ключи, sorted(без_момента)
 
 
 async def собрать(
@@ -164,20 +166,22 @@ async def собрать(
     одной длины и в одном порядке, как их ждёт прежний путь расчёта.
     """
     данные = score_v3.прочитать(путь_файла)
-    мост = await мост_ключей(conn)
-    if not мост:
-        raise score_v3.ФайлНеГодится(
-            "представления pred.pfx_collector нет — не накатана миграция 033, "
-            "ключ модели не на что переводить"
-        )
-
-    по_коллекторам = score_v3.по_коллекторам(данные, мост)
+    if данные.get("object_level") != "collector":
+        raise score_v3.ФайлНеГодится("product scoring requires object_level=collector; pfx majority mapping is unsafe")
+    if данные["horizon_h"] != horizon_h:
+        raise score_v3.ФайлНеГодится("score horizon differs from run horizon")
+    по_коллекторам = score_v3.по_коллекторам(данные, {})
     чужие = по_коллекторам.pop("_чужие", [])
     участки_по_коллектору = await участки_коллекторов(conn)
 
     # Спрашиваем вклады у образа `ml` — по одному запросу на весь парк коллекторов.
     коллекторы = sorted(по_коллекторам)
     значения = [по_коллекторам[к]["features"] for к in коллекторы]
+    # Original warning vectors share this model call; never use today's explanation.
+    warnings = данные["warnings"]
+    warning_ids = [max(коллекторы) + i + 1 for i in range(len(warnings))]
+    request_ids = коллекторы + warning_ids
+    request_values = значения + [w["features"] for w in warnings]
     # urllib синхронный, а мы внутри цикла событий: без to_thread запрос к модели
     # заблокировал бы его целиком — вместе с планировщиком и всеми соединениями.
     ответ = await asyncio.to_thread(
@@ -185,8 +189,8 @@ async def собрать(
         run_id,
         данные["as_of"],
         horizon_h,
-        коллекторы,
-        значения,
+        request_ids,
+        request_values,
         (направление,),
         feature_names=данные["feature_names"],
         schema_version=СХЕМА_ПРИЗНАКОВ,
@@ -195,16 +199,24 @@ async def собрать(
     # Вероятность модели и вероятность из файла обязаны совпасть: считает их один
     # и тот же код на одних и тех же весах. Расхождение значит, что образ `ml`
     # и образ `ml-score` собраны из разных версий, и дальше считать нельзя.
-    из_файла = [по_коллекторам[к]["p"] for к in коллекторы]
+    из_файла = [по_коллекторам[к]["p"] for к in коллекторы] + [w["probability"] for w in warnings]
     из_модели = ответ["predictions"][0]["probability"]
+    if ответ.get("horizon_h") != horizon_h or ответ.get("model_version") != данные["model_version"]:
+        raise score_v3.ФайлНеГодится("prediction horizon/model differs from score metadata")
     расхождение = max((abs(a - b) for a, b in zip(из_файла, из_модели)), default=0.0)
+    if расхождение > 1e-6:
+        raise score_v3.ФайлНеГодится(f"score/predict probabilities differ: {расхождение}")
 
     факторы_кол = факторы_по_вкладам(
         ответ,
-        {к: по_коллекторам[к]["features"] for к in коллекторы},
+        dict(zip(request_ids, request_values)),
         данные["feature_names"],
         факторов,
     )
+
+    templates = await explain.загрузить_шаблоны(conn)
+    for wid, warning in zip(warning_ids, warnings):
+        warning["explanation_ru"] = explain.объяснить(templates, факторы_кол.get(wid, []), None)
 
     участки: list[int] = []
     вероятности: list[float] = []
@@ -220,23 +232,22 @@ async def собрать(
             вероятности.append(по_коллекторам[к]["p"])
             факторы.append(факторы_кол.get(к, []))
 
-    # Предупреждения модели по префиксам и участки, на которые они ведут. Префикс без
-    # участков в справочнике остаётся в списке с пустыми участками: order_rules
-    # назовёт его вслух, а не потеряет молча.
-    открытые, без_момента = score_v3.предупреждения(данные)
-    по_префиксу = await участки_префиксов(conn)
-    for п in открытые:
-        п["участки"] = по_префиксу.get(п["pfx"], [])
+    ключи, без_момента = ключи_предупреждений(по_коллекторам, участки_по_коллектору)
 
     return {
-        "предупреждения": открытые,
+        "warnings": данные["warnings"],
+        "feature_names": данные["feature_names"],
+        "участки_по_коллектору": участки_по_коллектору,
+        "ключи_предупреждений": ключи,
         "предупреждений_без_момента": без_момента,
         "участки": участки,
         "вероятности": вероятности,
         "факторы": факторы,
         "коллекторов": len(коллекторы),
         "участков": len(участки),
-        "предупреждений": len(открытые) + len(без_момента),
+        "предупреждений": sum(
+            1 for к in коллекторы if по_коллекторам[к].get("warning_open", False)
+        ),
         "срез": данные["as_of"],
         "модель": данные["model_version"],
         "порог_модели": данные.get("alert_threshold"),

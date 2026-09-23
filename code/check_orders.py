@@ -24,8 +24,8 @@ DATABASE_URL. Своего способа не заводим, иначе сте
 базы и расходятся молча.
 
 М-10 и М-13 спрашивают ещё и выдачу модели — score.json с открытыми предупреждениями
-и их историей (контракт score.v3). В базе предупреждений нет: worker читает файл
-и складывает флаг в вероятность коллектора. Путь к файлу — SCORE_JSON; check-all.sh
+и их историей (контракт score.v3). Collector-путь хранит исходные предупреждения в pred.warning; legacy-путь
+сверяется с выдачей по префиксам. Путь к файлу — SCORE_JSON; check-all.sh
 забирает его со стенда сам, если задан STAND_SSH. Без файла обе строки — СБОЙ.
 
 Запуск:  DATABASE_URL=postgresql://... SCORE_JSON=score.json python3 code/check_orders.py
@@ -52,6 +52,7 @@ except ImportError:  # пакет живёт в образе бэкенда, л�
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА  # noqa: E402
+from app.worker.score_v3 import момент as warning_moment  # noqa: E402
 
 # Медиану упреждения для М-13 считает та же методика, что М-18…М-20a: эпизоды
 # цели модели по контракту, склейка контракта, evaluate_alerts с окном 0…168 ч.
@@ -89,6 +90,9 @@ REQUIRED_COLUMNS = (
     "pred.forecast.horizon_h",
     "pred.forecast.run_id",
     "pred.run.as_of",
+    "maint.notification.warning_section_id",
+    "pred.warning.opened_at",
+    "pred.warning_section.warning_key",
 )
 
 # ------------------------------------------------------------------ М-10, М-13: логика
@@ -111,15 +115,19 @@ def read_score(path):
     д = json.loads(Path(path).read_text(encoding="utf-8"))
     return {
         "model": д["model_version"],
+        "object_level": д.get("object_level", "pfx"),
+        "warnings": д.get("warnings", []),
         "horizon_h": int(д["horizon_h"]),
         # (pfx, момент открытия, та же строка как в файле): строкой момент
         # входит в ключ заявки warn:<pfx>:<открытие>:<участок> (миграция 037).
         "open": [
-            (str(к["pfx"]), _момент(к["warning_opened_at"]), к["warning_opened_at"])
+            (str(к.get("collector_id", к.get("pfx"))), _момент(к["warning_opened_at"]), к["warning_opened_at"])
             for к in д["collectors"]
             if к.get("warning_open")
         ],
-        "alerts": [(str(а["pfx"]), _момент(а["t"])) for а in д.get("alerts") or []],
+        "alerts": ([(str(w["collector_id"]), warning_moment(w["opened_at"])) for w in д["warnings"]]
+                   if д.get("object_level") == "collector" else
+                   [(str(а["pfx"]), _момент(а["t"])) for а in д.get("alerts") or []]),
     }
 
 
@@ -216,10 +224,11 @@ async def упреждение(conn, score):
     префикс = {}
     for r in await conn.fetch(ПРЕФИКС_КОЛЛЕКТОРЫ):
         префикс.setdefault(r["pfx"], set()).add(r["collector_id"])
-    на_коллекторах = [
-        (f"obj:{c}", t) for p, t in score["alerts"] for c in sorted(префикс.get(p, ()))
-    ]
-    return evaluate_alerts(на_коллекторах, инциденты, 0, ВЕРХ_ОКНА_Ч), len(инциденты)
+    на_коллекторах = ([(f"obj:{int(c)}", t) for c, t in score["alerts"]]
+        if score.get("object_level") == "collector" else
+        [(f"obj:{c}", t) for p, t in score["alerts"] for c in sorted(префикс.get(p, ()))])
+    окно = min(ВЕРХ_ОКНА_Ч, score["horizon_h"]) if score.get("object_level") == "collector" else ВЕРХ_ОКНА_Ч
+    return evaluate_alerts(на_коллекторах, инциденты, 0, окно), len(инциденты)
 
 
 # ------------------------------------------------------------------ проверки
@@ -272,6 +281,8 @@ async def check_m10(conn, score):
             f"{base_text}; открытые предупреждения сверить не с чем — "
             "не задан SCORE_JSON (check-all.sh берёт его со стенда по STAND_SSH)"
         )
+    if score.get("object_level") == "collector":
+        return await _collector_warning_orders(conn, score, base_text)
     if not score["open"]:
         return False, (
             f"{base_text}; в score.json 0 открытых предупреждений — "
@@ -344,30 +355,36 @@ async def check_m10(conn, score):
     return True, f"{суть}; {base_text}"
 
 
+async def _collector_warning_orders(conn, score, base_text):
+    """Compare immutable issuance identities and one work order per selected section."""
+    if not score["warnings"]:
+        return False, "в collector score нет истории предупреждений"
+    rows = await conn.fetch("""SELECT w.warning_key, count(n.id) AS orders,
+        count(n.id) FILTER (WHERE (SELECT count(*) FROM maint.work_order wo
+                                 WHERE wo.notification_id=n.id) <> 1) AS bad_work_orders
+        FROM pred.warning w
+        LEFT JOIN pred.warning_section ws ON ws.warning_key=w.warning_key
+        LEFT JOIN maint.notification n ON n.warning_section_id=ws.id
+        WHERE w.model_version=$1 GROUP BY w.warning_key""", score["model"])
+    by_key = {r["warning_key"]: r for r in rows}
+    expected = {f"warn:{score['model']}:{w['collector_id']}:{warning_moment(w['opened_at']).isoformat()}"
+                for w in score["warnings"]}
+    top = await conn.fetchval("SELECT value FROM ref.app_setting WHERE key='order_top_sections_per_object'")
+    if top is None:
+        return False, "нет order_top_sections_per_object"
+    missing = sorted(k for k in expected if k not in by_key or not by_key[k]["orders"])
+    bad = [k for k in expected & by_key.keys() if by_key[k]["bad_work_orders"]
+           or (top > 0 and by_key[k]["orders"] > top)]
+    return not missing and not bad, (f"{base_text}; предупреждений {len(expected)}, "
+        f"без заявки {len(missing)}, с нарушением числа заявок/нарядов {len(bad)}")
+
+
 async def _m10_source(conn):
-    """Заявки в базе вообще заводит расчёт, а не человек."""
-    row = await conn.fetchrow(
-        "SELECT count(*) AS total, "
-        "count(*) FILTER (WHERE source_system = 'forecast') AS forecast_src, "
-        "count(*) FILTER (WHERE source_system = 'forecast' "
-        "                 AND forecast_id IS NOT NULL) AS auto "
-        "FROM maint.notification"
-    )
-    if row["total"] == 0:
-        return False, "в maint.notification 0 заявок: расчёт не завёл ни одной"
-    if row["auto"] == 0:
-        return False, (
-            f"{row['total']} заявок, из них с source_system='forecast' "
-            f"{row['forecast_src']}, с заполненным forecast_id 0 — "
-            "ни одну не родил расчёт"
-        )
-    # Расхождение forecast_src и auto означало бы дыру в CHECK из 001_assets.sql
-    # (source_system <> 'forecast' OR forecast_id IS NOT NULL), поэтому печатаем
-    # оба числа: сошлись — заодно доказали, что ограничение работает.
-    return True, (
-        f"{row['total']} заявок, из них {row['forecast_src']} с "
-        f"source_system='forecast', и у всех {row['auto']} заполнен forecast_id"
-    )
+    row = await conn.fetchrow("""SELECT count(*) AS total,
+        count(*) FILTER (WHERE source_system='forecast' AND forecast_id IS NOT NULL
+            OR source_system='forecast_warning' AND warning_section_id IS NOT NULL) AS auto
+        FROM maint.notification""")
+    return row["auto"] > 0, f"в базе {row['total']} заявок; расчёт со ссылкой на прогноз/предупреждение завёл {row['auto']}"
 
 
 async def check_m11(conn):
@@ -387,7 +404,7 @@ async def check_m11(conn):
         "                    JOIN ref.order_type ot ON ot.id = wo.order_type_id "
         "                    JOIN ref.activity_type at ON at.id = wo.activity_type_id "
         "                   WHERE wo.notification_id = n.id LIMIT 1) w ON true "
-        "WHERE n.source_system = 'forecast'"
+        "WHERE n.source_system IN ('forecast','forecast_warning')"
     )
     auto = row["auto"]
     if auto == 0:
@@ -418,28 +435,15 @@ async def check_m12(conn):
     здесь НЕ означает, что приёмщик пройдёт переход из карточки в карточку.
     Вторую половину дописывать сюда, когда Q6.5 сдана.
     """
-    row = await conn.fetchrow(
-        "SELECT count(*) AS auto, "
-        "count(f.forecast_id) AS linked, "
-        "count(DISTINCT f.forecast_id) AS forecasts "
-        "FROM maint.notification n "
-        # LEFT JOIN, а не JOIN: обычный JOIN выбросил бы заявки с битой ссылкой
-        # и оставил зелёный счётчик на уменьшившемся знаменателе.
-        "LEFT JOIN pred.forecast f ON f.forecast_id = n.forecast_id "
-        "WHERE n.source_system = 'forecast'"
-    )
-    auto = row["auto"]
-    if auto == 0:
-        return False, "0 автозаявок: ссылаться на прогноз некому"
-    if row["linked"] != auto:
-        return False, (
-            f"{auto} автозаявок, из них ссылка ведёт на существующий прогноз "
-            f"только у {row['linked']}: {auto - row['linked']} ссылок битые"
-        )
-    return True, (
-        f"{auto} автозаявок, у всех {row['linked']} forecast_id ведёт на строку "
-        f"pred.forecast; обратно эти заявки собираются на {row['forecasts']} прогнозах"
-    )
+    row = await conn.fetchrow("""SELECT count(*) AS auto,
+        count(*) FILTER (WHERE f.forecast_id IS NOT NULL OR w.warning_key IS NOT NULL) AS linked
+        FROM maint.notification n
+        LEFT JOIN pred.forecast f ON f.forecast_id=n.forecast_id
+        LEFT JOIN pred.warning_section ws ON ws.id=n.warning_section_id
+        LEFT JOIN pred.warning w ON w.warning_key=ws.warning_key
+        WHERE n.source_system IN ('forecast','forecast_warning')""")
+    return row["auto"] > 0 and row["linked"] == row["auto"], (
+        f"{row['auto']} автозаявок, {row['linked']} ссылок на прогноз или исходное предупреждение; переход API/экран проверяется отдельно")
 
 
 def _сроки(rows, score, медиана, leads):
@@ -494,14 +498,17 @@ async def check_m13(conn, score):
             "горизонт модели и её предупреждения взять неоткуда — не задан "
             "SCORE_JSON (check-all.sh берёт его со стенда по STAND_SSH)"
         )
-    rows = await conn.fetch(
-        "SELECT n.due_at, n.source_key, r.as_of, f.horizon_h "
-        "FROM maint.notification n "
-        "JOIN pred.forecast f ON f.forecast_id = n.forecast_id "
-        "JOIN pred.run r ON r.run_id = f.run_id "
-        "WHERE n.source_system = 'forecast' AND r.model_version = $1",
-        score["model"],
-    )
+    if score.get("object_level") == "collector" and score["horizon_h"] != 24:
+        return False, f"MOS-219: нужен обученный горизонт 24 ч; кандидат {score['horizon_h']} ч не принят"
+    rows = await conn.fetch("""SELECT n.due_at, n.source_key,
+        coalesce(w.opened_at,r.as_of) AS as_of, coalesce(w.horizon_h,f.horizon_h) AS horizon_h
+        FROM maint.notification n
+        LEFT JOIN pred.forecast f ON f.forecast_id=n.forecast_id
+        LEFT JOIN pred.run r ON r.run_id=f.run_id
+        LEFT JOIN pred.warning_section ws ON ws.id=n.warning_section_id
+        LEFT JOIN pred.warning w ON w.warning_key=ws.warning_key
+        WHERE n.source_system IN ('forecast','forecast_warning')
+          AND coalesce(w.model_version,r.model_version)=$1""", score["model"])
     m0, инцидентов = await упреждение(conn, score)
     if not m0["tp"]:
         return False, (
@@ -515,7 +522,7 @@ async def check_m13(conn, score):
     голова = (
         f"модель {score['model']}, медиана упреждения {медиана} ч ({m0['tp']} "
         f"пойманных из {инцидентов} инцидентов, окно 0…{ВЕРХ_ОКНА_Ч} ч, методика "
-        f"М-18…М-20a)"
+        f"М-18…М-20a; для collector срок отсчитывается от исходного открытия)"
     )
     справка = ""
     if прежние:

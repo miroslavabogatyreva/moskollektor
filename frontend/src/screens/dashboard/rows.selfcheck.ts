@@ -36,21 +36,57 @@ assertEqual(цветРиска('normal'), 'var(--risk-low-border)', 'normal — 
 assertEqual(цветРиска(null), 'var(--border-subtle)', 'нет класса — нейтраль')
 assertEqual(цветРиска(null) === 'var(--risk-nodata)', false, 'нет класса ≠ нет связи')
 
-// ИМЯ ОБЪЕКТА слово в слово как у сервера в заявках: живой ответ
-// GET /api/orders 22.09.2026 отдал object_name «Коллектор 645, пикет 496»
-// при smvu_key «645:496».
+// Real sections from the checked-in customer registry export.
 const справочник = указатель([
-  { section_id: 2477, smvu_key: '889:1', collector: 889, picket: 1 },
-  { section_id: 401, smvu_key: '15:0', collector: 15, picket: 0 },
-  { section_id: 7, smvu_key: '645:496', collector: 645, picket: 496 },
+  {
+    section_id: 401,
+    smvu_key: '15:0',
+    collector: 6,
+    collector_ids: [6],
+    collector_name: 'объект Бета',
+    mapping_status: 'resolved',
+    picket: 0,
+    kinds: ['guardObject'],
+  },
+  {
+    section_id: 7,
+    smvu_key: '1044:1025',
+    collector: 7,
+    collector_ids: [7],
+    collector_name: 'объект Гамма',
+    mapping_status: 'resolved',
+    picket: 1025,
+    kinds: ['controlHouse', 'guardObject'],
+  },
+  {
+    section_id: 2477,
+    smvu_key: '889:1',
+    collector: 12,
+    collector_ids: [12],
+    collector_name: 'объект Зита',
+    mapping_status: 'resolved',
+    picket: 1,
+    kinds: ['guardObject'],
+  },
+  {
+    section_id: 1490,
+    smvu_key: '798:0',
+    collector: null,
+    collector_ids: [6, 12],
+    collector_name: null,
+    mapping_status: 'ambiguous',
+    picket: 0,
+    kinds: ['controlHouse', 'guardObject'],
+  },
 ])
-assertEqual(имяОбъекта(справочник.get(7), 7), 'Коллектор 645, пикет 496', 'имя как в заявках')
-assertEqual(имяОбъекта(справочник.get(2477), 2477), 'Коллектор 889, пикет 1', 'участок из тикета')
-
-// Пикет 0 — настоящий пикет, а не «нет пикета»: 15:0 есть в справочнике.
-// Проверка ловит подстановку вида `picket || '—'`, на нуле она бы соврала.
-assertEqual(имяОбъекта(справочник.get(401), 401), 'Коллектор 15, пикет 0', 'нулевой пикет назван')
-
+assertEqual(имяОбъекта(справочник.get(401), 401), 'объект Бета, пикет 0', 'реальное имя участка')
+assertEqual(имяОбъекта(справочник.get(7), 7), 'объект Гамма, пикет 1025', 'реальное имя участка')
+assertEqual(имяОбъекта(справочник.get(2477), 2477), 'объект Зита, пикет 1', 'реальное имя участка')
+assertEqual(
+  имяОбъекта(справочник.get(1490), 1490),
+  'Участок 798:0 · привязка к коллектору не подтверждена',
+  'реальное имя участка',
+)
 // Справочник не доехал (деплой не атомарен, sections.json едет отдельным
 // файлом) — показываем номер, а не пустую ячейку.
 assertEqual(имяОбъекта(undefined, 2477), 'Участок 2477', 'без справочника — номер участка')

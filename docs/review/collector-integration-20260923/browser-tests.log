@@ -1,0 +1,30 @@
+
+Running 4 tests using 3 workers
+
+(node:40388) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40386) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40387) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/us-03-menu.spec.ts:5:1 › US-03 сц. 1: текущий раздел подсвечен (280ms)
+  ✓  4 e2e/us-03-menu.spec.ts:16:1 › US-03 сц. 2: перезагрузка не теряет раздел (103ms)
+  ✓  3 e2e/collector-mapping.spec.ts:12:1 › collector mapping keeps ambiguous sections visible but off collector axes (1.4s)
+легенда: высокий риск / низкий риск: 42 px из 225 (19 %)
+6 ед.: высокий риск / низкий риск: 20 px из 121 (17 %)
+7 ед.: высокий риск / низкий риск: 27 px из 144 (19 %)
+легенда: высокий риск / класса нет: 44 px из 225 (20 %)
+6 ед.: высокий риск / класса нет: 27 px из 121 (22 %)
+7 ед.: высокий риск / класса нет: 48 px из 144 (33 %)
+легенда: низкий риск / класса нет: 24 px из 225 (11 %)
+6 ед.: низкий риск / класса нет: 21 px из 110 (19 %)
+7 ед.: низкий риск / класса нет: 20 px из 132 (15 %)
+6 ед.: высокий риск / ось без значка: 29 px из 55 (53 %)
+7 ед.: высокий риск / рамка без чипа: 55 px из 75 (73 %)
+6 ед.: низкий риск / ось без значка: 15 px из 55 (27 %)
+7 ед.: низкий риск / рамка без чипа: 32 px из 75 (43 %)
+6 ед.: класса нет / ось без значка: 10 px из 18 (56 %)
+7 ед.: класса нет / рамка без чипа: 24 px из 25 (96 %)
+  ✓  2 e2e/us-05-map.spec.ts:174:1 › US-05 сц. 5: риск различим без цвета (9.8s)
+
+  4 passed (10.2s)

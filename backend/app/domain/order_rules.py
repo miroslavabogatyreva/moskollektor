@@ -7,7 +7,7 @@
 Правило целиком — в docs/order-rules.md с разбором на одном участке. Здесь код
 и таблицы-ручки, которые это правило задают: ПОРОГ, ВИД_РАБОТ и ПРИОРИТЕТ.
 
-**Срок заявки — момент обнаружения плюс меньшее из двух чисел** (MOS-179):
+**Для legacy-заявок срок — момент обнаружения плюс меньшее из двух чисел** (MOS-179):
 норматива реакции приоритета (ref.priority.response_hours, 16 / 48 / 72 ч по
 Регламенту) и потолка превентивности (ref.app_setting.order_preventive_cap_h,
 медиана упреждения модели). Норматив говорит, за сколько Регламент велит устранить
@@ -26,6 +26,10 @@
 v3 это `warning_expires_at` модели, на прежнем — as_of + horizon_h. Это граница,
 до которой прогноз обещает риск, а не предсказанный момент отказа.
 
+Черновой collector-путь сохраняет исходный момент открытия и считает срок от него,
+с теми же нормативами и потолком. Задержка обработки не переносит срок. Это явное
+расхождение с политикой обнаружения legacy-пути; требует согласования перед merge.
+
 Запуск самопроверки:
     python -m app.domain.order_rules              # без базы: пороги, сроки, сутки
     DATABASE_URL=postgresql://... python -m app.domain.order_rules
@@ -33,6 +37,7 @@ v3 это `warning_expires_at` модели, на прежнем — as_of + hor
 """
 
 import asyncio
+import math
 import os
 import sys
 from datetime import datetime, timedelta
@@ -110,6 +115,11 @@ def срок(момент: datetime, часов_реакции: float) -> dateti
 def конец_окна(as_of: datetime, horizon_h: int) -> datetime:
     """Граница окна риска прогноза на прежнем пути: до неё прогноз обещает риск."""
     return as_of + timedelta(hours=horizon_h)
+
+
+def запас_часов(due_at: datetime, as_of: datetime, horizon_h: int) -> float:
+    """Остаток окна после срока; не упреждение реального отказа."""
+    return (конец_окна(as_of, horizon_h) - due_at).total_seconds() / 3600
 
 
 def момент_файла(значение: str) -> datetime:
@@ -239,6 +249,8 @@ async def справочники(conn) -> dict[str, dict]:
     if потолок is None:
         raise LookupError("в ref.app_setting нет order_preventive_cap_h (миграция 037): "
                           "срок заявки не от чего ограничить")
+    if not math.isfinite(float(потолок)) or float(потолок) <= 0:
+        raise ValueError("order_preventive_cap_h must be finite and positive")
     итог["потолок_ч"] = float(потолок)
     return итог
 
@@ -394,12 +406,14 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure",
             )
             if notif_id is None:
                 continue  # индекс uq_notif_forecast_key: заявка с этим ключом уже есть
-            await conn.execute(
+            inserted = await conn.execute(
                 ВСТАВКА_ЗАКАЗА,
                 номер_заказа(к["forecast_id"]), коды["order_type"][ВИД_ЗАКАЗА],
                 коды["activity_type"][ВИД_РАБОТ[крит]], тема, к["func_location_id"],
                 notif_id, приоритет, обнаружено, due_at,
             )
+            if inserted != "INSERT 0 1":
+                raise ValueError("work order not inserted; transaction rolled back")
             заведено += 1
 
     return {
@@ -410,6 +424,97 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure",
         "повторов": len(отобрано) - заведено,
         "без_строки_журнала": 0 if план is None else len(план) - len(отобрано),
     }
+
+
+def численно_равны(a, b) -> bool:
+    """Native and Linux reductions can differ in their last binary digits.
+
+    Keep original stored facts; tolerate only absolute error below 1e-9.
+    """
+    if a is None or b is None:
+        return a is None and b is None
+    return math.isclose(a, b, rel_tol=0, abs_tol=1e-9)
+
+
+async def завести_предупреждения(conn, run_id: int, score: dict, horizon_h: int) -> dict:
+    """Persist issuance snapshots and create each warning's orders atomically.
+
+    History includes warnings already closed in the latest score. A delayed worker
+    must consume them too; it never substitutes today's probability or onset.
+    """
+    import json
+    from app.worker.score_v3 import момент
+
+    codes = await справочники(conn)
+    count = total = repeats = 0
+    limit = await _сколько_худших(conn)
+    weights = await _веса(conn) if limit else {}
+    for warning in score["warnings"]:
+        opened, expires = момент(warning["opened_at"]), момент(warning["expires_at"])
+        key = f"warn:{score['модель']}:{warning['collector_id']}:{opened.isoformat()}"
+        async with conn.transaction():
+            await conn.execute("""INSERT INTO pred.warning
+                (warning_key, collector_id, opened_at, expires_at, horizon_h,
+                 probability, model_version, features, first_run_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,to_jsonb($8::double precision[]),$9)
+                ON CONFLICT (warning_key) DO NOTHING""",
+                key, warning["collector_id"], opened, expires, horizon_h,
+                warning["probability"], score["модель"], warning["features"], run_id)
+            # Row lock is the durable claim. A crash rolls back both the claim and orders.
+            stored = await conn.fetchrow("SELECT * FROM pred.warning WHERE warning_key=$1 FOR UPDATE", key)
+            saved_features = json.loads(stored["features"]) if isinstance(stored["features"], str) else stored["features"]
+            if (stored["expires_at"] != expires
+                    or not численно_равны(stored["probability"], warning["probability"])
+                    or len(saved_features) != len(warning["features"])
+                    or not all(численно_равны(a, b) for a, b in zip(saved_features, warning["features"]))):
+                raise ValueError(f"immutable warning changed: {key}")
+            if stored["orders_created_at"] is not None:
+                repeats += 1
+                continue
+            sections = score["участки_по_коллектору"].get(warning["collector_id"], [])
+            if not sections:
+                raise ValueError(f"warning {key}: no unambiguous sections")
+            candidates = await conn.fetch("""SELECT x.section_id, x.smvu_key, x.func_location_id,
+                    c.code AS crit, p.response_hours, p.id AS priority_id
+                FROM ref.object_xref x
+                JOIN asset.func_location l ON l.id=x.func_location_id
+                JOIN ref.criticality c ON c.id=l.criticality_id
+                JOIN ref.priority p ON p.code=CASE c.code WHEN 'A' THEN '2' WHEN 'B' THEN '3' ELSE '4' END
+                WHERE x.section_id=ANY($1::bigint[])""", sections)
+            if len(candidates) != len(sections):
+                raise ValueError(f"warning {key}: incomplete location/criticality/priority dictionary")
+            # Grouping here is already one real collector. Weights only rank its sections.
+            candidates = sorted(candidates, key=lambda c: (-weights.get(c['section_id'], (None, 0))[1], c['section_id']))
+            if limit:
+                candidates = candidates[:limit]
+            total += len(candidates)
+            for c in candidates:
+                response = c["response_hours"]
+                if response is None or response <= 0:
+                    raise ValueError("priority response_hours must be positive")
+                due = срок(opened, min(float(response), codes["потолок_ч"]))
+                reason = обоснование(warning["probability"], horizon_h, c["crit"], warning.get("explanation_ru"))
+                reason += f" Предупреждение открыто {opened.isoformat()}; окно риска до {expires.isoformat()}."
+                wsid = await conn.fetchval("""INSERT INTO pred.warning_section
+                    (warning_key, section_id, explanation_ru) VALUES ($1,$2,$3) RETURNING id""",
+                    key, c["section_id"], reason)
+                subject = f"Превентивные работы по предупреждению, участок {c['smvu_key']}"
+                notification = await conn.fetchval("""INSERT INTO maint.notification
+                    (notification_no, notification_kind, subject, long_text, func_location_id,
+                     priority_id, reported_at, due_at, source_system, source_key, warning_section_id, warning_opened_at, risk_window_end)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'forecast_warning',$9,$10,$7,$11) RETURNING id""",
+                    f"WN{wsid:010d}", ВИД_СООБЩЕНИЯ, subject, reason, c["func_location_id"],
+                    c["priority_id"], opened, due, key, wsid, expires)
+                result = await conn.execute(ВСТАВКА_ЗАКАЗА, f"WW{wsid:010d}",
+                    codes["order_type"][ВИД_ЗАКАЗА], codes["activity_type"][ВИД_РАБОТ[c["crit"]]],
+                    subject, c["func_location_id"], notification, c["priority_id"], opened, due)
+                if result != "INSERT 0 1":
+                    raise ValueError("work order was not inserted; missing order/activity/priority dictionary")
+                count += 1
+            await conn.execute("UPDATE pred.warning SET orders_created_at=now() WHERE warning_key=$1", key)
+    return {"правило": "открытие предупреждения", "участков": total,
+            "отобрано": total, "выше_порога": total, "без_строки_журнала": 0,
+            "отсечено_отбором": 0, "заявок": count, "повторов": repeats}
 
 
 async def проверить_реестр(conn) -> bool:

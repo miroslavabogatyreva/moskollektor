@@ -113,6 +113,12 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         {DIRECTION_LABEL[data.direction]}: вероятность{' '}
         <b class="num">{data.probability.toFixed(4)}</b>, ранг <b class="num">{data.risk_rank}</b>,
         горизонт {data.horizon_h} ч
+        <p style="color:var(--text-secondary)">
+          Вероятность отказа на коллекторе; локальный риск участка не оценён.
+        </p>
+        <p style="color:var(--text-secondary)">
+          Факторы деревьев — не полное разложение итоговой вероятности.
+        </p>
       </section>
 
       <section>

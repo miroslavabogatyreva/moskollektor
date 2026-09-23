@@ -23,8 +23,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth.deps import require
 from app.db import get_conn
+from app.domain.section_map import SECTION_MAP_SQL, get_section_mapping, map_section
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/objects")
+async def list_objects(
+    conn: asyncpg.Connection = Depends(get_conn),
+    _user=Depends(require("objects.read")),
+):
+    """Schematic map locations, with explicit ambiguous/unmapped sections."""
+    return [map_section(row) for row in await conn.fetch(SECTION_MAP_SQL)]
 
 
 @router.get("/objects/{section_id}")
@@ -106,6 +116,7 @@ async def get_object(
 
     return {
         **dict(passport),
+        **await get_section_mapping(conn, section_id),
         "channels": [dict(c) for c in channels],
         "current_risk": dict(current_risk) if current_risk else None,
         "recent_forecasts": [dict(f) for f in recent_forecasts],

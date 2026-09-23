@@ -80,10 +80,8 @@ from app.worker import features, publish, run_v3, score_v3
 # сильнее — расчёт встал, и лучше сказать это вслух, чем возить вчерашний риск.
 ЗАПАС_ФАЙЛА_Ч = float(os.environ.get("SCORE_V3_MAX_AGE_H", "1.5"))
 НАПРАВЛЕНИЕ = "sensor_failure"
-# Умолчание на случай пустой ref.app_setting. Обязано совпадать с 037_order_deadline.sql
-# (forecast_horizon_h = 720, модель v3 обучена на 720, MOS-145): разойдись они, прогон
-# с нуля и прогон по справочнику подписали бы один и тот же прогноз разными горизонтами.
-ГОРИЗОНТ_Ч = 720         # постановка требует не меньше 24
+# MOS-219: product requires a trained 24-hour model. Metadata is checked before publication.
+ГОРИЗОНТ_Ч = 24         # постановка требует не меньше 24
 ФАКТОРОВ_В_ОБЪЯСНЕНИИ = 3
 
 
@@ -220,24 +218,26 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
         # наката 020_app_setting.sql) не оставляет в pred.run ни строки, и со
         # стороны это выглядит не как «расчёт упал», а как «расчёт перестал
         # запускаться» — здесь тот же тик падает и остаётся в журнале как failed.
-        if horizon_h is None:
+        requested_horizon = horizon_h
+        if horizon_h is None and not ПУТЬ_SCORE:
             значение = await conn.fetchval(
                 "SELECT value FROM ref.app_setting WHERE key = 'forecast_horizon_h'")
             # is None, не or: пустая таблица — это None, а явный 0 — это 0, и это
             # разные случаи (нашла 44) — or молча подменил бы настоящий 0 на 24.
             horizon_h = int(значение) if значение is not None else ГОРИЗОНТ_Ч
-        print(f"прогон {run_id}, срез {as_of:%d.%m.%Y %H:%M}, горизонт {horizon_h} ч")
 
         # --- 0-бис. Кто отвечает и на тех ли признаках обучен -------------------
         # Схема признаков зависит от того, откуда берём числа: свои 22 (feat.v1)
         # или выдачу модели v3 (feat.v3). Ждём ту, по которой сейчас считаем,
         # иначе проверка контракта отвергнет правильную модель.
         по_v3 = bool(ПУТЬ_SCORE)
-        # None — прежнее правило заявок (порог); на пути v3 сюда ляжет план заявок
-        # по предупреждениям модели, и заявка пойдёт по моменту их открытия.
-        план, по_плану = None, None
+        # Collector warning history is persisted independently of the sparse journal.
         модель = await asyncio.to_thread(client.get_model)
         client.проверить_контракт(модель, run_v3.СХЕМА_ПРИЗНАКОВ if по_v3 else None)
+        if по_v3:
+            score_data = score_v3.прочитать(ПУТЬ_SCORE)
+            horizon_h = score_v3.горизонт_продукта(score_data, модель, requested_horizon)
+        print(f"прогон {run_id}, срез {as_of:%d.%m.%Y %H:%M}, горизонт {horizon_h} ч")
         версия = модель.get("model_version")
         print(f"   модель {версия}, схема признаков {модель.get('feature_schema')}"
               f"{', ЗАГЛУШКА' if модель.get('degraded') else ''}")
@@ -309,14 +309,6 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
                 print(f"   --limit {предел}: берём {len(участки)} участков из {всего} "
                       f"по возрастанию section_id")
             участков = посчитано = len(участки)
-            if заявки:
-                # План заявок — ДО записи прогноза: его участки publish.записать
-                # положит в журнал этого прогона, даже если мёртвая зона их бы
-                # пропустила. Иначе заявка по новому предупреждению ждала бы пульса
-                # до часа (MOS-180: прогоны 634–639 на стенде не записали ни строки).
-                по_плану = await order_rules.план_заявок(
-                    conn, v3["предупреждения"], set(участки))
-                план = по_плану["участки"]
             # Инференс прошёл внутри стадии выше — запрос к модели за вкладами
             # там же. Ноль здесь честнее, чем пустая колонка: своей стадии
             # инференса у этого пути нет, а не «она не измерена».
@@ -411,8 +403,7 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
         with часы.стадия("ms_write"):
             записано = await publish.записать(conn, run_id, as_of, horizon_h,
                                               НАПРАВЛЕНИЕ, участки, вероятности, ф, тексты,
-                                              full_log=full_log,
-                                              обязательно=frozenset(план or ()))
+                                              full_log=full_log)
         разбор = ", ".join(f"{имя} {n}" for имя, n in sorted(записано["причины"].items()))
         print(f"   в журнал {записано['журнал']} строк из {записано['участков']} "
               f"посчитанных ({разбор or 'ничего не менялось'}), "
@@ -424,16 +415,13 @@ async def прогон(conn, as_of: datetime | None = None, horizon_h: int | Non
         # Своей колонки ms_* у стадии нет — в pred.run их ровно шесть, и заводить
         # седьмую ради заявок значит менять схему прогонов из блока Q6.
         if заявки:
-            счёт = await order_rules.завести(conn, run_id, НАПРАВЛЕНИЕ, план)
             if по_v3:
-                print(f"   предупреждений модели открыто {v3['предупреждений']}; новых заявок "
-                      f"в плане {len(план)}, уже заведено {по_плану['уже']}; префиксы без "
-                      f"участков в прогоне {по_плану['вне_прогона'] or 'нет'}; без момента "
-                      f"открытия {v3['предупреждений_без_момента'] or 'нет'}")
+                счёт = await order_rules.завести_предупреждения(conn, run_id, v3, horizon_h)
+            else:
+                счёт = await order_rules.завести(conn, run_id, НАПРАВЛЕНИЕ)
             print(f"   заявки ({счёт['правило']}): отобрано {счёт['отобрано']} участков "
                   f"из {счёт['участков']}, заведено {счёт['заявок']}, "
-                  f"отброшено повторами {счёт['повторов']}, "
-                  f"без строки журнала {счёт['без_строки_журнала']}")
+                  f"повторных выдач пропущено {счёт['повторов']}")
         else:
             print("   заявки НЕ заводятся: прогон с --limit без --rollback")
         итог = "done"
@@ -505,12 +493,16 @@ def _selfcheck():
 # по потоку заявок): откат снимает побочные эффекты, но вместе с ними и сами заявки.
 # LEFT JOIN на коллектор: участок без коллектора попадает в выгрузку с null, а не пропадает.
 ЗАЯВКИ_ПРОГОНА = """
-SELECT n.id, so.object_id, f.section_id, n.source_key, n.reported_at, n.due_at,
-       n.warning_opened_at
+SELECT n.id, coalesce(w.collector_id,so.object_id) AS object_id,
+       coalesce(ws.section_id,f.section_id) AS section_id, n.source_key, n.reported_at, n.due_at,
+       coalesce(w.opened_at,n.warning_opened_at) AS warning_opened_at
   FROM maint.notification n
-  JOIN pred.forecast f ON f.forecast_id = n.forecast_id
+  LEFT JOIN pred.forecast f ON f.forecast_id = n.forecast_id
+  LEFT JOIN pred.warning_section ws ON ws.id=n.warning_section_id
+  LEFT JOIN pred.warning w ON w.warning_key=ws.warning_key
   LEFT JOIN pred.section_object so ON so.section_id = f.section_id
- WHERE n.source_system = 'forecast' AND f.run_id = $1
+ WHERE (n.source_system = 'forecast' AND f.run_id = $1)
+    OR (n.source_system = 'forecast_warning' AND w.first_run_id = $1)
  ORDER BY n.id
 """
 ПРИСТАВКА_ЗАЯВКИ = "ЗАЯВКА_JSON"

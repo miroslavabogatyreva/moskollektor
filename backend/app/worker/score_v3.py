@@ -1,25 +1,12 @@
-"""Приём `score.json` модели v3: контракт `score.v3` -> наш ключ коллектора.
+"""Validate score.v3 and immutable collector warning snapshots.
 
-**Зачем этот модуль вообще.** До 22.09.2026 worker сам считал 22 признака `feat.v1`
-по журналу — 48,3 секунды из 60 в бюджете расчёта, дороже всего остального вместе
-взятого. Модель v3 обучена на других 42 признаках, и считать их второй раз у себя
-нельзя: ML-команда прямо пишет, что «любая мелкая разница молча испортит прогноз»
-(`docs/ml-v3-hld.md`). Поэтому признаки, вероятности и предупреждения приезжают
-готовым файлом, а наша работа — перевести их на наш ключ и разнести по участкам.
-
-**Ключ в файле чужой.** Модель группирует каналы по префиксу тега (`pfx`, 32 значения),
-мы — по дереву объектов заказчика (`collector_id`, 16). Перевод делает представление
-`pred.pfx_collector` (миграция 033), и он не бесплатный: 26 каналов из 11 485 уезжают
-в соседний коллектор. Цена названа там же, в шапке миграции.
-
-**У коллектора бывает до пяти префиксов.** Замер 22.09.2026: у коллектора 12 их пять,
-у 11 — пять, у 7 — три. Коллектор получает **максимум** вероятности среди своих
-префиксов, а признаки — того префикса, который этот максимум дал. Максимум, а не
-среднее: диспетчеру важен худший участок коллектора, а среднее разбавит одну
-настоящую тревогу четырьмя спокойными префиксами и спрячет её.
+Product keys are level-2 object-tree collector IDs. The legacy prefix adapter
+below is retained for offline historical checks; run_v3 rejects prefix scores.
 """
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+import math
 from pathlib import Path
 import json
 
@@ -54,6 +41,8 @@ def прочитать(путь: str | Path) -> dict:
             f"{путь}: feature_schema={д.get('feature_schema')!r}, ждём {СХЕМА_ПРИЗНАКОВ!r}"
         )
 
+    if not isinstance(д.get("horizon_h"), int) or isinstance(д["horizon_h"], bool) or д["horizon_h"] <= 0:
+        raise ФайлНеГодится("horizon_h must be a positive integer")
     имена = д.get("feature_names") or []
     коллекторы = д.get("collectors") or []
     if not имена or not коллекторы:
@@ -67,12 +56,59 @@ def прочитать(путь: str | Path) -> dict:
                 f"{путь}: у коллектора {к.get('pfx')} значений {len(к.get('features') or [])}, "
                 f"а имён признаков {len(имена)} — порядок признаков не сойдётся"
             )
+        if any(v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)) for v in к["features"]):
+            raise ФайлНеГодится("features must be finite numbers or null")
         p = к.get("p")
-        if not isinstance(p, (int, float)) or not 0.0 <= p <= 1.0:
+        if not isinstance(p, (int, float)) or isinstance(p, bool) or not 0.0 <= p <= 1.0:
             raise ФайлНеГодится(
                 f"{путь}: у коллектора {к.get('pfx')} вероятность {p!r}"
             )
+    if д.get("object_level") == "collector":
+        ids = [к.get("collector_id") for к in коллекторы]
+        if any(not isinstance(i, int) or isinstance(i, bool) for i in ids) or len(set(ids)) != len(ids):
+            raise ФайлНеГодится("collector_id must be unique integer object-tree keys")
+        if "warnings" not in д:
+            raise ФайлНеГодится("immutable warnings history is required")
+        warning_keys = set()
+        for w in д["warnings"]:
+            opened, expires = момент(w["opened_at"]), момент(w["expires_at"])
+            key = (w["collector_id"], opened)
+            if key in warning_keys:
+                raise ФайлНеГодится("duplicate warning issuance")
+            warning_keys.add(key)
+            if any(v is not None and (not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)) for v in w["features"]):
+                raise ФайлНеГодится("warning features must be finite numbers or null")
+            if w["collector_id"] not in ids or not 0 <= w["probability"] <= 1:
+                raise ФайлНеГодится("invalid warning object or probability")
+            if abs((expires - opened).total_seconds() / 3600 - д["horizon_h"]) > 1e-6:
+                raise ФайлНеГодится("warning expiry differs from model horizon")
+            if opened > момент(д["as_of"]) or len(w["features"]) != len(имена):
+                raise ФайлНеГодится("invalid warning onset or opening features")
     return д
+
+
+def момент(value: str) -> datetime:
+    """Naive archive times are Moscow time, as in SMVU ingest."""
+    result = datetime.fromisoformat(value)
+    return result.astimezone(ZoneInfo("Europe/Moscow")) if result.tzinfo else result.replace(tzinfo=ZoneInfo("Europe/Moscow"))
+
+
+def горизонт(данные: dict, модель: dict, requested: int | None = None) -> int:
+    h = данные["horizon_h"]
+    if модель.get("horizon_h") != h:
+        raise ФайлНеГодится(f"score/model horizon mismatch: {h} / {модель.get('horizon_h')}")
+    if модель.get("model_version") != данные["model_version"]:
+        raise ФайлНеГодится("score/model version mismatch")
+    if requested is not None and requested != h:
+        raise ФайлНеГодится(f"requested horizon {requested} differs from trained horizon {h}")
+    return h
+
+
+def горизонт_продукта(данные: dict, модель: dict, requested: int | None = None) -> int:
+    h = горизонт(данные, модель, requested)
+    if h != 24:
+        raise ФайлНеГодится("MOS-219: product requires a trained 24-hour model; candidate publication is blocked")
+    return h
 
 
 def возраст_часов(данные: dict, сейчас: datetime | None = None) -> float:
@@ -82,9 +118,7 @@ def возраст_часов(данные: dict, сейчас: datetime | None 
     признаки, и именно он должен совпадать с `as_of` нашего прогона. Время файла
     на диске отвечает на другой вопрос — когда расчёт закончился.
     """
-    срез = datetime.fromisoformat(данные["as_of"])
-    if срез.tzinfo is None:
-        срез = срез.replace(tzinfo=timezone.utc)
+    срез = момент(данные["as_of"])
     сейчас = сейчас or datetime.now(timezone.utc)
     return (сейчас - срез).total_seconds() / 3600
 
@@ -96,6 +130,8 @@ def по_коллекторам(данные: dict, мост: dict[str, int]) ->
     нет, пропускаем и называем в диагностике: молча выброшенный коллектор выглядит
     как коллектор без риска, а это разные вещи.
     """
+    if данные.get("object_level") == "collector":
+        return {к["collector_id"]: dict(к) for к in данные["collectors"]}
     итог: dict[int, dict] = {}
     чужие: list[str] = []
     for к in данные["collectors"]:
@@ -220,7 +256,7 @@ def _selfcheck():
         часов = возраст_часов(
             данные, datetime(2026, 7, 1, 11, 59, 59, tzinfo=timezone.utc)
         )
-        assert abs(часов - 12.0) < 0.01, часов
+        assert abs(часов - 15.0) < 0.01, часов
 
         # Четыре вида порчи, каждый обязан быть виден.
         for порча, что in (
