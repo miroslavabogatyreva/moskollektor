@@ -26,7 +26,7 @@ from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
 from .tag_to_section import linear_metres
 
 НАЧАЛО = (37.6173, 55.7558)  # долгота, широта: центр Москвы, условная точка отсчёта
-ШАГ_М = 200.0                # между соседними частями на восток
+ШАГ_М = 200.0  # между соседними частями на восток
 ДЛИНА_ПИКЕТА_М = 10.0
 
 УЧАСТКИ = f"""
@@ -96,24 +96,32 @@ def разложить(rows):
         for колонка, v in zip(части, (collector_id, pfx, idx, длина)):
             колонка.append(v)
         for smvu_key, н in по_части[ключ]:
-            for колонка, v in zip(участки, (smvu_key, collector_id, pfx, н, н + ДЛИНА_ПИКЕТА_М)):
+            for колонка, v in zip(
+                участки, (smvu_key, collector_id, pfx, н, н + ДЛИНА_ПИКЕТА_М)
+            ):
                 колонка.append(v)
     return части, участки
 
 
 async def нарисовать_геометрию(conn):
     """Рисует оси коллекторов и отрезки участков. Без вида collector (046) — пропуск."""
-    if not await conn.fetchval("SELECT true FROM geo.object_kind WHERE code = 'collector'"):
+    if not await conn.fetchval(
+        "SELECT true FROM geo.object_kind WHERE code = 'collector'"
+    ):
         print("геометрия: вида collector нет (миграция 046 не накатана) — пропускаю")
         return
     rows = await conn.fetch(УЧАСТКИ)
     if not rows:
-        print("геометрия: участков с коллектором нет (справочник каналов пуст) — пропускаю")
+        print(
+            "геометрия: участков с коллектором нет (справочник каналов пуст) — пропускаю"
+        )
         return
     части, участки = разложить(rows)
     итог = await conn.fetchrow(НАРИСОВАТЬ, *части, *участки, *НАЧАЛО, ШАГ_М)
-    print(f"геометрия: коллекторов {итог['коллекторов']}, частей {len(части[0])}, "
-          f"участков {итог['участков']}, новых связей с ref.object_xref {итог['связей']}")
+    print(
+        f"геометрия: коллекторов {итог['коллекторов']}, частей {len(части[0])}, "
+        f"участков {итог['участков']}, новых связей с ref.object_xref {итог['связей']}"
+    )
 
 
 def _selfcheck():
@@ -135,5 +143,30 @@ def _selfcheck():
     print("selfcheck ok")
 
 
+async def _нарисовать(dsn):
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        async with conn.transaction():
+            await нарисовать_геометрию(conn)
+    finally:
+        await conn.close()
+
+
 if __name__ == "__main__":
-    _selfcheck()
+    # Без аргументов — самопроверка. С --dsn — нарисовать на уже работающем стенде,
+    # не перезаливая справочник (deploy/README.md, «на уже работающем стенде»).
+    import argparse
+    import asyncio
+    import time
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--dsn", help="postgresql://… ; без него только самопроверка")
+    args = ap.parse_args()
+    if not args.dsn:
+        _selfcheck()
+    else:
+        t = time.monotonic()
+        asyncio.run(_нарисовать(args.dsn))
+        print(f"геометрия: {time.monotonic() - t:.1f} с")

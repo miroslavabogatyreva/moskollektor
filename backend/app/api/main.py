@@ -88,7 +88,9 @@ async def convert_to_xml(request: Request, call_next):
     response = await call_next(request)
     if not wants_xml(request.headers.get("accept", ""), request.query_params.get("format")):
         return response
-    if "application/json" not in response.headers.get("content-type", ""):
+    # JSON — и application/json, и любой «+json» (application/geo+json у /api/geo/sections, MOS-45).
+    ctype = response.headers.get("content-type", "").split(";")[0].strip()
+    if ctype != "application/json" and not ctype.endswith("+json"):
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
     xml_body = to_xml(json.loads(body))
