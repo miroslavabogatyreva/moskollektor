@@ -214,7 +214,8 @@ def predict(req: PredictRequest) -> PredictResponse | JSONResponse:
 
     factors = [_top_factors(contrib[i], names) for i in range(matrix.shape[0])]
     probability = [
-        round(float(p), 6) if math.isfinite(float(p)) else 0.0 for p in proba
+        (float(p) if model.meta.get("model_format") == "local24.bag.v1" else round(float(p), 6))
+        if math.isfinite(float(p)) else 0.0 for p in proba
     ]
 
     # Направление одно (sensor_failure): модель бинарная. Если заказчик пришлёт два,

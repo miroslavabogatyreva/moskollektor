@@ -1,0 +1,17 @@
+FROM python:3.14-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements/ml-serving.txt requirements/local24-runtime.txt ./requirements/
+RUN pip install --no-cache-dir -r requirements/ml-serving.txt -r requirements/local24-runtime.txt
+COPY src/ml/__init__.py src/ml/local24_data.py src/ml/local24_engineering.py ./src/ml/
+COPY src/ml/serving ./src/ml/serving
+COPY scripts/ml_local24_score.py ./scripts/
+# Supplied by the local release packager, never committed as weights in Git.
+COPY model ./models/current
+ENV PYTHONPATH=/app/src ML_MODEL_DIR=/app/models/current \
+    OMP_NUM_THREADS=6 OPENBLAS_NUM_THREADS=2 PYTHONDONTWRITEBYTECODE=1
+RUN useradd --create-home --uid 10001 mlsvc
+USER mlsvc
+EXPOSE 8100
+CMD ["python", "-m", "uvicorn", "ml.serving.app:app", "--host", "0.0.0.0", "--port", "8100"]

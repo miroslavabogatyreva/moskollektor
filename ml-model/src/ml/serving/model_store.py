@@ -15,7 +15,7 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 
-from . import v3_bag
+from . import v3_bag, local24_bag
 
 # Относительный путь от корня проекта (правило раскладки проекта). В образе WORKDIR=/app,
 # поэтому тот же относительный путь работает и в контейнере.
@@ -39,7 +39,7 @@ REQUIRED_META_FIELDS = (
     "sha256",
 )
 
-VALID_OBJECT_LEVELS = ("pfx", "ch", "collector")
+VALID_OBJECT_LEVELS = ("pfx", "ch", "collector", "section")
 
 
 class ModelLoadError(RuntimeError):
@@ -82,6 +82,9 @@ class LoadedModel:
     def explanation_limitation(self) -> str | None:
         if self.bag is None:
             return None
+        if self.meta.get("model_format") == local24_bag.FORMAT:
+            return ("Factors describe the mean raw tree logit before per-model calibration. "
+                    "They do not decompose the mean calibrated probability.")
         return ("Factors describe the mean raw tree score only. The final probability "
                 "uses the median tree probability, rearm head and Platt calibration; "
                 "these factors do not explain the complete ensemble probability.")
@@ -206,6 +209,14 @@ def load_model(model_dir: Path | None = None) -> LoadedModel:
             head = json.loads(meta_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ModelLoadError(f"{meta_path} не читается как JSON: {exc}") from exc
+        if isinstance(head, dict) and head.get("model_format") == local24_bag.FORMAT:
+            try:
+                missing = [f for f in REQUIRED_META_FIELDS if f not in head]
+                if missing: raise ValueError(f"Missing metadata: {missing}")
+                bag = local24_bag.Bag(directory, head)
+                return LoadedModel(booster=None, meta=head, sha256=head["sha256"], model_dir=directory, bag=bag)
+            except (ValueError, KeyError, OSError) as exc:
+                raise ModelLoadError(f"Invalid local24 model: {exc}") from exc
         if isinstance(head, dict) and head.get("model_format") == v3_bag.FORMAT:
             return _load_bag(directory, head)
 
