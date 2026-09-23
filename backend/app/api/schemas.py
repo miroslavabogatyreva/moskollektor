@@ -27,10 +27,21 @@ IsoDatetime = Annotated[
 ]
 
 # Тот же зазор у Decimal: pydantic-core пишет его JSON-строкой ("1.5"), а
-# jsonable_encoder — числом через float(). Поймано тем же прогоном хешей на
-# avg_duration_h (объекты) и было бы на settings.value, не поймай я его здесь же.
+# jsonable_encoder — числом. Первая правка звала float() всегда — нашла 59
+# на settings.value=60: jsonable_encoder отдавал число 60 (int), моя модель —
+# 60.0. Копия настоящего правила FastAPI (fastapi.encoders.decimal_encoder):
+# Decimal без дробной части (exponent >= 0) — int, иначе — float. Показатель
+# степени берётся у Decimal, а не по "похоже на целое": Decimal("60.00")
+# и Decimal("60") дают разный exponent, и jsonable_encoder различает их так же.
+def _decimal_как_jsonable_encoder(v: Decimal) -> int | float:
+    exponent = v.as_tuple().exponent
+    if isinstance(exponent, int) and exponent >= 0:
+        return int(v)
+    return float(v)
+
+
 JsonDecimal = Annotated[
-    Decimal, PlainSerializer(lambda v: float(v), return_type=float, when_used="json")
+    Decimal, PlainSerializer(_decimal_как_jsonable_encoder, when_used="json")
 ]
 
 
