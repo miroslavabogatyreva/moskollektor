@@ -45,11 +45,16 @@ SELECT c.section_id, count(*) AS n
 """
 
 
+# Метод вызывается напрямую, мимо Depends: пользователь нужен для области видимости
+# (MOS-107). Роль ods_dispatcher видит весь парк, базу про область не спрашивает.
+ВИДИТ_ВСЁ = {"login": "check_card_weight", "roles": ["ods_dispatcher"]}
+
+
 async def каналы(conn, section_id):
     items, offset = [], 0
     while True:
         ответ = await list_object_channels(
-            section_id, limit=СТРАНИЦА, offset=offset, conn=conn, _user=None
+            section_id, limit=СТРАНИЦА, offset=offset, conn=conn, user=ВИДИТ_ВСЁ
         )
         items += ответ["items"]
         offset += СТРАНИЦА

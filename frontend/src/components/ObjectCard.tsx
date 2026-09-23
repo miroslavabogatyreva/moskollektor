@@ -118,7 +118,9 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     setReadings(null)
     fetch(`/api/objects/${sectionId}`, { headers: { 'X-User-Login': API_LOGIN } })
       .then((r) => {
-        if (r.status === 404) {
+        // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
+        // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
+        if (r.status === 404 || r.status === 403) {
           if (!отменено) setNotFound(true)
           return null
         }
@@ -210,7 +212,9 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   if (notFound) {
     return (
       <main class="p-5">
-        <p style="color:var(--text-muted)">Участок {sectionId} не найден.</p>
+        <p style="color:var(--text-muted)">
+          Участок {sectionId} не найден или вне вашей области видимости.
+        </p>
       </main>
     )
   }

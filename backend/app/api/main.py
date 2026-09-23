@@ -12,10 +12,13 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 
 from app.api.audit import router as audit_router
+from app.api.geo import router as geo_router
+from app.api.notifications import router as notifications_router
 from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
+from app.api.tech_events import router as tech_events_router
 from app.api.xml import to_xml, wants_xml
 from app.db import get_pool
 
@@ -25,6 +28,9 @@ app.include_router(orders_router)
 app.include_router(audit_router)
 app.include_router(objects_router)
 app.include_router(settings_router)
+app.include_router(geo_router)
+app.include_router(notifications_router)
+app.include_router(tech_events_router)
 
 
 @app.get("/health")
@@ -86,7 +92,9 @@ async def convert_to_xml(request: Request, call_next):
     response = await call_next(request)
     if not wants_xml(request.headers.get("accept", ""), request.query_params.get("format")):
         return response
-    if "application/json" not in response.headers.get("content-type", ""):
+    # JSON — и application/json, и любой «+json» (application/geo+json у /api/geo/sections, MOS-45).
+    ctype = response.headers.get("content-type", "").split(";")[0].strip()
+    if ctype != "application/json" and not ctype.endswith("+json"):
         return response
     body = b"".join([chunk async for chunk in response.body_iterator])
     xml_body = to_xml(json.loads(body))
