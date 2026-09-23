@@ -1,0 +1,559 @@
+{
+  "schema": "local24.mapping-audit.v1",
+  "resources": {
+    "threads": 3,
+    "memory_limit": "6GB"
+  },
+  "sources": {
+    "mapping": {
+      "relative_path": "data/03_processed/local24_20260923/mapping.parquet",
+      "sha256": "12423b2b633918e8ba1418bd6c5fc86d9b9148984dbd3820b6aa256886f92b58"
+    },
+    "daily": {
+      "relative_path": "data/03_processed/ml_20260915/chanday.parquet",
+      "sha256": "d354224635189f5acdbbbbc5912378c6c606f0783fe1466c0caf141b4ebb6ba1"
+    },
+    "episodes": {
+      "relative_path": "data/03_processed/faildef_20260915/D5/episodes_ext.parquet",
+      "sha256": "581acc43d3d729b05d1db72c8cb4b384e8157de216f5f2918b06c327e4be7221"
+    },
+    "events": {
+      "relative_path": "data/03_processed/local24_20260923/events.parquet",
+      "sha256": "9e892229497b0ae23486b5dab6c3612ad8e84f6d5521ac4c1949759adda129bc"
+    },
+    "dataset": {
+      "relative_path": "data/03_processed/local24_20260923/dataset.parquet",
+      "sha256": "7d684ed7e62fec39c2ca974071d8e6ed289456f5fbeb7a8baa127c659452157a"
+    },
+    "coverage": {
+      "relative_path": "data/03_processed/local24_20260923/coverage.parquet",
+      "sha256": "398e1bd997c6308d23889510af3fb9c4c01a31adf694459ee5b4b03479ee05c7"
+    },
+    "old_dictionary": {
+      "relative_path": "data/01_raw/dataset_20260915/справочник_каналов_датчиков.csv",
+      "sha256": "fa550d4c23c23c2ea29f47bd7dceca78f52d96bd12667a6f8c5f0e515784c5a5"
+    },
+    "new_dictionary": {
+      "relative_path": "data/01_raw/dataset_update_20260916/справочник_каналов_датчиков.csv",
+      "sha256": "87b3230e93ae00e3f03d915336acde6b3990c8b58d7378175cf02c000f67a45f"
+    },
+    "objects": {
+      "relative_path": "data/01_raw/dataset_20260915/справочник_объектов_диспетчер.csv",
+      "sha256": "219b4dbe34a78581640d839837649d3ef481c62c089fef18db1b364cff007084"
+    },
+    "product_parser": {
+      "relative_path": "moskollektor/backend/app/ingest/tag_to_section.py",
+      "sha256": "9e06ba48aada56591edb34e65dff87ce97613b444a7a9e119d99148841f2e136"
+    }
+  },
+  "dictionaries": {
+    "old_channels": 11485,
+    "new_channels": 11485,
+    "added_ids": 0,
+    "removed_ids": 0,
+    "changed_common_fields": {
+      "тип_инж_системы": 0,
+      "тип_датчика": 0,
+      "тег_инженерной_системы": 0,
+      "название_датчика": 364
+    },
+    "changed_parsed_keys": 0,
+    "new_dictionary_object_nulls": 0,
+    "collector_parent_mismatches": 0,
+    "missing_object_ids": 0,
+    "object_levels": {
+      "1": 1,
+      "2": 16,
+      "3": 78
+    }
+  },
+  "mapping": {
+    "n_rows": 11485,
+    "channels": 11485,
+    "no_picket_channels": 764,
+    "product_sections": 3173,
+    "collectors": 16,
+    "ambiguous_sections": [
+      {
+        "section_id": 1490,
+        "channels": 16,
+        "collectors": 2
+      }
+    ],
+    "parsed_key_bijection_violations": {
+      "section_to_keys": 0,
+      "key_to_sections": 0
+    }
+  },
+  "daily_identity": {
+    "first_day": "2022-04-01",
+    "last_day": "2026-06-30",
+    "n_rows": 2377992,
+    "channels": 11833,
+    "duplicate_channel_days": 0
+  },
+  "spatial_ambiguity_candidates": {
+    "multinode_sections": {
+      "sections": 564,
+      "channels": 5587
+    },
+    "same_collector_picket_split": {
+      "groups_count": 276,
+      "sections": 576,
+      "channels": 2754
+    },
+    "text_geometry": {
+      "multi_pk_channels": 977,
+      "multi_pk_sections": 377,
+      "offset_ge10_channels": 28
+    },
+    "events_in_multinode_sections": {
+      "events": 2269,
+      "sections": 288
+    },
+    "events_on_multirange_channels": {
+      "events": 281,
+      "channels": 79
+    }
+  },
+  "section_flags_summary": {
+    "ambiguous_collector_excluded": 1,
+    "current_mapping_physical_location_unverified": 1988,
+    "range_or_offset_lower_localization_confidence": 377,
+    "topology_review_required": 807
+  },
+  "journal_sources": [
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2019.parquet",
+      "size_bytes": 132963458,
+      "rows": 20993328
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2020.parquet",
+      "size_bytes": 169523962,
+      "rows": 28172398
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2021.parquet",
+      "size_bytes": 285427796,
+      "rows": 53698948
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2022.parquet",
+      "size_bytes": 256448849,
+      "rows": 43483149
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2023.parquet",
+      "size_bytes": 197188112,
+      "rows": 31937125
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2024.parquet",
+      "size_bytes": 247350038,
+      "rows": 49023883
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2025.parquet",
+      "size_bytes": 272683059,
+      "rows": 55541796
+    },
+    {
+      "relative_path": "data/02_interim/mk/parquet/j2026.parquet",
+      "size_bytes": 155023583,
+      "rows": 30695389
+    }
+  ],
+  "journal_mapping_coverage": [
+    {
+      "year": 2019,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 20409,
+      "channels": 16,
+      "first_ts": "2019-01-03 07:35:01",
+      "last_ts": "2019-12-30 15:51:34"
+    },
+    {
+      "year": 2019,
+      "mapping_reason": "no_picket",
+      "journal_rows": 5023276,
+      "channels": 534,
+      "first_ts": "2019-01-01 07:01:37",
+      "last_ts": "2019-12-31 23:41:44"
+    },
+    {
+      "year": 2019,
+      "mapping_reason": "resolved",
+      "journal_rows": 13467998,
+      "channels": 4068,
+      "first_ts": "2019-01-01 00:00:21",
+      "last_ts": "2019-12-31 23:59:52"
+    },
+    {
+      "year": 2019,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 2481645,
+      "channels": 1004,
+      "first_ts": "2019-01-01 00:04:25",
+      "last_ts": "2019-12-31 23:59:35"
+    },
+    {
+      "year": 2020,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 18238,
+      "channels": 16,
+      "first_ts": "2020-01-03 22:08:14",
+      "last_ts": "2020-12-29 09:26:53"
+    },
+    {
+      "year": 2020,
+      "mapping_reason": "no_picket",
+      "journal_rows": 6041846,
+      "channels": 567,
+      "first_ts": "2020-01-01 00:01:55",
+      "last_ts": "2020-12-31 23:35:30"
+    },
+    {
+      "year": 2020,
+      "mapping_reason": "resolved",
+      "journal_rows": 18833861,
+      "channels": 5677,
+      "first_ts": "2020-01-01 00:00:04",
+      "last_ts": "2020-12-31 23:59:59"
+    },
+    {
+      "year": 2020,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 3278453,
+      "channels": 990,
+      "first_ts": "2020-01-01 00:00:33",
+      "last_ts": "2020-12-31 23:48:41"
+    },
+    {
+      "year": 2021,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 103251,
+      "channels": 14,
+      "first_ts": "2021-01-08 12:44:26",
+      "last_ts": "2021-12-30 17:15:58"
+    },
+    {
+      "year": 2021,
+      "mapping_reason": "no_picket",
+      "journal_rows": 7053115,
+      "channels": 614,
+      "first_ts": "2021-01-01 00:52:18",
+      "last_ts": "2021-12-31 23:56:34"
+    },
+    {
+      "year": 2021,
+      "mapping_reason": "resolved",
+      "journal_rows": 43218889,
+      "channels": 7168,
+      "first_ts": "2021-01-01 00:00:01",
+      "last_ts": "2021-12-31 23:59:59"
+    },
+    {
+      "year": 2021,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 3323693,
+      "channels": 829,
+      "first_ts": "2021-01-01 00:13:07",
+      "last_ts": "2021-12-31 22:59:39"
+    },
+    {
+      "year": 2022,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 12013,
+      "channels": 14,
+      "first_ts": "2022-01-02 15:35:45",
+      "last_ts": "2022-12-27 09:36:03"
+    },
+    {
+      "year": 2022,
+      "mapping_reason": "no_picket",
+      "journal_rows": 5753292,
+      "channels": 699,
+      "first_ts": "2022-01-01 00:07:49",
+      "last_ts": "2022-12-31 23:49:25"
+    },
+    {
+      "year": 2022,
+      "mapping_reason": "resolved",
+      "journal_rows": 37388854,
+      "channels": 9451,
+      "first_ts": "2022-01-01 00:00:00",
+      "last_ts": "2022-12-31 23:59:56"
+    },
+    {
+      "year": 2022,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 328990,
+      "channels": 558,
+      "first_ts": "2022-01-01 00:36:10",
+      "last_ts": "2022-12-31 01:33:58"
+    },
+    {
+      "year": 2023,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 4925,
+      "channels": 16,
+      "first_ts": "2023-01-05 11:31:19",
+      "last_ts": "2023-12-29 08:18:27"
+    },
+    {
+      "year": 2023,
+      "mapping_reason": "no_picket",
+      "journal_rows": 5979358,
+      "channels": 753,
+      "first_ts": "2023-01-01 00:02:53",
+      "last_ts": "2023-12-31 22:49:41"
+    },
+    {
+      "year": 2023,
+      "mapping_reason": "resolved",
+      "journal_rows": 25931678,
+      "channels": 9525,
+      "first_ts": "2023-01-01 00:00:02",
+      "last_ts": "2023-12-31 23:59:58"
+    },
+    {
+      "year": 2023,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 21164,
+      "channels": 106,
+      "first_ts": "2023-01-01 08:29:12",
+      "last_ts": "2023-12-30 16:59:07"
+    },
+    {
+      "year": 2024,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 7378,
+      "channels": 16,
+      "first_ts": "2024-01-03 09:43:47",
+      "last_ts": "2024-12-31 10:01:47"
+    },
+    {
+      "year": 2024,
+      "mapping_reason": "no_picket",
+      "journal_rows": 6323598,
+      "channels": 755,
+      "first_ts": "2024-01-01 00:39:38",
+      "last_ts": "2024-12-31 23:23:37"
+    },
+    {
+      "year": 2024,
+      "mapping_reason": "resolved",
+      "journal_rows": 42687650,
+      "channels": 9547,
+      "first_ts": "2024-01-01 00:00:00",
+      "last_ts": "2024-12-31 23:59:59"
+    },
+    {
+      "year": 2024,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 5257,
+      "channels": 30,
+      "first_ts": "2024-01-01 02:44:33",
+      "last_ts": "2024-12-31 12:44:54"
+    },
+    {
+      "year": 2025,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 17086,
+      "channels": 16,
+      "first_ts": "2025-01-02 09:46:19",
+      "last_ts": "2025-12-30 09:32:03"
+    },
+    {
+      "year": 2025,
+      "mapping_reason": "no_picket",
+      "journal_rows": 6274660,
+      "channels": 762,
+      "first_ts": "2025-01-01 00:03:02",
+      "last_ts": "2025-12-31 23:35:39"
+    },
+    {
+      "year": 2025,
+      "mapping_reason": "resolved",
+      "journal_rows": 49249520,
+      "channels": 10693,
+      "first_ts": "2025-01-01 00:00:05",
+      "last_ts": "2025-12-31 23:59:59"
+    },
+    {
+      "year": 2025,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 530,
+      "channels": 12,
+      "first_ts": "2025-01-09 11:28:28",
+      "last_ts": "2025-12-22 10:43:45"
+    },
+    {
+      "year": 2026,
+      "mapping_reason": "ambiguous_section",
+      "journal_rows": 4439,
+      "channels": 16,
+      "first_ts": "2026-01-01 10:28:32",
+      "last_ts": "2026-06-30 11:59:01"
+    },
+    {
+      "year": 2026,
+      "mapping_reason": "no_picket",
+      "journal_rows": 2772760,
+      "channels": 761,
+      "first_ts": "2026-01-01 00:12:42",
+      "last_ts": "2026-06-30 23:53:40"
+    },
+    {
+      "year": 2026,
+      "mapping_reason": "resolved",
+      "journal_rows": 27918068,
+      "channels": 10668,
+      "first_ts": "2026-01-01 00:00:00",
+      "last_ts": "2026-06-30 23:59:59"
+    },
+    {
+      "year": 2026,
+      "mapping_reason": "unknown_channel",
+      "journal_rows": 122,
+      "channels": 2,
+      "first_ts": "2026-01-04 11:08:13",
+      "last_ts": "2026-03-18 15:42:47"
+    }
+  ],
+  "identity_lifetime_proxies": {
+    "journal_channels": 12627,
+    "journal_channels_absent_from_current_dictionary": 1142,
+    "channels_with_a_full_calendar_year_absent_then_returning": 180,
+    "returning_channels_in_current_dictionary": 180,
+    "interpretation": "Activity gaps are NOT proof of reassignment or reuse; no versioned registry exists in these inputs."
+  },
+  "episodes": {
+    "n_rows": 349896,
+    "first_onset": "2022-01-03 12:09:02",
+    "last_onset": "2026-06-30 23:19:26",
+    "same_onset_extra_rows": 3277,
+    "exact_tuple_extra_rows": 1250,
+    "zero_duration_rows": 150292,
+    "negative_duration_rows": 0,
+    "exact_full_row_extra_rows": 1249,
+    "onset_conflicts": {
+      "duplicate_groups": 2994,
+      "different_end_close_groups": 2027,
+      "groups_with_one_long": 143,
+      "groups_with_multiple_long": 0
+    },
+    "positive_duration_onset_conflicts": 0
+  },
+  "long_event_mapping_coverage": [
+    {
+      "mapping_reason": "no_picket",
+      "events": 592,
+      "channels": 123
+    },
+    {
+      "mapping_reason": "resolved",
+      "events": 4302,
+      "channels": 1377
+    },
+    {
+      "mapping_reason": "unknown_channel",
+      "events": 23,
+      "channels": 14
+    }
+  ],
+  "long_event_id_check": {
+    "events": 4302,
+    "distinct_ids": 4302
+  },
+  "event_eligibility": [
+    {
+      "exposed": false,
+      "ongoing_d5": false,
+      "past_covered": true,
+      "target_covered": true,
+      "events": 44
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": false,
+      "past_covered": false,
+      "target_covered": false,
+      "events": 23
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": false,
+      "past_covered": false,
+      "target_covered": true,
+      "events": 9
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": false,
+      "past_covered": true,
+      "target_covered": false,
+      "events": 5
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": false,
+      "past_covered": true,
+      "target_covered": true,
+      "events": 2901
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": true,
+      "past_covered": false,
+      "target_covered": false,
+      "events": 4
+    },
+    {
+      "exposed": true,
+      "ongoing_d5": true,
+      "past_covered": true,
+      "target_covered": true,
+      "events": 1316
+    }
+  ],
+  "dataset_check": {
+    "rows_count": 4267349,
+    "positive_section_days": 1713,
+    "eligible_events": 2901,
+    "duplicate_keys": 0
+  },
+  "short_feature_audit": {
+    "original_rows": 324738,
+    "exact_tuple_excess": 1244,
+    "zero_duration_rows": 138761,
+    "distinct_positive_rows": 185977,
+    "sections_with_zero_duration": 757,
+    "section_days_with_zero_duration": 26375,
+    "eligible_rows_with_zero_duration_in_prior28d": 286087
+  },
+  "join_cardinality": {
+    "once_rows": 2091257,
+    "twice_rows": 2091257,
+    "once_readings": 172674693,
+    "twice_readings": 172674693
+  },
+  "temporal_query_probe": {
+    "as_of": "2025-07-01T00:00:00",
+    "cutoffs": [
+      "2025-07-01T00:00:00",
+      "2026-06-30T23:59:59"
+    ],
+    "sections": 15,
+    "features": 40,
+    "exactly_equal": true,
+    "builder_source_sha256": "df05979bb9243532e39574e8d48242fdb7b665d4aaba04f66b37af99696a5436",
+    "scope": "Actual current Local24Data SQL; real event-rich section per represented collector. Static mapping reused in both; no proof of historical identity."
+  },
+  "section_flags_artifact": {
+    "path": "data/03_processed/local24_mapping_audit_20260923/mapping-flags.json",
+    "sha256": "20c7e573c0e6a4b40a58ef180aec59a2bc1d1baa4de4bd7514fcdbb0414855a9",
+    "tracked_in_git": false
+  }
+}

@@ -1,0 +1,547 @@
+{
+  "scope": "D5 operational journal onsets; no independently verified hardware outcome",
+  "resources": {
+    "threads": 3,
+    "memory_limit": "6GB"
+  },
+  "labels_unchanged": true,
+  "independent_holdout_available": false,
+  "source_range": {
+    "first_onset": "2022-01-03 12:09:02",
+    "last_onset": "2026-06-30 23:19:26",
+    "all_episode_rows": 349896,
+    "open_episodes": 54,
+    "stored_duration_gt1": 5036
+  },
+  "event_integrity": {
+    "events": 4302,
+    "event_ids": 4302,
+    "channels": 1377,
+    "sections": 784,
+    "open_events": 51,
+    "overlapping_same_channel": 0,
+    "exact_touch_same_channel": 331,
+    "repeated_channel_onsets": 2925,
+    "previous_onset_within24h": 1381,
+    "recovery_gap_le1h": 1303,
+    "recovery_gap_le24h": 1696,
+    "recovery_gap_le7d": 1799
+  },
+  "duration_sensitivity": [
+    {
+      "threshold_h": 1,
+      "events": 4302
+    },
+    {
+      "threshold_h": 2,
+      "events": 2712
+    },
+    {
+      "threshold_h": 6,
+      "events": 1645
+    },
+    {
+      "threshold_h": 24,
+      "events": 602
+    }
+  ],
+  "closing_values": [
+    {
+      "closing_value": "Норма",
+      "events": 2005
+    },
+    {
+      "closing_value": "Неопределен",
+      "events": 1909
+    },
+    {
+      "closing_value": "Выключен",
+      "events": 137
+    },
+    {
+      "closing_value": "Отключено устройство",
+      "events": 98
+    },
+    {
+      "closing_value": "<open>",
+      "events": 51
+    },
+    {
+      "closing_value": "Питание от сети",
+      "events": 37
+    },
+    {
+      "closing_value": "Обесточен",
+      "events": 17
+    },
+    {
+      "closing_value": "Обнаружен дым",
+      "events": 12
+    },
+    {
+      "closing_value": "Есть питание",
+      "events": 6
+    },
+    {
+      "closing_value": "Батарея разряжена",
+      "events": 4
+    },
+    {
+      "closing_value": "На охране",
+      "events": 4
+    },
+    {
+      "closing_value": "Неисправен",
+      "events": 4
+    },
+    {
+      "closing_value": "4",
+      "events": 3
+    },
+    {
+      "closing_value": "16.04.2025 00:31:10",
+      "events": 2
+    },
+    {
+      "closing_value": "Обнаружено движение",
+      "events": 2
+    },
+    {
+      "closing_value": "04.05.2026 07:45:29",
+      "events": 1
+    },
+    {
+      "closing_value": "11.02.2026 16:44:31",
+      "events": 1
+    },
+    {
+      "closing_value": "12",
+      "events": 1
+    },
+    {
+      "closing_value": "13",
+      "events": 1
+    },
+    {
+      "closing_value": "14",
+      "events": 1
+    },
+    {
+      "closing_value": "27.11.2025 08:40:50",
+      "events": 1
+    },
+    {
+      "closing_value": "5",
+      "events": 1
+    },
+    {
+      "closing_value": "9",
+      "events": 1
+    },
+    {
+      "closing_value": "Включен",
+      "events": 1
+    },
+    {
+      "closing_value": "Дыма нет",
+      "events": 1
+    },
+    {
+      "closing_value": "Затоплен",
+      "events": 1
+    }
+  ],
+  "coverage_by_quarter": [
+    {
+      "year": 2022,
+      "quarter": 2,
+      "total_events": 1341,
+      "eligible_events": 585,
+      "events_on_evaluation_calendar": 1313,
+      "excluded_ongoing": 708,
+      "excluded_no_exposure": 24,
+      "excluded_past": 28,
+      "excluded_target": 27,
+      "eligible_first_observed": 296,
+      "eligible_positive_section_days": 253
+    },
+    {
+      "year": 2022,
+      "quarter": 3,
+      "total_events": 136,
+      "eligible_events": 132,
+      "events_on_evaluation_calendar": 136,
+      "excluded_ongoing": 4,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 35,
+      "eligible_positive_section_days": 64
+    },
+    {
+      "year": 2022,
+      "quarter": 4,
+      "total_events": 146,
+      "eligible_events": 144,
+      "events_on_evaluation_calendar": 146,
+      "excluded_ongoing": 1,
+      "excluded_no_exposure": 1,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 56,
+      "eligible_positive_section_days": 87
+    },
+    {
+      "year": 2023,
+      "quarter": 1,
+      "total_events": 134,
+      "eligible_events": 133,
+      "events_on_evaluation_calendar": 134,
+      "excluded_ongoing": 0,
+      "excluded_no_exposure": 1,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 39,
+      "eligible_positive_section_days": 73
+    },
+    {
+      "year": 2023,
+      "quarter": 2,
+      "total_events": 355,
+      "eligible_events": 156,
+      "events_on_evaluation_calendar": 355,
+      "excluded_ongoing": 199,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 100,
+      "eligible_positive_section_days": 61
+    },
+    {
+      "year": 2023,
+      "quarter": 3,
+      "total_events": 91,
+      "eligible_events": 91,
+      "events_on_evaluation_calendar": 91,
+      "excluded_ongoing": 0,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 11,
+      "eligible_positive_section_days": 57
+    },
+    {
+      "year": 2023,
+      "quarter": 4,
+      "total_events": 68,
+      "eligible_events": 68,
+      "events_on_evaluation_calendar": 68,
+      "excluded_ongoing": 0,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 5,
+      "eligible_positive_section_days": 39
+    },
+    {
+      "year": 2024,
+      "quarter": 1,
+      "total_events": 82,
+      "eligible_events": 78,
+      "events_on_evaluation_calendar": 82,
+      "excluded_ongoing": 4,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 7,
+      "eligible_positive_section_days": 46
+    },
+    {
+      "year": 2024,
+      "quarter": 2,
+      "total_events": 70,
+      "eligible_events": 62,
+      "events_on_evaluation_calendar": 63,
+      "excluded_ongoing": 1,
+      "excluded_no_exposure": 0,
+      "excluded_past": 7,
+      "excluded_target": 0,
+      "eligible_first_observed": 4,
+      "eligible_positive_section_days": 42
+    },
+    {
+      "year": 2024,
+      "quarter": 3,
+      "total_events": 45,
+      "eligible_events": 40,
+      "events_on_evaluation_calendar": 45,
+      "excluded_ongoing": 5,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 2,
+      "eligible_positive_section_days": 32
+    },
+    {
+      "year": 2024,
+      "quarter": 4,
+      "total_events": 22,
+      "eligible_events": 22,
+      "events_on_evaluation_calendar": 22,
+      "excluded_ongoing": 0,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 1,
+      "eligible_positive_section_days": 17
+    },
+    {
+      "year": 2025,
+      "quarter": 1,
+      "total_events": 23,
+      "eligible_events": 23,
+      "events_on_evaluation_calendar": 23,
+      "excluded_ongoing": 0,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 3,
+      "eligible_positive_section_days": 22
+    },
+    {
+      "year": 2025,
+      "quarter": 2,
+      "total_events": 113,
+      "eligible_events": 91,
+      "events_on_evaluation_calendar": 113,
+      "excluded_ongoing": 19,
+      "excluded_no_exposure": 3,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 21,
+      "eligible_positive_section_days": 70
+    },
+    {
+      "year": 2025,
+      "quarter": 3,
+      "total_events": 179,
+      "eligible_events": 170,
+      "events_on_evaluation_calendar": 179,
+      "excluded_ongoing": 9,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 66,
+      "eligible_positive_section_days": 106
+    },
+    {
+      "year": 2025,
+      "quarter": 4,
+      "total_events": 628,
+      "eligible_events": 331,
+      "events_on_evaluation_calendar": 628,
+      "excluded_ongoing": 282,
+      "excluded_no_exposure": 15,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 128,
+      "eligible_positive_section_days": 238
+    },
+    {
+      "year": 2026,
+      "quarter": 1,
+      "total_events": 242,
+      "eligible_events": 222,
+      "events_on_evaluation_calendar": 242,
+      "excluded_ongoing": 20,
+      "excluded_no_exposure": 0,
+      "excluded_past": 0,
+      "excluded_target": 0,
+      "eligible_first_observed": 60,
+      "eligible_positive_section_days": 157
+    },
+    {
+      "year": 2026,
+      "quarter": 2,
+      "total_events": 627,
+      "eligible_events": 553,
+      "events_on_evaluation_calendar": 621,
+      "excluded_ongoing": 68,
+      "excluded_no_exposure": 0,
+      "excluded_past": 1,
+      "excluded_target": 5,
+      "eligible_first_observed": 106,
+      "eligible_positive_section_days": 349
+    }
+  ],
+  "coverage_totals": {
+    "events": 4302,
+    "eligible": 2901,
+    "ongoing": 1320,
+    "only_ongoing_exclusion": 1316,
+    "own_channel_ongoing_exclusion": 1196
+  },
+  "grouping_sensitivity": [
+    {
+      "unit": "channel_id",
+      "recovery_gap_hours": 0,
+      "grouped_events": 3971,
+      "original_events": 4302,
+      "largest_group": 3,
+      "multiple_groups": 326,
+      "events_in_multiple_groups": 657,
+      "q2_grouped_events": 607
+    },
+    {
+      "unit": "channel_id",
+      "recovery_gap_hours": 1,
+      "grouped_events": 2999,
+      "original_events": 4302,
+      "largest_group": 17,
+      "multiple_groups": 593,
+      "events_in_multiple_groups": 1896,
+      "q2_grouped_events": 506
+    },
+    {
+      "unit": "channel_id",
+      "recovery_gap_hours": 6,
+      "grouped_events": 2858,
+      "original_events": 4302,
+      "largest_group": 19,
+      "multiple_groups": 627,
+      "events_in_multiple_groups": 2071,
+      "q2_grouped_events": 492
+    },
+    {
+      "unit": "channel_id",
+      "recovery_gap_hours": 24,
+      "grouped_events": 2606,
+      "original_events": 4302,
+      "largest_group": 23,
+      "multiple_groups": 669,
+      "events_in_multiple_groups": 2365,
+      "q2_grouped_events": 453
+    },
+    {
+      "unit": "section_id",
+      "recovery_gap_hours": 0,
+      "grouped_events": 2620,
+      "original_events": 4302,
+      "largest_group": 24,
+      "multiple_groups": 785,
+      "events_in_multiple_groups": 2467,
+      "q2_grouped_events": 451
+    },
+    {
+      "unit": "section_id",
+      "recovery_gap_hours": 1,
+      "grouped_events": 1965,
+      "original_events": 4302,
+      "largest_group": 35,
+      "multiple_groups": 771,
+      "events_in_multiple_groups": 3108,
+      "q2_grouped_events": 370
+    },
+    {
+      "unit": "section_id",
+      "recovery_gap_hours": 6,
+      "grouped_events": 1836,
+      "original_events": 4302,
+      "largest_group": 35,
+      "multiple_groups": 781,
+      "events_in_multiple_groups": 3247,
+      "q2_grouped_events": 358
+    },
+    {
+      "unit": "section_id",
+      "recovery_gap_hours": 24,
+      "grouped_events": 1657,
+      "original_events": 4302,
+      "largest_group": 35,
+      "multiple_groups": 771,
+      "events_in_multiple_groups": 3416,
+      "q2_grouped_events": 317
+    }
+  ],
+  "collector_cooccurrence_sensitivity": [
+    {
+      "chained_gap_minutes": 10,
+      "clusters": 966,
+      "channel_events": 4302,
+      "clusters_ge5_channels": 157,
+      "events_in_ge5_clusters": 3185,
+      "clusters_ge10_channels": 64,
+      "events_in_ge10_clusters": 2560,
+      "largest_channel_cluster": 192,
+      "largest_section_cluster": 125,
+      "transitive_clusters_spanning_gt24h": 0
+    },
+    {
+      "chained_gap_minutes": 60,
+      "clusters": 805,
+      "channel_events": 4302,
+      "clusters_ge5_channels": 141,
+      "events_in_ge5_clusters": 3433,
+      "clusters_ge10_channels": 72,
+      "events_in_ge10_clusters": 2977,
+      "largest_channel_cluster": 194,
+      "largest_section_cluster": 125,
+      "transitive_clusters_spanning_gt24h": 0
+    }
+  ],
+  "collector_cooccurrence": {
+    "chained_gap_minutes": 60,
+    "clusters": 805,
+    "channel_events": 4302,
+    "clusters_ge5_channels": 141,
+    "events_in_ge5_clusters": 3433,
+    "clusters_ge10_channels": 72,
+    "events_in_ge10_clusters": 2977,
+    "largest_channel_cluster": 194,
+    "largest_section_cluster": 125,
+    "transitive_clusters_spanning_gt24h": 0
+  },
+  "concentration": {
+    "sections_with_events": 784,
+    "events": 4302,
+    "events_top10_sections": 474,
+    "events_top50_sections": 1502
+  },
+  "first_observed_left_censor": {
+    "first_channel_labels": 1377,
+    "first_channel_labels_with_earlier_qualified_history": 78,
+    "first_section_event_labels": 1000,
+    "first_section_labels_with_earlier_qualified_history": 68
+  },
+  "sources": {
+    "events": {
+      "path": "data/03_processed/local24_20260923/events.parquet",
+      "sha256": "9e892229497b0ae23486b5dab6c3612ad8e84f6d5521ac4c1949759adda129bc"
+    },
+    "coverage": {
+      "path": "data/03_processed/local24_20260923/coverage.parquet",
+      "sha256": "398e1bd997c6308d23889510af3fb9c4c01a31adf694459ee5b4b03479ee05c7"
+    },
+    "mapping": {
+      "path": "data/03_processed/local24_20260923/mapping.parquet",
+      "sha256": "12423b2b633918e8ba1418bd6c5fc86d9b9148984dbd3820b6aa256886f92b58"
+    },
+    "forecast_days": {
+      "path": "data/03_processed/local24_20260923/forecast_days.parquet",
+      "sha256": "9ae9be99af969cb8707785fbc2cb16312f2b84c68787f6b520799d724936b656"
+    },
+    "episodes": {
+      "path": "data/03_processed/faildef_20260915/D5/episodes_ext.parquet",
+      "sha256": "581acc43d3d729b05d1db72c8cb4b384e8157de216f5f2918b06c327e4be7221"
+    }
+  },
+  "repeat_fix_rebuild": {
+    "events_compared": 4302,
+    "section_repeat_flags_changed": 68,
+    "channel_repeat_flags_changed": 78,
+    "event_nonflag_differences": 0,
+    "dataset_rows_compared": 4267349,
+    "dataset_row_or_field_differences": 0,
+    "original_files_unchanged": true
+  }
+}
