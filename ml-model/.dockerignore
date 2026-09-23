@@ -1,0 +1,12 @@
+.git/
+data/
+docs/
+tests/
+artifacts/
+.venv/
+.env
+**/__pycache__/
+**/*.pyc
+**/*.log
+# External models are permitted only in an explicitly prepared offline build
+# context. No model files are included in this source-only draft.

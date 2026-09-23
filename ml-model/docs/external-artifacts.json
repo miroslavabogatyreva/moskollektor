@@ -1,0 +1,146 @@
+{
+  "status": "superseded_720h_candidate_do_not_deploy",
+  "required_horizon_h": 24,
+  "candidate_horizon_h": 720,
+  "replacement_task": "MOS-219",
+  "model_version": "lgbm-v3-collector-2026.09.22",
+  "files": [
+    {
+      "path": "models/v3_collector_20260922/booster_42.txt",
+      "size_bytes": 49206,
+      "sha256": "4ae3df7e9097087ba54a3c6c4d0400b071ef37a070af2fd6a3b5125b2313a200"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_43.txt",
+      "size_bytes": 49325,
+      "sha256": "d65e28085baac8d399a37c0a2c34ed430c57771ef3f60b20c8dcc30cb26efd25"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_44.txt",
+      "size_bytes": 49184,
+      "sha256": "611458178d520a698f70222116c2e5d9d74b1c01c6d3ee0d247585667fcc35c7"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_45.txt",
+      "size_bytes": 78253,
+      "sha256": "255472a65dfaaedbb6524283a1c9df95246fe8a49935b4160335f2a610c3d9d4"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_46.txt",
+      "size_bytes": 51956,
+      "sha256": "f28ec7612b01f60f088c56c515f0c63df7ecf0bd55e9166baf59b7912a85c58e"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_47.txt",
+      "size_bytes": 49308,
+      "sha256": "d31a428b7ebc7155181ad376a76bd60b7974f62c30362dc04eba49223c3d1cbd"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_48.txt",
+      "size_bytes": 49252,
+      "sha256": "270891e7a8222f469733882cce6d3bb62da2016715cedef51f65070eeba8b44a"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_49.txt",
+      "size_bytes": 49287,
+      "sha256": "c23547316e120c8c03fdf5af64ce86cab3963e13ebb2d009037ee20c55a2a3bf"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_50.txt",
+      "size_bytes": 49301,
+      "sha256": "6303e70060ffc143449378b386b5a13a8b6649d8b931142a8f33b4beaf547077"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_51.txt",
+      "size_bytes": 49316,
+      "sha256": "d979569787b19296554bec7470021a8e5c6605d48288c8ff363b7ce8bfe5bf0d"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_52.txt",
+      "size_bytes": 49200,
+      "sha256": "7935c739c7ba9d7c1f151c1b92a9340659b61ef5fb950418bb41b6a329c4177a"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_53.txt",
+      "size_bytes": 49262,
+      "sha256": "eecdc02f0479a293b49b84f07de483b08bca8d7d04ef861f3f4b5132952a2d1c"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_54.txt",
+      "size_bytes": 49232,
+      "sha256": "70ea5fc219115f8a1e2292eb2320638680a588558c6f4f91daf83dc2cbb39654"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_55.txt",
+      "size_bytes": 49290,
+      "sha256": "aa6162465766626ee791dbab0c87246ea18949b0e62a8f4918eb37510c793f0b"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_56.txt",
+      "size_bytes": 49320,
+      "sha256": "9db94620c4a16de80698b10636d9faf180ee0629fc5d62f1f17ce45bb62570ba"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_57.txt",
+      "size_bytes": 49229,
+      "sha256": "0567b3533d4b1f61d4458277c52d5792832d4e7fb6bf2043155b31ba87c65973"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_58.txt",
+      "size_bytes": 49312,
+      "sha256": "e36f6e4ae92ccd4a21b4a11e9a242d5629079d42490711665cb362e02937916a"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_59.txt",
+      "size_bytes": 49284,
+      "sha256": "ed8124a584c626361410ae3d2d72f416a343a8ed3f2df565a9749e78fe56807a"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_60.txt",
+      "size_bytes": 49249,
+      "sha256": "ac24ddfab0965afc1931beabe9e466b3dcdacbfcbbdfe752f3bfbe43b52ab1d8"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_61.txt",
+      "size_bytes": 49280,
+      "sha256": "ef9c31d4b5f3588389c5d325e8d18ae4cc69872eaa159c6bb552cc463504f3a9"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_62.txt",
+      "size_bytes": 49243,
+      "sha256": "9dd42ef36f46846565be2ddcde95ea5dedf85c6fd12fdc4e8aa7f9e4630197c9"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_63.txt",
+      "size_bytes": 49306,
+      "sha256": "f06c31078a8170dfa8182c3e7fee74da9db7765ee17710f255860d27016253fe"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_64.txt",
+      "size_bytes": 49236,
+      "sha256": "8b906d7cd9135f2193fd78041bd69439f5af1c7f7dd88fd3b188413972b3fcae"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_65.txt",
+      "size_bytes": 49240,
+      "sha256": "fd878ec34f22f7fa2f5838a9d1cd1bcde36e9b35a4dd5ec7a0f833ab251c19ba"
+    },
+    {
+      "path": "models/v3_collector_20260922/booster_66.txt",
+      "size_bytes": 49230,
+      "sha256": "4f7d0ced3bb8d074631914a08b275fca5567ba129d01086331505269c4d1c0dd"
+    },
+    {
+      "path": "models/v3_collector_20260922/channels.parquet",
+      "size_bytes": 77656,
+      "sha256": "7b0f6759eb811084cb50ea7938b25b7773e22cb4cb40e04a5b5611dce9a46d93"
+    },
+    {
+      "path": "models/v3_collector_20260922/model_meta.json",
+      "size_bytes": 6067,
+      "sha256": "bbf2610a248ea14ab3a3197ec613e490f3c206e4a669ae9ce211174179e60fd4"
+    }
+  ],
+  "included_payloads": false,
+  "note": "Hashes identify external candidate files for offline review only. No weights, channel registry or customer data are included."
+}
