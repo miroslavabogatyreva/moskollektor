@@ -75,11 +75,13 @@ def запрос(base, путь, логин=ЛОГИН, params=None):
 
 
 def записи(тело):
-    """Список записей, как бы метод его ни завернул; None — это не список."""
+    """Список записей, как бы метод его ни завернул: голым списком, в items или,
+    у GeoJSON FeatureCollection, в features. None — это не список."""
     if isinstance(тело, list):
         return тело
-    if isinstance(тело, dict) and isinstance(тело.get("items"), list):
-        return тело["items"]
+    for ключ in ("items", "features"):
+        if isinstance(тело, dict) and isinstance(тело.get(ключ), list):
+            return тело[ключ]
     return None
 
 
@@ -175,6 +177,7 @@ def подставить_путь(путь, списки):
 
 def _selfcheck():
     assert записи([]) == [] and записи({"total": 0, "items": []}) == []
+    assert записи({"type": "FeatureCollection", "features": []}) == [], "GeoJSON (MOS-45)"
     assert записи({"data_edge": "x"}) is None
     spec = {"components": {"schemas": {"R": {"type": "object", "required": ["a", "b"]}}}}
     op = {"responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/R"}}}}}}
