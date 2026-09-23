@@ -206,6 +206,12 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний д
 check "GET /api/objects/409/channels (dispatcher1)"         200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels"
 check "GET /api/objects/999999999/channels (участка нет)"   404 -H "X-User-Login: ods1" "$BASE_URL/api/objects/999999999/channels"
 
+# MOS-45, Ф-81: геометрия участков. Формат — ?geometry=, а не ?format= (тот занят XML).
+# Участок 1490 («798:0») — коллектор «объект Зита», чужой для tech1 (коллектор 6).
+check "GET /api/geo/sections?section_id=1490 (ods1, GeoJSON)"          200 -H "X-User-Login: ods1" "$BASE_URL/api/geo/sections?section_id=1490"
+check "GET /api/geo/sections?geometry=wkt&section_id=1490 (ods1, WKT)" 200 -H "X-User-Login: ods1" "$BASE_URL/api/geo/sections?geometry=wkt&section_id=1490"
+check "GET /api/geo/sections?section_id=1490 (tech1, чужой участок)"   403 -H "X-User-Login: tech1" "$BASE_URL/api/geo/sections?section_id=1490"
+
 check_channel_faults_top() {
     label="GET /api/objects/409/channels — отказы D5 участка 15:12, наибольшие в парке"
     body=$(curl -s $CURL_OPTS -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels")
@@ -394,20 +400,27 @@ check "PUT /api/settings/precision_min (admin1, 1.5 — вне (0,1))" \
 # Проверка по улову, не по счётчику (нашла 58): audit.user_action пишет КАЖДЫЙ
 # запрос, включая GET-запросы этого же прогона, — разница длины «до/после»
 # не изолирует именно наш PUT. Печатаем оба числа для картины, но ассерт ищет
-# конкретную строку: метод, путь, код 200 и details.old/new — прежнее значение и пробное.
+# конкретную строку: метод, путь, код 200 и details.old/new.
 #
-# Прежнее значение ЧИТАЕТСЯ, а не зашито (MOS-179, 22.09.2026). До этого проверка
-# «возвращала как было» числом 24, а миграция 037 подняла горизонт до 720 — и каждый
-# прогон examples.sh ставил на стенде 24 (audit.user_action 7904: 720 → 30,
-# 7906: 30 → 24). Не прочиталось — PUT не делаем вовсе: вернуть было бы нечего.
+# ПИШЕМ ТО ЖЕ ЗНАЧЕНИЕ, ЧТО ПРОЧИТАЛИ (MOS-224, 23.09.2026). До этой правки
+# проверка писала пробное число, отличное от прочитанного, потом отдельным
+# PUT возвращала прочитанное — окно между двумя PUT было временем, когда
+# настройка на стенде стояла ЧУЖИМ значением. 23.09.2026 в 11:00 два прогона
+# examples.sh пошли одновременно: первый прочитал 24 и записал 30, второй
+# прочитал уже 30 (чужое пробное) и в конце «вернул» его вместо настоящих 24.
+# `update_setting` (`backend/app/api/settings.py`) пишет `old`/`new` в journal
+# безусловно, даже когда они равны, — значит проверить путь записи и след
+# в audit можно, ни разу не меняя значение по-настоящему: любое число
+# конкурентных прогонов, каждый читает и пишет назад СВОЁ прочитанное,
+# оставляет настройку той же, какой она была до всех них.
 #
 # action_id, а не просто «есть подходящая строка в списке» (нашла я сама,
 # 17.09.2026): при повторных прогонах в журнале остаётся строка от ПРОШЛОГО
-# успешного PUT с тем же old=24/new=30, и поиск без границы находит её даже
-# когда текущий прогон ничего не пишет — проверка была зелёной на сломанном
-# коде. Граница — максимальный action_id ДО этого PUT, ищем строго после него.
+# успешного PUT с тем же old/new — поиск без границы находит её даже
+# когда текущий прогон ничего не пишет. Граница — максимальный action_id
+# ДО этого PUT, ищем строго после него.
 check_settings_audit_trail() {
-    label="PUT /api/settings/forecast_horizon_h (admin1) со следом old/new в audit"
+    label="PUT /api/settings/forecast_horizon_h (admin1) со следом old=new в audit — значение не меняется"
     was=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/settings" | python3 -c "
 import json, sys
 from decimal import Decimal
@@ -419,8 +432,6 @@ print(Decimal(str(v)).normalize().to_eng_string())
         mismatch=1
         return
     fi
-    # Пробное значение обязано отличаться от прежнего, иначе old = new и след не отличим.
-    probe=30; [ "$was" = "30" ] && probe=31
     # GET /api/audit отдаёт {total, items} с 21.09.2026 (MOS-135) — total,
     # а не длина items: items теперь страница (умолчание 200), а не весь журнал.
     before_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
@@ -431,17 +442,13 @@ rows = json.load(sys.stdin).get('items', [])
 print(max((r['action_id'] for r in rows), default=0))
 " 2>/dev/null || echo 0)
 
-    curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
-        -H "Content-Type: application/json" -d "{\"value\": $probe}" \
-        "$BASE_URL/api/settings/forecast_horizon_h"
-    audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
-    after=$(echo "$audit_body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
-
-    # Вернуть горизонт как было — до печати результата, чтобы откат случился
-    # даже если сама проверка ниже упадёт.
+    # Единственный PUT в этой проверке: пишем ровно $was. Второго, «возвращающего»,
+    # больше нет — писать нечего возвращать, когда ничего не менялось.
     curl -s $CURL_OPTS -o /dev/null -X PUT -H "X-User-Login: admin1" \
         -H "Content-Type: application/json" -d "{\"value\": $was}" \
         "$BASE_URL/api/settings/forecast_horizon_h"
+    audit_body=$(curl -s $CURL_OPTS -H "X-User-Login: admin1" "$BASE_URL/api/audit")
+    after=$(echo "$audit_body" | python3 -c "import json,sys; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null || echo -1)
 
     found=$(echo "$audit_body" | python3 -c "
 import json, sys
@@ -459,7 +466,7 @@ for r in rows:
     d = r.get('details') or {}
     if (r.get('method') == 'PUT' and r.get('path') == '/api/settings/forecast_horizon_h'
             and r.get('status_code') == 200 and same(d.get('old'), '$was')
-            and same(d.get('new'), '$probe')):
+            and same(d.get('new'), '$was')):
         print('да')
         break
 else:
@@ -470,7 +477,7 @@ else:
     if [ "$found" = "да" ]; then
         echo "OK          $label"
     else
-        echo "РАСХОЖДЕНИЕ $label -> среди строк новее action_id $before_max_id нет PUT .../forecast_horizon_h, код 200, old=$was/new=$probe"
+        echo "РАСХОЖДЕНИЕ $label -> среди строк новее action_id $before_max_id нет PUT .../forecast_horizon_h, код 200, old=new=$was"
         mismatch=1
     fi
 }
