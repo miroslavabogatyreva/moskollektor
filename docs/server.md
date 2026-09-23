@@ -158,6 +158,18 @@ systemctl is-active  docker -> active
 `shared_buffers = 3GB`, `maintenance_work_mem = 1GB`, `max_wal_size = 8GB`,
 `effective_cache_size = 8GB`. На маке под кэш было 128 МБ, и это половина тормозов.
 
+**`/dev/shm` контейнера `db` — 512 МБ (MOS-222), добавлено 23.09.2026.** Докеровское
+умолчание — 64 МБ, и параллельный план падал `could not resize shared memory
+segment`: нашлось на живом инциденте, когда сессия 50 проверяла журнал
+технологических событий двумя тяжёлыми запросами и Postgres выбрал план
+на 3 участника. Считать надо не от `shared_buffers` — он лежит в анонимном
+mmap (`SHOW shared_memory_type` = `mmap`), `/dev/shm` не трогает. Расходует
+`/dev/shm` `dynamic_shared_memory_type = posix` — общая память параллельных
+воркеров, и её бюджет идёт от `work_mem` (64 МБ) × `max_parallel_workers` (8,
+потолок на весь экземпляр) = 512 МБ. Проверка на стенде: `docker exec
+moskollektor-db-1 df -h /dev/shm` — 512M вместо 64M. Разбор и цифры —
+`docs/HLD.md` разд. 7.1.
+
 **Стенд достроен 16.09.2026 (MOS-90), к вечеру того же дня контейнеров стало
 пять** — `db`, `nginx`, `ml`, `api` и `worker`. Первые четыре `healthy`; проверку
 живости для `api` я добавил 16.09.2026, до этого она была у всех служб, кроме той
