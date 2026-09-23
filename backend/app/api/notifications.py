@@ -23,11 +23,35 @@ import json
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.auth.deps import get_current_user, require, видимые_участки, проверить_участок
 from app.db import get_conn, get_pool
 
 router = APIRouter(prefix="/api")
+
+
+# Порядок полей — как в _строка()/list_notifications(): response_model меняет
+# сериализацию по объявленному порядку и объявленному типу, а не только
+# добавляет схему в /openapi.json. Нашёл 59 (check-api-contract): без модели
+# схема ответа у GET пустая — {}. Типы сверены с колонками (docs/HLD.md разд. 5.4):
+# probability — real (float4, уже float), horizon_h — smallint (уже int),
+# acked_by здесь login из JOIN на ref.app_user, а не число.
+class NotificationItem(BaseModel):
+    id: int
+    reported_at: str
+    object_name: str | None
+    smvu_key: str | None
+    probability: float
+    horizon_h: int
+    as_of: str | None
+    acked_at: str | None
+    acked_by: str | None
+
+
+class NotificationsResponse(BaseModel):
+    total: int
+    items: list[NotificationItem]
 
 ПИНГ_С = 20  # HLD разд. 4.3: пинг раз в 20 с, иначе nginx рвёт по своему таймауту
 ОПРОС_С = 5
@@ -92,7 +116,7 @@ def _строка(r: asyncpg.Record) -> dict:
     }
 
 
-@router.get("/notifications")
+@router.get("/notifications", response_model=NotificationsResponse)
 async def list_notifications(
     acked: bool | None = Query(None, description="квитировано ли; без параметра — все"),
     limit: int = Query(200, ge=1, le=1000),
@@ -169,7 +193,10 @@ async def ack(
     }
 
 
-@router.get("/alerts/stream")
+@router.get(
+    "/alerts/stream",
+    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+)
 async def alerts_stream(request: Request, x_user_login: str | None = Header(None)):
     pool = await get_pool()
     checker = require("notifications.read")

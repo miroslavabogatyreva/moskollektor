@@ -41,11 +41,29 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.auth.deps import require, видимые_участки
 from app.db import КРАЙ_ДАННЫХ, get_conn
 
 МСК = ZoneInfo("Europe/Moscow")
+
+
+# Порядок и типы — как в list_tech_events() ниже (нашёл 59, check-api-contract:
+# без модели /openapi.json отдаёт пустую схему у 200). journal_id — bigint,
+# read_time уже строка isoformat, остальное — text из БД, уже str.
+class TechEventItem(BaseModel):
+    journal_id: int
+    read_time: str
+    object: str | None
+    sensor_kind: str | None
+    value_text: str | None
+    event_type: str
+
+
+class TechEventsResponse(BaseModel):
+    total: int
+    items: list[TechEventItem]
 
 router = APIRouter(prefix="/api")
 
@@ -129,7 +147,7 @@ def _тип_события(is_alarm: bool) -> str:
     return "Предупреждение" if is_alarm else "Норма"
 
 
-@router.get("/tech-events")
+@router.get("/tech-events", response_model=TechEventsResponse)
 async def list_tech_events(
     from_: date | None = Query(
         None, alias="from", description="начало периода, включительно"
@@ -168,7 +186,15 @@ async def list_tech_events(
     участки = await видимые_участки(user, conn)
 
     async with conn.transaction():
-        # Живёт только в этой транзакции (docstring выше — цифры замера).
+        # SET LOCAL действует строго до COMMIT этого блока, но не до возврата
+        # соединения в пул — нашла 5e, MOS-42: asyncpg 0.31.0 на первой
+        # подготовке запроса в транзакции запоминает текущий jit ('off' из-за
+        # этой же строки) и после COMMIT оставляет его на сеансе; снимает
+        # только RESET ALL, который asyncpg шлёт при release (pool.py:239).
+        # Наш код это не задевает не из-за asyncpg, а потому что после этого
+        # блока метод больше ничего не запрашивает на том же соединении:
+        # запрос, дописанный после transaction() (или пущенный по этому conn
+        # мимо пула), отработает с выключенным jit.
         await conn.execute("SET LOCAL jit = off")
         total = await conn.fetchval(
             СЧЁТ_SQL,
