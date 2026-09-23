@@ -89,7 +89,7 @@ moskollektor/
 │   └── books/                разбор литературы, 80 находок с номерами страниц;
 │                              сами PDF с 15.09.2026 на сервере, в git не идут
 ├── db/              8   миграции базы — первый продуктовый каталог
-│   ├── migrations/           001_assets … 044_roles_scope, по возрастанию.
+│   ├── migrations/           001_assets … 046_synthetic_geometry, по возрастанию.
 │   │                          010_orders — справочники ТОиР, синтетический реестр
 │   │                          объектов из ref.object_xref и уникальность автозаявки;
 │   │                          022_channel_daily — суточная свёртка по каналу,
@@ -102,7 +102,9 @@ moskollektor/
 │   │                          изменение плюс пульс, а не каждый расчёт
 │   │                          044_roles_scope — четыре роли заказчика в ref.user_role
 │   │                          и область видимости в ref.user_scope (MOS-107);
-│   │                          041–043 заняты черновыми ветками, в master их нет
+│   │                          041–043 заняты черновыми ветками, в master их нет;
+│   │                          046_synthetic_geometry — вид «коллектор» с
+│   │                          MULTILINESTRING, линии рисует ingest (MOS-45)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости
@@ -118,7 +120,9 @@ moskollektor/
 │                              по словарю модели v3 (model_failure_episodes.py);
 │                              вес, карточка участка и метрики с 038 читают
 │                              вторые, первые — только features.py заглушки;
-│                              место канала — channel_place.py и kind_names.py
+│                              место канала — channel_place.py и kind_names.py;
+│                              синтетическая геометрия коллекторов и участков —
+│                              synthetic_geometry.py (MOS-45)
 ├── backend/tests/       pytest чистых функций без базы, вместе с code/tests/:
 │                        python3 -m pytest backend/tests code/tests — 35 тестов.
 │                        requirements-dev.txt ставит pytest, в образ он не идёт
@@ -168,7 +172,8 @@ db/migrations/      нумерованные .sql, накатываются по
 db/seed/            справочники данными: типы событий, уставки, нормативы ТО
 backend/app/
   api/              методы REST (settings.py — пороги и горизонт из ref.app_setting,
-                    020_app_setting.sql; правит только администратор, НФ-44)
+                    020_app_setting.sql; правит только администратор, НФ-44;
+                    geo.py — геометрия участков в GeoJSON и WKT, Ф-81)
   auth/             вход через службу каталогов, роли
   worker/           расчёт: восемь стадий и планировщик
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026
