@@ -19,13 +19,14 @@ from datetime import datetime
 import asyncpg
 from fastapi import APIRouter, Depends, Query
 
+from app.api.schemas import AuditList
 from app.auth.deps import require
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
 
-@router.get("/audit")
+@router.get("/audit", response_model=AuditList)
 async def list_audit(
     from_: datetime | None = Query(None, alias="from", description="момент начала периода, включительно"),
     to: datetime | None = Query(None, description="момент конца периода, включительно"),
