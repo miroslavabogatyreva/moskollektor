@@ -81,7 +81,8 @@ INSERT INTO smvu.model_failure_episode
 SELECT s.channel_id, s.section_id, s.started_at, s.ended_at, s.rows_cnt, s.closed_by,
        s.fault_value,
        EXISTS (SELECT 1 FROM smvu.data_outage o
-                WHERE tstzrange(s.started_at, coalesce(s.ended_at, $2))
+                WHERE o.reason = 'export_gap'  -- 2021 год не тишина (040)
+                  AND tstzrange(s.started_at, coalesce(s.ended_at, $2))
                    && tstzrange(o.started_at, o.ended_at)),
        v.model_version
   FROM собрано s
