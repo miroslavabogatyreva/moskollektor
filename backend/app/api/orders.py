@@ -23,7 +23,7 @@ predicted_failure_at и lead_hours убраны: момент as_of + horizon_h 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
-from app.auth.deps import require
+from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
@@ -37,6 +37,7 @@ FROM_SQL = """
   JOIN ref.priority p        ON p.id = n.priority_id
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
+ WHERE $1::int[] IS NULL OR x.section_id = ANY($1)
 """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
@@ -50,7 +51,7 @@ SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
  ORDER BY n.due_at
- LIMIT $1 OFFSET $2
+ LIMIT $2 OFFSET $3
 """
 
 DETAIL_SQL = """
@@ -107,10 +108,11 @@ async def list_orders(
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("orders.read")),
+    user=Depends(require("orders.read")),
 ):
-    total = await conn.fetchval(COUNT_SQL)
-    rows = await conn.fetch(LIST_SQL, limit, offset)
+    участки = await видимые_участки(user, conn)
+    total = await conn.fetchval(COUNT_SQL, участки)
+    rows = await conn.fetch(LIST_SQL, участки, limit, offset)
     return {
         "schema_version": "orders.v1",
         "total": total,
@@ -134,9 +136,10 @@ async def list_orders(
 async def get_order(
     order_id: int,
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("orders.read")),
+    user=Depends(require("orders.read")),
 ):
     row = await conn.fetchrow(DETAIL_SQL, order_id)
+    await проверить_участок(user, conn, row["section_id"] if row else None)
     if row is None:
         raise HTTPException(404, "заявка не найдена")
 

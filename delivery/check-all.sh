@@ -503,6 +503,28 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
+# backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
+# что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
+# в JSON на /api/risks целиком и /api/forecasts?limit=1000.
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-80"        "XML = JSON, лист за листом"  env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_xml_response.py
+else
+  skip_msg "Ф-80" "XML = JSON, лист за листом — задайте BASE_URL"
+fi
+
+# Условия готовности Q4 по каждому GET из живого /openapi.json, а не из списка
+# в коде: новый метод попадает под проверку сам. Отказ без X-User-Login, 200 под
+# admin1 и схема ответа в openapi (нет схемы — СБОЙ, MOS-221), заведомо пустой
+# запрос даёт 200 и [], строка в audit.user_action на
+# каждый вызов. Краснеет, если снять require с одного метода (23.09.2026:
+# GET /api/settings без require → «без X-User-Login ответ 200»).
+if [ -n "${BASE_URL:-}" ]; then
+  run "НФ-43, НФ-77" "контракт каждого GET из openapi" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" delivery/check-api-contract.py
+else
+  skip_msg "НФ-43, НФ-77" "контракт каждого GET из openapi — задайте BASE_URL"
+fi
+
 # Пять экранных строк стояли закрытыми на разовом curl от 16.09.2026, и ни одна
 # не была привязана сюда. Способ доказательства при этом не работал: nginx отдаёт
 # try_files $uri $uri/ /index.html, то есть КОД 200 НА ЛЮБОЙ ПУТЬ без /api/
@@ -518,6 +540,109 @@ if [ -n "${BASE_URL:-}" ]; then
   run "М-03, М-04, М-07, М-08, М-15" "экраны и метод рисков" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_frontend.py
 else
   skip_msg "М-03…М-15" "экраны и метод рисков — задайте BASE_URL"
+fi
+
+# Роли и область видимости (MOS-107, Q4.11). Проверка уловом, а не статусом:
+# у диспетчера района и диспетчера ОДС выдача одинаковая (район в выгрузке один),
+# и отключённую подрезку по ним не отличить. Отличает только техник: tech1
+# привязан к коллектору 6 «объект Бета» (db/seed/rbac.sql) и обязан получить
+# строго меньше строк /api/risks, чем ods1, 403 на чужой участок, чужую заявку
+# и чужой прогноз. С DATABASE_URL сверяет ещё и точное число — участки
+# коллекторов из ref.user_scope техника по УЧАСТКИ_КОЛЛЕКТОРА, и число района:
+# dispatcher1 с узлом 5773 видит ровно столько участков, сколько строк
+# в pred.forecast_current. Несуществующий объект технику — 403, а не 404:
+# иначе по разнице кодов он узнал бы, есть ли чужой объект. НФ-44 — 403
+# диспетчеру на /api/settings. Сложение областей — tech2 с двумя коллекторами
+# (6 и 4068): объединение строго больше, чем у tech1, и строго меньше всего
+# парка; пара «техник + район» дала бы весь парк и прошла бы вхолостую.
+check_scope() {
+  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
+import json, os, ssl, urllib.error, urllib.request
+base = os.environ["BASE_URL"].rstrip("/")
+ctx = ssl._create_unverified_context() if "-k" in os.environ["CURL_OPTS"].split() else None
+
+def get(path, login):
+    req = urllib.request.Request(base + path, headers={"X-User-Login": login})
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, None
+
+def ok(path, login):
+    code, body = get(path, login)
+    assert code == 200, f"{login} {path}: {code}, ждали 200"
+    return body
+
+def denied(path, login):
+    code, _ = get(path, login)
+    assert code == 403, f"{login} {path}: {code}, ждали 403"
+
+ods = {r["section_id"] for r in ok("/api/risks", "ods1")}
+tech = {r["section_id"] for r in ok("/api/risks", "tech1")}
+district = {r["section_id"] for r in ok("/api/risks", "dispatcher1")}
+tech2 = {r["section_id"] for r in ok("/api/risks", "tech2")}
+assert tech < tech2 < ods, f"сложение областей: tech1 {len(tech)}, tech2 {len(tech2)}, ods1 {len(ods)} — ждали tech1 < tech2 < ods1"
+assert district == ods, f"район: dispatcher1 {len(district)}, ods1 {len(ods)} — район в выгрузке один, числа обязаны совпасть"
+assert 0 < len(tech) < len(ods), f"риски: tech1 {len(tech)}, ods1 {len(ods)} — подрезка не работает"
+assert tech <= ods, f"tech1 видит участки, которых нет у ods1: {sorted(tech - ods)[:5]}"
+
+if os.environ.get("DATABASE_URL"):
+    import asyncio, asyncpg
+    from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
+    async def expected():
+        c = await asyncpg.connect(os.environ["DATABASE_URL"])
+        per_login = {}
+        for login in ("tech1", "tech2"):
+            rows = await c.fetch(f"""
+                WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+                SELECT section_id FROM u
+                 WHERE collector_id IN (SELECT object_id FROM ref.user_scope WHERE login = $1)
+            """, login)
+            per_login[login] = {r["section_id"] for r in rows}
+        n_current = await c.fetchval("SELECT count(*) FROM pred.forecast_current")
+        await c.close()
+        return per_login, n_current
+    exp, n_current = asyncio.run(expected())
+    for login, got in (("tech1", tech), ("tech2", tech2)):
+        want = exp[login]
+        assert got == want, f"{login} видит {len(got)}, по УЧАСТКИ_КОЛЛЕКТОРА {len(want)}"
+    assert len(district) == n_current, f"dispatcher1 видит {len(district)}, в pred.forecast_current {n_current}"
+
+own, foreign = min(tech), min(ods - tech)
+ok(f"/api/objects/{own}", "tech1")
+for path in (f"/api/objects/{foreign}", f"/api/objects/{foreign}/channels",
+             f"/api/objects/{foreign}/readings?from=2026-06-30&to=2026-06-30",
+             "/api/objects/999999999", "/api/orders/999999999", "/api/forecasts/999999999"):
+    denied(path, "tech1")
+code, _ = get("/api/objects/999999999", "ods1")
+assert code == 404, f"ods1 /api/objects/999999999: {code}, ждали 404"
+
+orders_ods = ok("/api/orders?limit=1000", "ods1")
+orders_tech = ok("/api/orders?limit=1000", "tech1")
+n_ods, n_tech = orders_ods["total"], orders_tech["total"]
+assert n_tech < n_ods, f"заявки: tech1 {n_tech}, ods1 {n_ods} — подрезка не работает"
+tech_orders = {o["id"] for o in orders_tech["items"]}
+alien = [o["id"] for o in orders_ods["items"] if o["id"] not in tech_orders]
+alien_order = alien[0] if alien else "—"
+if alien:
+    denied(f"/api/orders/{alien_order}", "tech1")
+
+fc = ok("/api/forecasts?limit=1000", "ods1")["items"]
+alien_fc = next((f["forecast_id"] for f in fc if f["section_id"] not in tech), "—")
+if alien_fc != "—":
+    denied(f"/api/forecasts/{alien_fc}", "tech1")
+
+denied("/api/settings", "dispatcher1")
+print(f"риски: tech1 {len(tech)}, tech2 {len(tech2)}, dispatcher1 {len(district)}, ods1 {len(ods)}; заявки: tech1 {n_tech} из {n_ods}; "
+      f"403: участок {foreign}, заявка {alien_order}, прогноз {alien_fc}, /api/settings")
+'
+}
+
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 < tech2 < ods1" check_scope
+else
+  skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
 fi
 
 # Доступность таблиц (НФ-92, часть III). Проверяет не нажатия, а дерево
