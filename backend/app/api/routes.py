@@ -9,7 +9,7 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.auth.deps import require
+from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import КРАЙ_ДАННЫХ, get_conn
 
 router = APIRouter(prefix="/api")
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api")
 @router.get("/risks")
 async def list_risks(
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("risks.read")),
+    user=Depends(require("risks.read")),
 ):
     """Текущий риск по каждому участку — одна строка на участок (М-15).
 
@@ -59,8 +59,10 @@ async def list_risks(
         SELECT section_id, probability, risk_rank, horizon_h, as_of, is_stale,
                risk_class
         FROM pred.forecast_current
+        WHERE $1::int[] IS NULL OR section_id = ANY($1)
         ORDER BY risk_rank
-        """
+        """,
+        await видимые_участки(user, conn),
     )
     return [dict(r) for r in rows]
 
@@ -144,7 +146,7 @@ async def list_forecasts(
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("forecasts.read")),
+    user=Depends(require("forecasts.read")),
 ):
     """Прогнозы за период (М-16). Две даты в каждой строке, и они значат разное.
 
@@ -189,7 +191,9 @@ async def list_forecasts(
     where = """
         WHERE ($1::date IS NULL OR r.started_at >= $1)
           AND ($2::timestamptz IS NULL OR r.started_at < $2)
+          AND ($3::int[] IS NULL OR f.section_id = ANY($3))
     """
+    участки = await видимые_участки(user, conn)
     total = await conn.fetchval(
         f"""
         SELECT count(*)
@@ -197,7 +201,7 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         """,
-        from_, to_exclusive,
+        from_, to_exclusive, участки,
     )
     rows = await conn.fetch(
         f"""
@@ -208,9 +212,9 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         ORDER BY r.started_at DESC, f.risk_rank
-        LIMIT $3 OFFSET $4
+        LIMIT $4 OFFSET $5
         """,
-        from_, to_exclusive, limit, offset,
+        from_, to_exclusive, участки, limit, offset,
     )
     return {
         "total": total,
@@ -235,7 +239,7 @@ async def list_forecasts(
 async def get_forecast(
     forecast_id: int,
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("forecasts.read")),
+    user=Depends(require("forecasts.read")),
 ):
     row = await conn.fetchrow(
         """
@@ -262,4 +266,5 @@ async def get_forecast(
     )
     if row is None:
         raise HTTPException(404, "прогноз не найден")
+    await проверить_участок(user, conn, row["section_id"])
     return dict(row)

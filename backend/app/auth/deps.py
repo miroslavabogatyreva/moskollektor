@@ -1,9 +1,15 @@
 """Проверка личности и разрешений на каждый метод API. Задача MOS-38 (Q4.1).
 
-Ролей четыре, колонка role_code лежит в ref.app_user (db/migrations/008_rbac.sql).
+Роли — четыре роли заказчика (MOS-107, Q4.11): dispatcher, ods_dispatcher,
+technician, admin. Роли складываются: они лежат в ref.user_role
+(db/migrations/044_roles_scope.sql), у человека их может быть несколько.
 Какие разрешения даёт роль — не решение кода, а данные в ref.role_permission
-(db/seed/rbac.sql): require(permission_code) сверяет запрошенный код со списком
-роли пользователя. НФ-43 требует отказа при прямом переходе по URL, а не только
+(db/seed/rbac.sql): require(permission_code) пускает, если код даёт хотя бы
+одна роль пользователя.
+
+Область видимости — видимые_участки(): ods_dispatcher и admin видят всё,
+остальные — участки коллекторов из своих узлов ref.user_scope. Участок относится
+к коллектору запросом УЧАСТКИ_КОЛЛЕКТОРА из расчёта, второй копии правила нет. НФ-43 требует отказа при прямом переходе по URL, а не только
 скрытия пункта меню в интерфейсе — значит проверка обязана жить на сервере,
 а не во фронте, и её место здесь.
 
@@ -19,6 +25,19 @@ import asyncpg
 from fastapi import Depends, Header, HTTPException
 
 from app.db import get_conn
+from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
+
+ВИДЯТ_ВСЁ = {"ods_dispatcher", "admin"}
+
+# Узел уровня 2 — сам коллектор, уровня 1 — коллекторы под ним (parent_id).
+ВИДИМЫЕ_УЧАСТКИ_SQL = f"""
+WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+SELECT u.section_id
+  FROM u
+  JOIN smvu.object_tree t ON t.object_id = u.collector_id
+ WHERE EXISTS (SELECT 1 FROM ref.user_scope s
+                WHERE s.login = $1 AND s.object_id IN (t.object_id, t.parent_id))
+"""
 
 
 async def get_current_user(
@@ -28,7 +47,13 @@ async def get_current_user(
     if not x_user_login:
         raise HTTPException(401, "нужен заголовок X-User-Login")
     user = await conn.fetchrow(
-        "SELECT user_id, login, role_code FROM ref.app_user WHERE login = $1 AND is_active",
+        """
+        SELECT u.user_id, u.login,
+               ARRAY(SELECT r.role_code FROM ref.user_role r
+                      WHERE r.login = u.login ORDER BY r.role_code) AS roles
+          FROM ref.app_user u
+         WHERE u.login = $1 AND u.is_active
+        """,
         x_user_login,
     )
     if user is None:
@@ -44,34 +69,63 @@ def require(permission_code: str):
         conn: asyncpg.Connection = Depends(get_conn),
     ) -> asyncpg.Record:
         allowed = await conn.fetchval(
-            "SELECT true FROM ref.role_permission WHERE role_code = $1 AND permission_code = $2",
-            user["role_code"], permission_code,
+            "SELECT true FROM ref.role_permission"
+            " WHERE role_code = ANY($1::text[]) AND permission_code = $2 LIMIT 1",
+            list(user["roles"]), permission_code,
         )
         if not allowed:
-            raise HTTPException(403, f"роль {user['role_code']} не даёт разрешения {permission_code}")
+            роли = ", ".join(user["roles"]) or "нет ролей"
+            raise HTTPException(403, f"роли ({роли}) не дают разрешения {permission_code}")
         return user
 
     return checker
 
 
+async def видимые_участки(user, conn) -> list[int] | None:
+    """Участки, которые видит пользователь. None — видит все (Ф-66, НФ-43).
+
+    Список отдаётся в SQL параметром `$n::int[]` с условием
+    `($n IS NULL OR section_id = ANY($n))`, чтобы total и страница считались
+    по той же подрезке, что и строки.
+    """
+    if ВИДЯТ_ВСЁ & set(user["roles"]):
+        return None
+    return [r["section_id"] for r in await conn.fetch(ВИДИМЫЕ_УЧАСТКИ_SQL, user["login"])]
+
+
+async def проверить_участок(user, conn, section_id: int) -> None:
+    """403 на участок вне области видимости: карточка, прогноз, заявка."""
+    участки = await видимые_участки(user, conn)
+    if участки is not None and section_id not in участки:
+        raise HTTPException(403, f"участок {section_id} вне области видимости {user['login']}")
+
+
 def _selfcheck():
-    """Логика require() без базы: подставной conn отвечает по двум словарям."""
+    """Логика require() и области видимости без базы: подставной conn."""
 
     class _FakeConn:
-        def __init__(self, users, grants):
+        def __init__(self, users, grants, scope):
             self._users = users
             self._grants = grants
+            self._scope = scope  # login -> участки, которые вернул бы ВИДИМЫЕ_УЧАСТКИ_SQL
 
         async def fetchrow(self, _sql, login):
             return self._users.get(login)
 
-        async def fetchval(self, _sql, role_code, permission_code):
-            return (role_code, permission_code) in self._grants
+        async def fetchval(self, _sql, roles, permission_code):
+            return any((r, permission_code) in self._grants for r in roles)
+
+        async def fetch(self, _sql, login):
+            return [{"section_id": s} for s in self._scope.get(login, [])]
+
+    def u(login, *roles):
+        return {"user_id": 1, "login": login, "roles": list(roles)}
 
     async def run():
         conn = _FakeConn(
-            users={"disp1": {"user_id": 1, "login": "disp1", "role_code": "dispatcher"}},
-            grants={("dispatcher", "risks.read")},
+            users={"disp1": u("disp1", "dispatcher")},
+            grants={("dispatcher", "risks.read"), ("admin", "audit.read")},
+            scope={"tech1": [10, 11], "disp1": [10, 11, 12]},
         )
 
         try:
@@ -89,7 +143,7 @@ def _selfcheck():
             raise AssertionError("должен упасть на неизвестном логине")
 
         user = await get_current_user(x_user_login="disp1", conn=conn)
-        assert user["role_code"] == "dispatcher"
+        assert user["roles"] == ["dispatcher"]
 
         allowed = require("risks.read")
         assert (await allowed(user=user, conn=conn))["login"] == "disp1"
@@ -101,6 +155,37 @@ def _selfcheck():
             assert e.status_code == 403
         else:
             raise AssertionError("должен упасть без разрешения audit.read")
+
+        # Роли складываются: dispatcher + admin получает audit.read от admin.
+        both = u("both", "dispatcher", "admin")
+        assert (await denied(user=both, conn=conn))["login"] == "both"
+
+        # Без ролей — 403, а не падение на пустом списке.
+        try:
+            await allowed(user=u("nobody"), conn=conn)
+        except HTTPException as e:
+            assert e.status_code == 403
+        else:
+            raise AssertionError("без ролей должен получить 403")
+
+        # ods_dispatcher и admin видят всё — None, базу не спрашивают.
+        assert await видимые_участки(u("ods1", "ods_dispatcher"), conn) is None
+        assert await видимые_участки(u("x", "technician", "admin"), conn) is None
+
+        # Техник — только свои участки; чужой — 403, свой проходит.
+        tech = u("tech1", "technician")
+        assert await видимые_участки(tech, conn) == [10, 11]
+        await проверить_участок(tech, conn, 10)
+        try:
+            await проверить_участок(tech, conn, 12)
+        except HTTPException as e:
+            assert e.status_code == 403
+        else:
+            raise AssertionError("чужой участок должен дать 403")
+
+        # dispatcher и technician без строк в ref.user_scope видят пусто, а не всё.
+        assert await видимые_участки(u("lost", "dispatcher"), conn) == []
+        assert await видимые_участки(u("lost", "technician"), conn) == []
 
     asyncio.run(run())
     print("selfcheck ok")
