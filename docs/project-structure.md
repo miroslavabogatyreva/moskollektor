@@ -89,7 +89,7 @@ moskollektor/
 │   └── books/                разбор литературы, 80 находок с номерами страниц;
 │                              сами PDF с 15.09.2026 на сервере, в git не идут
 ├── db/              8   миграции базы — первый продуктовый каталог
-│   ├── migrations/           001_assets … 040_data_outage_reason, по возрастанию.
+│   ├── migrations/           001_assets … 044_roles_scope, по возрастанию.
 │   │                          010_orders — справочники ТОиР, синтетический реестр
 │   │                          объектов из ref.object_xref и уникальность автозаявки;
 │   │                          022_channel_daily — суточная свёртка по каналу,
@@ -100,7 +100,12 @@ moskollektor/
 │   │                          computed_at в as_of, чтобы имя значило одно;
 │   │                          026_forecast_write_policy — журнал прогнозов пишет
 │   │                          изменение плюс пульс, а не каждый расчёт
-│   └── seed/                 explain_templates, уставки, нормативы, виды работ
+│   │                          044_roles_scope — четыре роли заказчика в ref.user_role
+│   │                          и область видимости в ref.user_scope (MOS-107);
+│   │                          041–043 заняты черновыми ветками, в master их нет
+│   └── seed/                 explain_templates, уставки, нормативы, виды работ;
+│                              rbac — разрешения ролей, тестовые учётки dispatcher1,
+│                              ods1, tech1, admin1 и их область видимости
 ├── backend/             продуктовый код: то, что работает в бою
 │   └── app/
 │       ├── migrate.py        накат миграций по журналу public.schema_migration
@@ -182,7 +187,10 @@ frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на ис�
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
 delivery/           check-all.sh — один прогон всех проверок;
                     check-a11y.mjs — доступность таблиц настоящим браузером (НФ-92),
-                    единственная проверка, которая не живёт внутри образа api;
+                    check-map.mjs — экран схемы тем же браузером (М-05);
+                    обе не живут внутри образа api;
+                    check-api-contract.py — условия готовности Q4 по каждому GET
+                    из живого /openapi.json: отказ без входа, схема, пустота, журнал;
                     презентация и страница сдачи
 ```
 

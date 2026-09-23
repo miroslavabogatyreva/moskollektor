@@ -102,6 +102,18 @@ check "GET /api/risks (dispatcher1)"                        200 -H "X-User-Login
 # (PUT /api/settings/risk_threshold_high). Условие на "high" краснело бы на
 # исправном коде на следующий же день после того, как порог подняли.
 check_contains "GET /api/risks отдаёт risk_class" '"risk_class"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks"
+
+# Ф-80 (MOS-44): выбор формата вызывающей системой — заголовком Accept
+# и параметром ?format=xml, оба на любом GET-методе, который отвечает JSON
+# (backend/app/api/main.py, middleware convert_to_xml). Здесь — код ответа
+# и форма; листовая сверка значений XML против JSON — code/check_xml_response.py.
+check "GET /api/risks (Accept: application/xml)"            200 -H "X-User-Login: dispatcher1" -H "Accept: application/xml" "$BASE_URL/api/risks"
+check_contains "GET /api/risks Accept:xml отдаёт XML" '<risk_class>' -H "X-User-Login: dispatcher1" -H "Accept: application/xml" "$BASE_URL/api/risks"
+check_contains "GET /api/risks ?format=xml отдаёт XML" '<risk_class>' -H "X-User-Login: dispatcher1" "$BASE_URL/api/risks?format=xml"
+# Ошибка тоже в XML, если её попросили: 401 без входа заворачивается тем же
+# middleware, а не только успешные ответы.
+check_contains "GET /api/risks без входа, Accept: application/xml" '<detail>' -H "Accept: application/xml" "$BASE_URL/api/risks"
+
 check "GET /api/forecasts (dispatcher1)"                    200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts"
 # Состояние данных (MOS-148, М-04). Метод обязан быть открыт диспетчеру: под ним
 # ходит дашборд (frontend/src/screens/dashboard/api.ts). Проверяем не только код,
@@ -114,7 +126,13 @@ check_contains "GET /api/data-status отдаёт data_edge" '"data_edge"' -H "X
 # на фронте пошло бы в поясе браузера.
 check_contains "GET /api/data-status отдаёт lag_days" '"lag_days"' -H "X-User-Login: dispatcher1" "$BASE_URL/api/data-status"
 # Расчёт (Q3) ещё не писал pred.forecast — 200 и пустой список, а не 404 и не 500.
-check "GET /api/forecasts/1 (dispatcher1, id не найден)"    404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts/1"
+# 404 «не найден» отвечает только тем, кто видит весь парк по роли — ods1 и admin1
+# (MOS-107). dispatcher1 и tech1 ограничены областью видимости и на несуществующий
+# id получают 403: иначе по разнице 404 и 403 они узнавали бы, есть ли чужой объект.
+# dispatcher1 видит все 3 173 участка только потому, что район в выгрузке один.
+check "GET /api/forecasts/1 (ods1, id не найден)"           404 -H "X-User-Login: ods1" "$BASE_URL/api/forecasts/1"
+check "GET /api/forecasts/1 (dispatcher1, id не найден)"    403 -H "X-User-Login: dispatcher1" "$BASE_URL/api/forecasts/1"
+check "GET /api/objects/999999999 (tech1, участка нет)"     403 -H "X-User-Login: tech1" "$BASE_URL/api/objects/999999999"
 
 # check, но берёт число из поля total тела {total, items} — постраничность
 # 4.13 (MOS-117) превратила и /api/forecasts, и /api/orders из голого массива
@@ -166,7 +184,7 @@ check "GET /api/objects/1 (dispatcher1)"                    200 -H "X-User-Login
 # свёртки 2025-07-01…2026-06-30 обрезало бы семь участков со старыми показаниями).
 check_contains "GET /api/objects/1 содержит last_reading_at" '"last_reading_at"' \
     -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1"
-check "GET /api/objects/999999999 (участка нет)"            404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/999999999"
+check "GET /api/objects/999999999 (участка нет)"            404 -H "X-User-Login: ods1" "$BASE_URL/api/objects/999999999"
 
 # Ряд показаний — from/to обязательны (иначе смахнём 109 партиций smvu.reading).
 check "GET /api/objects/1/readings без from/to"             422 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/1/readings"
@@ -186,7 +204,7 @@ check_count "GET /api/objects/1/readings?from=to=2025-10-12 (соседний д
 # 277 экранных эпизодов — «Неопределен» тепловых датчиков, эпизодов D5 у него 0,
 # и после 038 все 20 каналов законно показывают 0 (замер на стенде 22.09.2026).
 check "GET /api/objects/409/channels (dispatcher1)"         200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/409/channels"
-check "GET /api/objects/999999999/channels (участка нет)"   404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/objects/999999999/channels"
+check "GET /api/objects/999999999/channels (участка нет)"   404 -H "X-User-Login: ods1" "$BASE_URL/api/objects/999999999/channels"
 
 check_channel_faults_top() {
     label="GET /api/objects/409/channels — отказы D5 участка 15:12, наибольшие в парке"
@@ -244,7 +262,7 @@ check_channel_faults_paging
 # на массиве верхнего уровня. Настоящий id берём из списка, а не выдумываем
 # число — 64 заявки из двух прогонов не гарантируют, что id 42 существует.
 check "GET /api/orders (dispatcher1)"                       200 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders"
-check "GET /api/orders/999999999 (заявки нет)"               404 -H "X-User-Login: dispatcher1" "$BASE_URL/api/orders/999999999"
+check "GET /api/orders/999999999 (заявки нет)"               404 -H "X-User-Login: ods1" "$BASE_URL/api/orders/999999999"
 
 # М-16 требует не «метод отвечает», а «метод отдаёт данные»: код 200 на пустом
 # списке и код 200 на списке заявок ничем не отличаются. check_total() — та же

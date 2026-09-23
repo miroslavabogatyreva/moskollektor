@@ -6,8 +6,10 @@
 /api как есть. /health объявлен прямо на app, а не в роутере — живость не должна
 зависеть от разрешений и не пишется в audit.user_action (Q4.10).
 """
+import json
+
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from app.api.audit import router as audit_router
 from app.api.notifications import router as notifications_router
@@ -16,6 +18,7 @@ from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
 from app.api.tech_events import router as tech_events_router
+from app.api.xml import to_xml, wants_xml
 from app.db import get_pool
 
 app = FastAPI(title="Москоллектор API")
@@ -69,6 +72,32 @@ async def write_audit_log(request: Request, call_next):
             details,
         )
     return response
+
+
+@app.middleware("http")
+async def convert_to_xml(request: Request, call_next):
+    """MOS-44 (Q4.7): XML по `Accept: application/xml` или `?format=xml`,
+    приёмка Ф-80. Требование строже плана — XML отдают все GET-методы,
+    которые отвечают JSON, а не три перечисленных в docs/plan.md (ОВ-52
+    закрыт этим решением, разбор в docs/HLD.md разд. 3.4).
+
+    Добавлен декоратором после write_audit_log, поэтому в стеке middleware
+    стоит снаружи от него: аудит логирует настоящий JSON-ответ, здесь только
+    переупаковка готовых байт в XML перед отдачей клиенту. Ответы не в JSON
+    (поток SSE из MOS-42, HTML `/docs`) распознаются по content-type и уходят
+    как есть.
+    """
+    response = await call_next(request)
+    if not wants_xml(request.headers.get("accept", ""), request.query_params.get("format")):
+        return response
+    if "application/json" not in response.headers.get("content-type", ""):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    xml_body = to_xml(json.loads(body))
+    headers = dict(response.headers)
+    headers["content-type"] = "application/xml"
+    headers.pop("content-length", None)
+    return Response(content=xml_body, status_code=response.status_code, headers=headers)
 
 
 if __name__ == "__main__":
