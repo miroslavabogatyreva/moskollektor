@@ -96,11 +96,11 @@ async def собрать(conn):
     d["1490"] = [
         dict(r)
         for r in await conn.fetch(
-            """SELECT t2.name, count(*) FILTER (WHERE c.is_active) AS активных
+            """SELECT t2.object_id, t2.name, count(*) FILTER (WHERE c.is_active) AS активных
              FROM smvu.channel c
              JOIN smvu.object_tree t3 ON t3.object_id = c.object_id
              JOIN smvu.object_tree t2 ON t2.object_id = t3.parent_id
-            WHERE c.section_id = 1490 GROUP BY t2.name ORDER BY активных DESC"""
+            WHERE c.section_id = 1490 GROUP BY t2.object_id, t2.name ORDER BY активных DESC"""
         )
     ]
     d["1490_выбран"] = await conn.fetchval(
