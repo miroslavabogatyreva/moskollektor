@@ -39,8 +39,9 @@ docs/for-ml-team.md разд. 2, а не удобство.
 
 1. *Эпизод сквозь тишину выгрузки.* 7 и 8 апреля 2024 СМВУ не написала ни строки
    по всему парку. Канал, замолчавший 6 апреля и заговоривший 9-го, выглядит как
-   трёхсуточный отказ. Такие эпизоды помечаются spans_outage по smvu.data_outage,
-   а не выбрасываются: среди них есть и настоящие отказы.
+   трёхсуточный отказ. Такие эпизоды помечаются spans_outage по окнам export_gap
+   из smvu.data_outage, а не выбрасываются: среди них есть и настоящие отказы.
+   Окно vendor_migration (2021 год, 040) данные не прерывает и пометки не даёт.
 2. *Незакрытый эпизод.* Канал ушёл в отказ и больше ничего не сказал: 51 такой
    эпизод упирается в конец выгрузки, шесть — в снятие самого канала. Длительность
    у них неизвестна, поэтому в таблицу попадают только те, что **уже** длятся дольше
@@ -172,8 +173,11 @@ INSERT INTO smvu.fault_episode
         fault_value, spans_outage)
 SELECT s.channel_id, s.section_id, s.started_at, s.ended_at, s.rows_cnt, s.closed_by,
        s.fault_value,
+       -- Только тишина выгрузки: окно vendor_migration (2021 год) длительность
+       -- не завышает, данные в нём есть (040_data_outage_reason.sql).
        EXISTS (SELECT 1 FROM smvu.data_outage o
-                WHERE tstzrange(s.started_at, coalesce(s.ended_at, $2))
+                WHERE o.reason = 'export_gap'
+                  AND tstzrange(s.started_at, coalesce(s.ended_at, $2))
                    && tstzrange(o.started_at, o.ended_at))
   FROM собрано s
   JOIN правило p ON p.channel_id = s.channel_id AND p.fault_value = s.fault_value
@@ -210,10 +214,12 @@ async def построить(conn, частей: int = 8, тихо: bool = False
     Возвращает диагностику. Пачками режем каналы, а не время: эпизод пересекает
     границу месяца, а канал не пересекает.
     """
-    окон = await conn.fetchval("SELECT count(*) FROM smvu.data_outage")
+    окон = await conn.fetchval(
+        "SELECT count(*) FROM smvu.data_outage WHERE reason = 'export_gap'")
     if окон == 0:
         raise RuntimeError(
-            "smvu.data_outage пуста: эпизоды, тянущиеся сквозь тишину выгрузки, "
+            "в smvu.data_outage нет окон тишины (export_gap): эпизоды, тянущиеся "
+            "сквозь тишину выгрузки, "
             "не пометились бы и уехали в обучение с выдуманной длительностью. "
             "Сначала накатить db/migrations/017_fault_episodes.sql")
 
@@ -377,7 +383,8 @@ async def _selfcheck():
         # 5. Парная проверка на пометку тишины: эпизод, накрывающий окно тишины,
         #    обязан быть помечен, не накрывающий — не помечен. Проверка связывает
         #    две величины, а не сторожит диапазон одной.
-        окна = await conn.fetch("SELECT started_at, ended_at FROM smvu.data_outage")
+        окна = await conn.fetch(
+            "SELECT started_at, ended_at FROM smvu.data_outage WHERE reason = 'export_gap'")
         for э in строки:
             конец_э = э["ended_at"] or конец
             накрывает = any(э["started_at"] < о["ended_at"] and конец_э > о["started_at"]
