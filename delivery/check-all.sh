@@ -618,7 +618,7 @@ print(f"риски: tech1 {len(tech)}, tech2 {len(tech2)}, dispatcher1 {len(dist
 }
 
 if [ -n "${BASE_URL:-}" ]; then
-  run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 против ods1" check_scope
+  run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 < tech2 < ods1" check_scope
 else
   skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
 fi
