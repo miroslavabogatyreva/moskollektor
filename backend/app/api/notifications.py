@@ -195,6 +195,12 @@ async def ack(
 
 @router.get(
     "/alerts/stream",
+    # response_class=StreamingResponse (без media_type в самом классе — он None,
+    # в отличие от JSONResponse) убирает автодобавленную пустую application/json
+    # из openapi: без него FastAPI документирует оба content-type сразу, а тут
+    # реально отдаётся только text/event-stream. Рантайм не меняется — метод
+    # и так возвращает StreamingResponse, это только объявление для схемы.
+    response_class=StreamingResponse,
     responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
 )
 async def alerts_stream(request: Request, x_user_login: str | None = Header(None)):
