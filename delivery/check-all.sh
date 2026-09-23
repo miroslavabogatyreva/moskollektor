@@ -503,6 +503,18 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-223 (Q4.17), нашла 98 при сверке хешей для MOS-221: ORDER BY n.due_at
+# у /api/orders без второго ключа отдавал разный набор id на странице у
+# заявок с одинаковым сроком. Проверка проходит страницы orders/forecasts/
+# audit/channels и требует множество id без повторов (у forecasts — без
+# повторов внутри первых пяти страниц, весь день без этого стоил бы 108
+# запросов на каждый прогон).
+if [ -n "${BASE_URL:-}" ]; then
+  run "М-06, М-16"  "постраничность без повторов и пропусков" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_stable_paging.py
+else
+  skip_msg "М-06, М-16" "постраничность без повторов и пропусков — задайте BASE_URL"
+fi
+
 # MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
 # backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
 # что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
@@ -643,6 +655,99 @@ if [ -n "${BASE_URL:-}" ]; then
   run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 < tech2 < ods1" check_scope
 else
   skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
+fi
+
+# Геометрия участков в GeoJSON и WKT (MOS-45, Q4.8). Ф-81 просит геометрию одного
+# участка в обоих форматах, совпадение координат и названную систему координат.
+# Координаты сверяем разбором обоих ответов, а не глазами. Участков с геометрией
+# ods1 получает столько же, сколько строк /api/risks, tech1 — только свои.
+# Формат — ?geometry=, а ?format=xml и Accept: application/xml отдают XML (Ф-80).
+# С DATABASE_URL: geo_object_id у всех участков ref.object_xref; коллекторов
+# и частей MultiLineString столько, сколько дают данные — коллекторы участков
+# по УЧАСТКИ_КОЛЛЕКТОРА и пары «коллектор, префикс» (сегодня 16 и 32); длина
+# каждого участка отличается от 10 м по пикетам не больше чем на 1 %.
+check_geo() {
+  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
+import json, os, re, ssl, urllib.error, urllib.request
+base = os.environ["BASE_URL"].rstrip("/")
+ctx = ssl._create_unverified_context() if "-k" in os.environ["CURL_OPTS"].split() else None
+
+def raw(path, login, accept=None):
+    h = {"X-User-Login": login}
+    if accept:
+        h["Accept"] = accept
+    req = urllib.request.Request(base + path, headers=h)
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=120) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, "", b""
+
+def get(path, login):
+    code, ctype, body = raw(path, login)
+    return code, ctype, json.loads(body) if code == 200 else None
+
+code, ctype, gj = get("/api/geo/sections?geometry=geojson&section_id=1490", "ods1")
+assert code == 200, f"geojson: {code}"
+assert ctype.startswith("application/geo+json"), f"geojson: тип {ctype}"
+for path, accept in (("/api/geo/sections?section_id=1490&format=xml", None),
+                     ("/api/geo/sections?section_id=1490", "application/xml")):
+    code, ctype, body = raw(path, "ods1", accept)
+    assert code == 200 and ctype.startswith("application/xml") and b"FeatureCollection" in body, \
+        f"XML {path} Accept={accept}: {code} {ctype}"
+code, _, wk = get("/api/geo/sections?geometry=wkt&section_id=1490", "ods1")
+assert code == 200, f"wkt: {code}"
+for name, body in (("geojson", gj), ("wkt", wk)):
+    crs, src = body.get("crs"), body.get("geometry_source")
+    assert crs == "EPSG:4326", f"{name}: crs {crs}"
+    assert src == "synthetic", f"{name}: geometry_source {src}"
+a = [x for pt in gj["features"][0]["geometry"]["coordinates"] for x in pt]
+b = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", wk["items"][0]["wkt"])]
+assert a == b, f"координаты разошлись: geojson {a}, wkt {b}"
+
+n_risks = len(get("/api/risks", "ods1")[2])
+n_geo = len(get("/api/geo/sections?geometry=geojson", "ods1")[2]["features"])
+assert n_geo == n_risks, f"геометрия у {n_geo} участков, рисков {n_risks}"
+n_tech = len(get("/api/geo/sections?geometry=wkt", "tech1")[2]["items"])
+n_tech_risks = len(get("/api/risks", "tech1")[2])
+assert n_tech == n_tech_risks < n_geo, f"tech1: геометрия {n_tech}, риски {n_tech_risks}, всего {n_geo}"
+extra = ""
+if os.environ.get("DATABASE_URL"):
+    import asyncio, asyncpg
+    from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
+    async def db():
+        c = await asyncpg.connect(os.environ["DATABASE_URL"])
+        ждём = await c.fetchrow(f"""
+            WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+            SELECT count(DISTINCT u.collector_id) AS коллекторов,
+                   count(DISTINCT (u.collector_id, split_part(x.smvu_key, $1, 1))) AS частей
+              FROM u JOIN ref.object_xref x USING (section_id)
+        """, ":")
+        r = await c.fetchrow("""
+            SELECT (SELECT count(*) FROM ref.object_xref WHERE geo_object_id IS NULL) AS без_геометрии,
+                   (SELECT count(*) FROM geo.geo_object WHERE kind_code = $1) AS коллекторов,
+                   (SELECT sum(ST_NumGeometries(geom)) FROM geo.geo_object WHERE kind_code = $1) AS частей,
+                   (SELECT max(abs(ST_Length(geom::geography) - 10) / 10 * 100)
+                      FROM geo.geo_object WHERE kind_code = $2) AS худшее
+        """, "collector", "collector_section")
+        await c.close()
+        return r, ждём
+    r, ждём = asyncio.run(db())
+    bez, kol, chast, hud = r["без_геометрии"], r["коллекторов"], r["частей"], r["худшее"]
+    ж_kol, ж_chast = ждём["коллекторов"], ждём["частей"]
+    assert bez == 0, f"без геометрии {bez} участков"
+    assert (kol, chast) == (ж_kol, ж_chast), f"коллекторов {kol}, частей {chast}; по данным {ж_kol} и {ж_chast}"
+    assert hud <= 1, f"длина участка разошлась с пикетами на {hud:.4f} %"
+    extra = f"; коллекторов {kol}, частей {chast}, худшее отклонение длины {hud:.4f} %"
+print(f"участок 1490: координаты GeoJSON = WKT ({len(a) // 2} точки), EPSG:4326, synthetic; "
+      f"геометрия у {n_geo} участков из {n_risks}, tech1 {n_tech}{extra}")
+'
+}
+
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-81"        "геометрия GeoJSON = WKT" check_geo
+else
+  skip_msg "Ф-81" "геометрия GeoJSON и WKT — задайте BASE_URL"
 fi
 
 # Доступность таблиц (НФ-92, часть III). Проверяет не нажатия, а дерево

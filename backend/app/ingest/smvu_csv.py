@@ -79,6 +79,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .channel_place import дозаполнить_место, есть_место
+from .synthetic_geometry import нарисовать_геометрию
 from .kind_names import canon, canon_map
 from .tag_to_section import collector_of, location_kind, section_key
 
@@ -560,6 +561,10 @@ async def run(args):
             await load_objects(conn, args.objects)
         if args.channels:
             await load_channels(conn, args.channels)
+            # Геометрия — здесь, а не в миграции 046: на чистой установке миграции идут
+            # до заливки, и рисовать было бы не по чему. На любом проходе --channels,
+            # и на первом, и на повторе: повтор ничего не удваивает (MOS-45).
+            await нарисовать_геометрию(conn)
 
         if args.check:
             return await check(conn)
