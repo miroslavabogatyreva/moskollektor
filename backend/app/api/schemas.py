@@ -26,6 +26,13 @@ IsoDatetime = Annotated[
     datetime, PlainSerializer(lambda v: v.isoformat(), return_type=str, when_used="json")
 ]
 
+# Тот же зазор у Decimal: pydantic-core пишет его JSON-строкой ("1.5"), а
+# jsonable_encoder — числом через float(). Поймано тем же прогоном хешей на
+# avg_duration_h (объекты) и было бы на settings.value, не поймай я его здесь же.
+JsonDecimal = Annotated[
+    Decimal, PlainSerializer(lambda v: float(v), return_type=float, when_used="json")
+]
+
 
 class RiskItem(BaseModel):
     section_id: int
@@ -128,7 +135,7 @@ class ObjectChannelStat(BaseModel):
     is_active: bool
     faults_cnt: int
     last_fault_at: IsoDatetime | None
-    avg_duration_h: Decimal | None
+    avg_duration_h: JsonDecimal | None
 
 
 class ObjectChannelList(BaseModel):
@@ -237,7 +244,7 @@ class AuditList(BaseModel):
 
 class SettingItem(BaseModel):
     key: str
-    value: Decimal
+    value: JsonDecimal
     unit: str | None
     changed_by: int | None
     changed_at: IsoDatetime
