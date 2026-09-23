@@ -21,7 +21,7 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.auth.deps import require
+from app.auth.deps import require, проверить_участок
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
@@ -31,8 +31,9 @@ router = APIRouter(prefix="/api")
 async def get_object(
     section_id: int,
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
+    await проверить_участок(user, conn, section_id)
     # last_reading_at — из smvu.reading, а не из feat.section_daily: свёртка
     # покрывает только 2025-07-01…2026-06-30, а у семи участков (554, 559, 564,
     # 567, 570, 574, 579) последнее показание — 03.03.2025, раньше этого окна.
@@ -118,7 +119,7 @@ async def get_object_readings(
     from_: date = Query(..., alias="from", description="дата начала окна, включительно"),
     to: date = Query(..., description="дата конца окна, включительно — весь день целиком"),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
     """from/to обязательны и не моменты времени, а даты — обе границы включительны.
 
@@ -129,6 +130,7 @@ async def get_object_readings(
     строгое: так «from=to=сегодня» отдаёт весь сегодняшний день, а не пустоту
     (та же ошибка на границе, что нашли в GET /api/forecasts, здесь исправлена сразу).
     """
+    await проверить_участок(user, conn, section_id)
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "объект не найден")
@@ -152,7 +154,7 @@ async def list_object_channels(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
     """Каналы участка с фактом отказов — не прогноз, обычная арифметика по журналу.
 
@@ -201,6 +203,7 @@ async def list_object_channels(
     пропустить его вовсе. Проверяющая 21.09.2026 нашла 1 268 участков с такой
     группой неразличимых каналов, крупнейшая — 81 канал на участке 2204.
     """
+    await проверить_участок(user, conn, section_id)
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "участок не найден")
