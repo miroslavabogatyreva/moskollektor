@@ -10,10 +10,12 @@ import uvicorn
 from fastapi import FastAPI, Request
 
 from app.api.audit import router as audit_router
+from app.api.notifications import router as notifications_router
 from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
+from app.api.tech_events import router as tech_events_router
 from app.db import get_pool
 
 app = FastAPI(title="Москоллектор API")
@@ -22,6 +24,8 @@ app.include_router(orders_router)
 app.include_router(audit_router)
 app.include_router(objects_router)
 app.include_router(settings_router)
+app.include_router(notifications_router)
+app.include_router(tech_events_router)
 
 
 @app.get("/health")
