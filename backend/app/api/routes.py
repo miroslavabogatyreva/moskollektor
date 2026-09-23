@@ -9,13 +9,14 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.schemas import DataStatus, ForecastDetail, ForecastList, RiskItem
 from app.auth.deps import require
 from app.db import КРАЙ_ДАННЫХ, get_conn
 
 router = APIRouter(prefix="/api")
 
 
-@router.get("/risks")
+@router.get("/risks", response_model=list[RiskItem])
 async def list_risks(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("risks.read")),
@@ -65,7 +66,7 @@ async def list_risks(
     return [dict(r) for r in rows]
 
 
-@router.get("/data-status")
+@router.get("/data-status", response_model=DataStatus)
 async def data_status(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("risks.read")),
@@ -137,7 +138,7 @@ async def data_status(
     return dict(row)
 
 
-@router.get("/forecasts")
+@router.get("/forecasts", response_model=ForecastList)
 async def list_forecasts(
     from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
     to: date | None = Query(None, description="дата конца периода, включительно — весь день целиком"),
@@ -231,7 +232,7 @@ async def list_forecasts(
     }
 
 
-@router.get("/forecasts/{forecast_id}")
+@router.get("/forecasts/{forecast_id}", response_model=ForecastDetail)
 async def get_forecast(
     forecast_id: int,
     conn: asyncpg.Connection = Depends(get_conn),

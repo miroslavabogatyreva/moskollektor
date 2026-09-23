@@ -12,6 +12,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.api.schemas import SettingItem
 from app.auth.deps import require
 from app.db import get_conn
 
@@ -110,7 +111,7 @@ class SettingUpdate(BaseModel):
     value: Decimal
 
 
-@router.get("/settings")
+@router.get("/settings", response_model=list[SettingItem])
 async def list_settings(
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("settings.read")),
