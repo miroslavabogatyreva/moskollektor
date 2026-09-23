@@ -34,7 +34,9 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
   if (notFound) {
     return (
       <main class="p-5">
-        <p style="color:var(--text-muted)">Заявка {orderId} не найдена.</p>
+        <p style="color:var(--text-muted)">
+          Заявка {orderId} не найдена или вне вашей области видимости.
+        </p>
       </main>
     )
   }
