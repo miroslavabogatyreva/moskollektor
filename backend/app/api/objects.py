@@ -21,7 +21,7 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.auth.deps import require
+from app.auth.deps import require, проверить_участок
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api")
 async def get_object(
     section_id: int,
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
     # last_reading_at — из smvu.reading, а не из feat.section_daily: свёртка
     # покрывает только 2025-07-01…2026-06-30, а у семи участков (554, 559, 564,
@@ -50,6 +50,7 @@ async def get_object(
     )
     if passport is None:
         raise HTTPException(404, "объект не найден")
+    await проверить_участок(user, conn, section_id)
 
     channels = await conn.fetch(
         """
@@ -118,7 +119,7 @@ async def get_object_readings(
     from_: date = Query(..., alias="from", description="дата начала окна, включительно"),
     to: date = Query(..., description="дата конца окна, включительно — весь день целиком"),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
     """from/to обязательны и не моменты времени, а даты — обе границы включительны.
 
@@ -132,6 +133,7 @@ async def get_object_readings(
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "объект не найден")
+    await проверить_участок(user, conn, section_id)
 
     to_exclusive = to + timedelta(days=1)
     rows = await conn.fetch(
@@ -152,7 +154,7 @@ async def list_object_channels(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("objects.read")),
+    user=Depends(require("objects.read")),
 ):
     """Каналы участка с фактом отказов — не прогноз, обычная арифметика по журналу.
 
@@ -204,6 +206,7 @@ async def list_object_channels(
     exists = await conn.fetchval("SELECT 1 FROM ref.object_xref WHERE section_id = $1", section_id)
     if exists is None:
         raise HTTPException(404, "участок не найден")
+    await проверить_участок(user, conn, section_id)
 
     total = await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE section_id = $1", section_id)
     rows = await conn.fetch(
