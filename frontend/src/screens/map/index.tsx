@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { errorMessage } from '../../lib/format'
-import { AxisLine } from './AxisLine'
+import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
-import { riskColors, riskLabel, type RiskClass } from './risk'
+import { riskLabel, type RiskClass } from './risk'
 import type { RiskClassRow, Section } from './types'
 import type { ViewRange } from './viewport'
 
@@ -181,21 +181,17 @@ export function MapScreen(_props: Record<string, unknown>) {
             class="flex flex-wrap items-center gap-4 text-sm"
             style="color:var(--text-secondary)"
           >
-            {LEGEND_STATES.map((cls) => {
-              const colors = riskColors(cls)
-              return (
-                <span key={String(cls)} class="flex items-center gap-1.5">
-                  <span
-                    aria-hidden="true"
-                    style={`display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors.fill};border:1px solid ${colors.border}`}
-                  />
-                  {riskLabel(cls)}
-                  {cls == null && (
-                    <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
-                  )}
-                </span>
-              )
-            })}
+            {LEGEND_STATES.map((cls) => (
+              <span key={String(cls)} class="flex items-center gap-1.5">
+                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+                  <RiskMark cls={cls} cx={6} cy={6} size={10} />
+                </svg>
+                {riskLabel(cls)}
+                {cls == null && (
+                  <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
+                )}
+              </span>
+            ))}
           </div>
         </>
       )}

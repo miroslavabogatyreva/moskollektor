@@ -3,7 +3,7 @@
 
 declare const process: { exitCode?: number }
 
-import { isDense, riskColors, riskLabel } from './risk.ts'
+import { isDense, riskColors, riskLabel, riskShape } from './risk.ts'
 
 let failed = false
 const assertEqual = (got: unknown, want: unknown, label: string) => {
@@ -29,6 +29,11 @@ assertEqual(riskLabel('high'), 'высокий риск', 'high → подпис
 assertEqual(riskLabel('normal'), 'низкий риск', 'normal → подпись')
 assertEqual(riskLabel(undefined), 'класса нет', 'нет класса → подпись')
 
+// форма (MOS-173): у трёх состояний три разные формы — цвет не работает один
+const формы = new Set([riskShape('high'), riskShape('normal'), riskShape(null)])
+assertEqual(формы.size, 3, 'три состояния — три формы')
+assertEqual(riskShape(undefined), riskShape(null), 'undefined и null — одно состояние')
+
 // правило плотности: 455 участков коллектора 914 на ось шириной 920 — превышает
 const denseAxis = isDense(455, 920)
 assertEqual(denseAxis, true, 'коллектор 914 целиком — густо')
@@ -41,5 +46,5 @@ if (failed) {
   console.error('risk: самопроверка провалена')
   process.exitCode = 1
 } else {
-  console.log('risk: самопроверка ок, 9 случаев')
+  console.log('risk: самопроверка ок, 11 случаев')
 }

@@ -1,5 +1,5 @@
 import { route } from 'preact-router'
-import { isDense, riskColors, riskLabel, type RiskClass } from './risk'
+import { isDense, riskColors, riskLabel, riskShape, type RiskClass } from './risk'
 import type { Section } from './types'
 import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewport'
 
@@ -15,6 +15,27 @@ const AXIS_WIDTH = 1000
 const AXIS_HEIGHT = 100
 const PADDING = 40
 const MIN_VIEW_FRACTION = 0.01
+
+// Значок состояния — одна функция на все размеры: густой режим (6), чип рядом
+// с номером (7) и легенда (index.tsx, 10). Форма — riskShape, цвет — riskColors.
+export function RiskMark({ cls, cx, cy, size }: { cls: RiskClass; cx: number; cy: number; size: number }) {
+  const c = riskColors(cls)
+  const h = size / 2
+  const shape = riskShape(cls)
+  if (shape === 'triangle')
+    return (
+      <polygon
+        points={`${cx},${cy - h} ${cx + h},${cy + h} ${cx - h},${cy + h}`}
+        fill={c.fill}
+        stroke={c.border}
+        stroke-width={1}
+      />
+    )
+  if (shape === 'circle') return <circle cx={cx} cy={cy} r={h} fill={c.fill} stroke={c.border} stroke-width={1} />
+  // Вертикальная, а не горизонтальная: вдоль оси черта ложилась на саму линию
+  // (MOS-50, находка 4d) и отличалась от куска оси только цветом.
+  return <rect x={cx - size / 6} y={cy - h} width={size / 3} height={size} fill={c.text} />
+}
 
 interface AxisLineProps {
   prefix: string
@@ -138,7 +159,6 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
         </text>
         {visibleAxis.map((s) => {
           const cls = riskBySection.get(s.section_id)
-          const colors = riskColors(cls)
           const title = `${s.smvu_key} · участок ${s.section_id} · ${riskLabel(cls)}`
           const cx = x(s.picket)
 
@@ -146,20 +166,13 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
           // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
           if (dense) {
             return (
-              <rect
-                key={s.section_id}
-                x={cx - 3}
-                y={baselineY - 3}
-                width={6}
-                height={6}
-                fill={colors.fill}
-                stroke={colors.border}
-                stroke-width={1}
-                style="cursor:pointer"
-                onClick={() => route(`/objects/${s.section_id}`)}
-              >
+              <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
                 <title>{title}</title>
-              </rect>
+                {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
+                    через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
+                    видимого значка у 302 меток из 303 (линия 847). Кликается сама форма. */}
+                <RiskMark cls={cls} cx={cx} cy={baselineY} size={6} />
+              </g>
             )
           }
 
@@ -181,15 +194,8 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
               <text x={cx} y={baselineY + 4} font-size="9" text-anchor="middle" fill="var(--text-primary)">
                 {Math.round(s.picket)}
               </text>
-              <rect
-                x={cx + 5}
-                y={baselineY - 13}
-                width={7}
-                height={7}
-                fill={colors.fill}
-                stroke={colors.border}
-                stroke-width={1}
-              />
+              {/* Чип над правым углом рамки, не на кромке: на кромке черта сливалась с ней. */}
+              <RiskMark cls={cls} cx={cx + 10} cy={baselineY - 16} size={7} />
             </g>
           )
         })}
