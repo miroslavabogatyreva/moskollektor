@@ -503,6 +503,28 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
+# backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
+# что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
+# в JSON на /api/risks целиком и /api/forecasts?limit=1000.
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-80"        "XML = JSON, лист за листом"  env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_xml_response.py
+else
+  skip_msg "Ф-80" "XML = JSON, лист за листом — задайте BASE_URL"
+fi
+
+# Условия готовности Q4 по каждому GET из живого /openapi.json, а не из списка
+# в коде: новый метод попадает под проверку сам. Отказ без X-User-Login, 200 под
+# admin1 и схема ответа в openapi (нет схемы — СБОЙ, MOS-221), заведомо пустой
+# запрос даёт 200 и [], строка в audit.user_action на
+# каждый вызов. Краснеет, если снять require с одного метода (23.09.2026:
+# GET /api/settings без require → «без X-User-Login ответ 200»).
+if [ -n "${BASE_URL:-}" ]; then
+  run "НФ-43, НФ-77" "контракт каждого GET из openapi" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" delivery/check-api-contract.py
+else
+  skip_msg "НФ-43, НФ-77" "контракт каждого GET из openapi — задайте BASE_URL"
+fi
+
 # Пять экранных строк стояли закрытыми на разовом curl от 16.09.2026, и ни одна
 # не была привязана сюда. Способ доказательства при этом не работал: nginx отдаёт
 # try_files $uri $uri/ /index.html, то есть КОД 200 НА ЛЮБОЙ ПУТЬ без /api/
