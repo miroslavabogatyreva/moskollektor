@@ -43,27 +43,37 @@ export function MapScreen(_props: Record<string, unknown>) {
   const [filters, setFilters] = useState<MapFilterState>(DEFAULT_FILTERS)
 
   useEffect(() => {
-    fetch('/data/sections.json')
+    fetch('/api/objects', { headers: { 'X-User-Login': API_LOGIN } })
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<Section[]>
       })
       .then((data) => {
+        data.sort(
+          (a, b) =>
+            (a.collector ?? Infinity) - (b.collector ?? Infinity) ||
+            a.picket - b.picket ||
+            a.section_id - b.section_id,
+        )
         setSections(data)
-        setCollector(data[0]?.collector ?? null)
+        setCollector(data.find((s) => s.mapping_status === 'resolved')?.collector ?? null)
       })
       .catch((e) => setError(errorMessage(e)))
   }, [])
 
   useEffect(() => {
-    fetch('/api/risks', { headers: { 'X-User-Login': API_LOGIN } })
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-        return r.json() as Promise<RiskClassRow[]>
-      })
-      .then(setRisks)
-      // Риск не грузится — не блокируем схему, участки просто выйдут нейтральными.
-      .catch((e) => console.error('не удалось загрузить /api/risks:', errorMessage(e)))
+    const refresh = () =>
+      fetch('/api/risks', { headers: { 'X-User-Login': API_LOGIN } })
+        .then((r) => {
+          if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+          return r.json() as Promise<RiskClassRow[]>
+        })
+        .then(setRisks)
+        // Риск не грузится — не блокируем схему, участки просто выйдут нейтральными.
+        .catch((e) => console.error('не удалось загрузить /api/risks:', errorMessage(e)))
+    refresh()
+    const timer = setInterval(refresh, 60_000)
+    return () => clearInterval(timer)
   }, [])
 
   const riskBySection = useMemo(() => {
@@ -78,6 +88,7 @@ export function MapScreen(_props: Record<string, unknown>) {
     if (!sections) return []
     const byId = new Map<number, { name: string; count: number }>()
     for (const s of sections) {
+      if (s.mapping_status !== 'resolved' || s.collector == null) continue
       const g = byId.get(s.collector) ?? { name: s.collector_name ?? String(s.collector), count: 0 }
       g.count += 1
       byId.set(s.collector, g)
@@ -85,12 +96,18 @@ export function MapScreen(_props: Record<string, unknown>) {
     return [...byId.entries()].sort((a, b) => a[0] - b[0])
   }, [sections])
 
-  const collectorName = collectors.find(([c]) => c === collector)?.[1].name ?? String(collector ?? '')
+  const collectorName =
+    collectors.find(([c]) => c === collector)?.[1].name ?? String(collector ?? '')
 
   const onAxis = useMemo(
-    () => (sections && collector != null ? sections.filter((s) => s.collector === collector) : []),
+    () =>
+      sections && collector != null
+        ? sections.filter((s) => s.mapping_status === 'resolved' && s.collector === collector)
+        : [],
     [sections, collector],
   )
+
+  const unresolved = sections?.filter((s) => s.mapping_status !== 'resolved') ?? []
 
   // Фильтры сужают набор значков, но не масштаб оси — линейка и подписи ПК держатся
   // на полном onAxis, иначе включённый фильтр менял бы диапазон под ногами.
@@ -144,11 +161,36 @@ export function MapScreen(_props: Record<string, unknown>) {
             >
               {collectors.map(([c, g]) => (
                 <option key={c} value={c}>
-                  {g.name} · {g.count} участков
+                  {g.name} · ID {c} · {g.count} участков
                 </option>
               ))}
             </select>
           </label>
+
+          <p class="text-sm" style="color:var(--text-secondary)">
+            {collectorName} · ID дерева объектов {collector}. Ключ участка — исторический префикс
+            тега:пикет; префикс не является номером коллектора. Вероятность относится к коллектору;
+            локальный риск участка не оценён.
+          </p>
+          {unresolved.length > 0 && (
+            <aside class="text-sm" style="color:var(--text-secondary)">
+              <p>
+                Не размещено участков: {unresolved.length}. Привязка к одному коллектору не
+                подтверждена.
+              </p>
+              <ul>
+                {unresolved.map((s) => (
+                  <li key={s.section_id}>
+                    <a href={`/objects/${s.section_id}`}>Участок {s.smvu_key}</a>
+                    {' · '}
+                    {s.mapping_status === 'ambiguous'
+                      ? `несколько коллекторов: ${(s.collector_ids ?? []).join(', ')}`
+                      : 'нет полной привязки'}
+                  </li>
+                ))}
+              </ul>
+            </aside>
+          )}
 
           <MapFilters
             filters={filters}

@@ -62,6 +62,10 @@ interface CurrentRisk {
 }
 
 interface ObjectDetail {
+  collector: number | null
+  collector_name: string | null
+  collector_ids: number[]
+  mapping_status: string
   section_id: number
   smvu_key: string
   inventory_no: string | null
@@ -239,7 +243,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           Участок {data.section_id}
         </h1>
         <p style="color:var(--text-secondary)">
-          Ключ СМВУ <code class="num">{data.smvu_key}</code>
+          Ключ СМВУ <code class="num">{data.smvu_key}</code> (префикс тега:пикет)
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
@@ -247,6 +251,12 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           )}
         </p>
       </div>
+
+      <p style="color:var(--text-secondary)">
+        {data.mapping_status === 'resolved'
+          ? `${data.collector_name} · ID коллектора ${data.collector}`
+          : `Привязка к одному коллектору не подтверждена. Коллекторы: ${(data.collector_ids ?? []).join(', ') || 'не определены'}`}
+      </p>
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
@@ -297,8 +307,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-          Отказы по каналам
+          Операционные отказы D5 по каналам
         </h2>
+        <p class="text-sm" style="color:var(--text-secondary)">
+          Длительность незакрытого отказа учитывается до среза данных.
+        </p>
         {channelFaultsError && (
           <p style="color:var(--state-error)">
             Не удалось загрузить отказы по каналам: {channelFaultsError}
@@ -355,6 +368,12 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
               {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
             </div>
+            <p style="color:var(--text-secondary)">
+              Вероятность отказа на коллекторе; локальный риск участка не оценён.
+            </p>
+            <p style="color:var(--text-secondary)">
+              Факторы деревьев — не полное разложение итоговой вероятности.
+            </p>
             {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
                 «Данные по состоянию на … — момент среза выгрузки заказчика»,
                 и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство

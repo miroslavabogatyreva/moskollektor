@@ -132,6 +132,8 @@ async def update_setting(
     old = await conn.fetchval("SELECT value FROM ref.app_setting WHERE key = $1", key)
     if old is None:
         raise HTTPException(404, f"настройки «{key}» нет")
+    if key == "forecast_horizon_h" and body.value != old:
+        raise HTTPException(422, "Горизонт задаётся обученной моделью. Для изменения требуется новая модель и повторная проверка, а не настройка отображения.")
     ошибка = _validation_error(key, body.value)
     if ошибка is None and key in _WINDOW_PAIR:
         other = await conn.fetchval(

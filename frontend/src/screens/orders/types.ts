@@ -10,6 +10,7 @@ export interface OrderListItem {
   work_type_name: string
   due_at: string // ISO, +03:00
   deadline_hours: number // due_at − reported_at самой заявки
+  window_remaining_after_due_h: number
   status: string
   priority_code: string
 }
@@ -34,7 +35,10 @@ export const PRIORITY_LABEL: Record<string, string> = {
 export interface OrderObject {
   section_id: number
   smvu_key: string
-  collector: number
+  collector: number | null
+  collector_ids?: number[]
+  collector_name?: string | null
+  mapping_status?: 'resolved' | 'ambiguous' | 'unmapped'
   picket: number
   func_location_id: number
   func_location_code: string
@@ -65,13 +69,16 @@ export interface OrderPriority {
 }
 
 export interface OrderForecastRef {
-  forecast_id: number
+  forecast_id: number | null
   run_id: number
   as_of: string
   direction: Direction
   horizon_h: number
   probability: number
-  risk_rank: number
+  risk_rank: number | null
+  risk_window_ends_at: string
+  warning_id: string | null
+  window_remaining_after_due_h: number
 }
 
 export interface OrderDetail {

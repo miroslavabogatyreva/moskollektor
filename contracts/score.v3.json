@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "score.v3 collector contract (draft)",
+  "type": "object",
+  "$comment": "Proposed collector format; product publication requires 24h under MOS-219. Naive timestamps are Europe/Moscow. The consumer also validates vector lengths against feature_names, collector ID uniqueness, model version/horizon equality, warning membership and expiry; see contracts/score.v3.md. This schema does not certify those relational conditions.",
+  "required": [
+    "schema_version",
+    "feature_schema",
+    "object_level",
+    "model_version",
+    "model_sha256",
+    "as_of",
+    "horizon_h",
+    "alert_threshold",
+    "feature_names",
+    "collectors",
+    "warnings",
+    "failure_values",
+    "explanation_scope",
+    "explains_probability"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "score.v3"
+    },
+    "feature_schema": {
+      "const": "feat.v3"
+    },
+    "object_level": {
+      "const": "collector"
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+    },
+    "horizon_h": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "alert_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "feature_names": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "collectors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "collector_id",
+          "p",
+          "features",
+          "moment_t",
+          "moment_kind",
+          "warning_open",
+          "warning_opened_at",
+          "warning_expires_at"
+        ],
+        "properties": {
+          "collector_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "p": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "features": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "moment_t": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+          },
+          "moment_kind": {
+            "enum": [
+              "tick",
+              "rearm"
+            ]
+          },
+          "warning_open": {
+            "type": "boolean"
+          },
+          "warning_opened_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warning_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "warning_id",
+          "collector_id",
+          "opened_at",
+          "expires_at",
+          "probability",
+          "features",
+          "closed_at",
+          "status"
+        ],
+        "properties": {
+          "warning_id": {
+            "type": "string",
+            "pattern": "^warn:[0-9a-f]{64}$"
+          },
+          "collector_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "opened_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+          },
+          "expires_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+          },
+          "probability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "features": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "open",
+              "closed",
+              "expired"
+            ]
+          }
+        }
+      }
+    },
+    "failure_values": {
+      "const": [
+        "Неисправен",
+        "Батарея неисправна",
+        "Много неисправных устройств",
+        "Не определено"
+      ]
+    },
+    "explanation_scope": {
+      "const": "mean_tree_logit"
+    },
+    "explains_probability": {
+      "const": false
+    }
+  }
+}

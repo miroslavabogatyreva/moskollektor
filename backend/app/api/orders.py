@@ -1,30 +1,17 @@
-"""Заявки. Задачи MOS-43 (Q4.6, заглушка) и MOS-60 (Q6.5, настоящая форма),
-приёмка М-09…М-13, М-16.
+"""Заявки со снимком исходного предупреждения или прогнозом старого формата.
 
-Форма ответов — contracts/examples/orders/order-list.json и order.json
-(moskollektor-44, 17.09.2026, Q6.1/6.2). Заявка без заказа ТОиР и без прогноза
-сегодня не встречается: обе строки заводит одной транзакцией
-app.domain.order_rules.завести() — поэтому джойны на work_order, приоритет
-и прогноз внутренние, а не LEFT: если инвариант когда-нибудь нарушится, метод
-должен явно потерять такую строку, а не молча подставить null в объект,
-которого по контракту не бывает.
-
-Срок заявки отдаётся двумя числами рядом (MOS-179): deadline_hours — due_at − reported_at
-самой заявки, из её же двух колонок, и priority.response_hours — норматив приоритета
-из справочника. У новых заявок класса A они совпадают (16 ч); у B и C срок меньше
-норматива, его ограничил потолок превентивности order_preventive_cap_h; у заведённых
-до миграции 037 они расходятся, потому что их срок считался от as_of + horizon_h, а историю
-задним числом мы не переписываем. Расхождение видно в одной строке карточки.
-
-predicted_failure_at и lead_hours убраны: момент as_of + horizon_h — конец окна риска,
-а не предсказанный отказ (ревью Codex 22.09.2026, М-13). Вместо них — warning_opened_at
-и risk_window_end, колонки заявки из той же миграции.
+Конец окна риска не является предсказанным временем отказа. Срок реакции
+и оставшаяся часть окна выводятся раздельно.
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
 from app.auth.deps import require
 from app.db import get_conn
+from app.domain.section_map import get_section_mapping, SECTION_MAP_SQL, map_section
+from app.domain.order_rules import запас_часов, конец_окна
 
 router = APIRouter(prefix="/api")
 
@@ -35,8 +22,11 @@ FROM_SQL = """
   JOIN maint.work_order wo   ON wo.notification_id = n.id
   JOIN ref.activity_type act ON act.id = wo.activity_type_id
   JOIN ref.priority p        ON p.id = n.priority_id
-  JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
-  JOIN pred.run r            ON r.run_id = f.run_id
+  LEFT JOIN pred.forecast f ON f.forecast_id = n.forecast_id
+  LEFT JOIN pred.run r ON r.run_id = f.run_id
+  LEFT JOIN pred.warning_section ws ON ws.id=n.warning_section_id
+  LEFT JOIN pred.warning w ON w.warning_key=ws.warning_key
+ WHERE f.forecast_id IS NOT NULL OR w.warning_key IS NOT NULL
 """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
@@ -46,8 +36,9 @@ COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 # 21.09.2026: GET /api/orders?offset=1000 отвечал total=0 при 224 заявках).
 # Отдельный COUNT_SQL от страницы не зависит, как и у /api/forecasts.
 LIST_SQL = f"""
-SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
-       n.due_at, n.reported_at, n.status, p.code AS priority_code
+SELECT n.id, x.section_id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
+       n.due_at, n.reported_at, n.status, p.code AS priority_code, COALESCE(w.opened_at,r.as_of) AS as_of,
+       COALESCE(w.horizon_h,f.horizon_h) AS horizon_h
 {FROM_SQL}
  ORDER BY n.due_at
  LIMIT $1 OFFSET $2
@@ -66,8 +57,12 @@ SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
        wo.order_no, wo.status AS work_order_status,
        wo.planned_start, wo.planned_finish,
        p.code AS priority_code, p.name AS priority_name, p.response_hours,
-       f.forecast_id, f.run_id, r.as_of, f.direction, f.horizon_h,
-       f.probability, f.risk_rank,
+       f.forecast_id, COALESCE(f.run_id,w.first_run_id) AS run_id,
+       COALESCE(w.opened_at,r.as_of) AS as_of,
+       COALESCE(f.direction,'sensor_failure') AS direction,
+       COALESCE(w.horizon_h,f.horizon_h) AS horizon_h,
+       COALESCE(w.probability,f.probability) AS probability, f.risk_rank,
+       w.warning_key, w.expires_at, w.features AS opening_features,
        -- Класс критичности участка проставлен db/migrations/010_orders.sql по
        -- системам его каналов (smvu.channel.system_kind) — причина берётся тем
        -- же способом, а не выдумывается заново; пусто только у класса C, для
@@ -91,15 +86,22 @@ SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
   JOIN ref.order_type ot      ON ot.id = wo.order_type_id
   JOIN ref.activity_type act  ON act.id = wo.activity_type_id
   JOIN ref.priority p         ON p.id = n.priority_id
-  JOIN pred.forecast f        ON f.forecast_id = n.forecast_id
-  JOIN pred.run r             ON r.run_id = f.run_id
- WHERE n.id = $1
+  LEFT JOIN pred.forecast f ON f.forecast_id = n.forecast_id
+  LEFT JOIN pred.run r ON r.run_id = f.run_id
+  LEFT JOIN pred.warning_section ws ON ws.id=n.warning_section_id
+  LEFT JOIN pred.warning w ON w.warning_key=ws.warning_key
+ WHERE n.id = $1 AND (f.forecast_id IS NOT NULL OR w.warning_key IS NOT NULL)
 """
 
 
 def _часов(от, до) -> float:
-    """Срок заявки в часах: due_at − reported_at, из двух колонок самой заявки."""
     return round((до - от).total_seconds() / 3600, 1)
+
+
+def название_участка(location, key):
+    if location.get("collector_name"):
+        return f"{location['collector_name']}, пикет {location['picket']}"
+    return f"Участок {key}, коллектор не определён однозначно"
 
 
 @router.get("/orders")
@@ -111,17 +113,19 @@ async def list_orders(
 ):
     total = await conn.fetchval(COUNT_SQL)
     rows = await conn.fetch(LIST_SQL, limit, offset)
+    locations = {r["section_id"]: map_section(r) for r in await conn.fetch(SECTION_MAP_SQL)}
     return {
         "schema_version": "orders.v1",
         "total": total,
         "items": [
             {
                 "id": r["id"],
-                "object_name": r["object_name"],
+                "object_name": название_участка(locations.get(r["section_id"], {}), r["smvu_key"]),
                 "smvu_key": r["smvu_key"],
                 "work_type_name": r["work_type_name"],
                 "due_at": r["due_at"],
                 "deadline_hours": _часов(r["reported_at"], r["due_at"]),
+                "window_remaining_after_due_h": round(запас_часов(r["due_at"], r["as_of"], r["horizon_h"]), 1),
                 "status": r["status"],
                 "priority_code": r["priority_code"],
             }
@@ -140,7 +144,7 @@ async def get_order(
     if row is None:
         raise HTTPException(404, "заявка не найдена")
 
-    collector, picket = row["smvu_key"].split(":")
+    location = await get_section_mapping(conn, row["section_id"])
     criticality_reason = row["criticality_reason"] or (
         f"класс критичности «{row['criticality_name']}» — "
         "выделенных систем на участке нет"
@@ -162,11 +166,10 @@ async def get_order(
         "object": {
             "section_id": row["section_id"],
             "smvu_key": row["smvu_key"],
-            "collector": int(collector),
-            "picket": int(picket),
+            **location,
             "func_location_id": row["func_location_id"],
             "func_location_code": row["func_location_code"],
-            "name": row["object_name"],
+            "name": название_участка(location, row["smvu_key"]),
             "criticality_code": row["criticality_code"],
             "criticality_name": row["criticality_name"],
             "criticality_reason": criticality_reason,
@@ -196,6 +199,10 @@ async def get_order(
             "horizon_h": row["horizon_h"],
             "probability": row["probability"],
             "risk_rank": row["risk_rank"],
+            "risk_window_ends_at": row["expires_at"] or конец_окна(row["as_of"], row["horizon_h"]),
+            "warning_id": row["warning_key"],
+            "opening_features": json.loads(row["opening_features"]) if isinstance(row["opening_features"], str) else row["opening_features"],
+            "window_remaining_after_due_h": round(запас_часов(row["due_at"], row["as_of"], row["horizon_h"]), 1),
         },
         "reason": row["reason"],
         "created_at": row["created_at"],

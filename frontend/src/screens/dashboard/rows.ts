@@ -4,31 +4,17 @@
 
 import type { RiskClass } from './types'
 
-// ИМЯ ОБЪЕКТА. `GET /api/risks` отдаёт только `section_id` — число вида 2477,
-// которое диспетчеру не говорит ничего. Тот же объект сервер уже называет
-// словами в заявках: `GET /api/orders` отдаёт `object_name` = «Коллектор 645,
-// пикет 496». Повторяем ЭТУ строку слово в слово, а не придумываем свою:
-// один объект обязан на всех экранах зваться одинаково, иначе диспетчер
-// читает два имени как два объекта.
-//
-// Складываем её на клиенте из `/data/sections.json` — того же справочника,
-// который уже читает схема коллектора (`screens/map/index.tsx:50`) и который
-// собирался читать журнал. Не поле в ответе API: 3 173 строки × «Коллектор
-// 645, пикет 496» это ещё около 70 КБ в ответе, который и так весит 504 421 Б,
-// а справочник статический, лежит рядом с бандлом, жмётся до 30,4 КБ и после
-// первого экрана берётся из кэша браузера.
-export interface SectionRef {
-  section_id: number
-  smvu_key: string
-  collector: number
-  picket: number
-}
+// Authoritative customer-tree mapping shared with the collector map.
+import type { Section } from '../map/types'
+export type SectionRef = Section
 
 export function имяОбъекта(section: SectionRef | undefined, sectionId: number): string {
   // Справочник не доехал или участка в нём нет — показываем номер, а не пустоту.
   // Пустая ячейка в столбце «Объект» читается как «объекта нет», а он есть.
   if (!section) return `Участок ${sectionId}`
-  return `Коллектор ${section.collector}, пикет ${section.picket}`
+  if (section.mapping_status !== 'resolved')
+    return `Участок ${section.smvu_key} · привязка к коллектору не подтверждена`
+  return `${section.collector_name ?? `Коллектор ${section.collector}`}, пикет ${section.picket}`
 }
 
 export function указатель(sections: SectionRef[]): Map<number, SectionRef> {

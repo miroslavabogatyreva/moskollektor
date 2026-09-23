@@ -70,7 +70,8 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
         <Field label="Срок выполнения">
           {formatDateTime(data.due_at)}{' '}
           <span style="color:var(--text-muted)">
-            · срок заявки <span class="num">{data.deadline_hours}</span> ч от обнаружения
+            · срок заявки <span class="num">{data.deadline_hours}</span> ч{' '}
+            {data.forecast.warning_id ? 'от открытия предупреждения' : 'от обнаружения'}
           </span>
         </Field>
         {data.warning_opened_at && (
@@ -96,17 +97,24 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
       </section>
 
       <section>
-        <a
-          href={`/forecasts/${data.forecast.forecast_id}`}
-          onClick={(e) => {
-            e.preventDefault()
-            route(`/forecasts/${data.forecast.forecast_id}`)
-          }}
-          class="text-sm"
-          style="color:var(--link)"
+        <Field
+          label={data.forecast.warning_id ? 'Вероятность при открытии' : 'Вероятность прогноза'}
         >
-          Прогноз, срез данных {formatDateTime(data.forecast.as_of)}
-        </a>
+          {(data.forecast.probability * 100).toFixed(1)} %
+        </Field>
+        {data.forecast.forecast_id !== null && (
+          <a
+            href={`/forecasts/${data.forecast.forecast_id}`}
+            onClick={(e) => {
+              e.preventDefault()
+              route(`/forecasts/${data.forecast.forecast_id}`)
+            }}
+            class="text-sm"
+            style="color:var(--link)"
+          >
+            Прогноз, срез данных {formatDateTime(data.forecast.as_of)}
+          </a>
+        )}
       </section>
     </main>
   )
