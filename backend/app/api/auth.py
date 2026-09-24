@@ -1,5 +1,10 @@
 """Вход по логину и паролю, LDAP-каталог, служебные методы. Задача MOS-39
-(Q4.2), приёмка Ф-66, НФ-43, НФ-76, НФ-85.
+(Q4.2), приёмка Ф-66, НФ-43, НФ-76, НФ-85. GET/PATCH /users — MOS-226
+(Q4.19): администратор блокирует и разблокирует пользователя из интерфейса,
+без обращения к базе данных (решение Славы 24.09.2026 закрывать Ф-66 кнопкой,
+не блокировкой в каталоге). Каталожную учётку блокировка тоже держит:
+_sync_ldap_user при входе не трогает is_active, поэтому она переживает
+повторный вход через LDAP.
 
 Маршрут входа сам решает способ по auth_source учётки: local — argon2 против
 ref.app_user.password_hash, ldap (или неизвестный логин при настроенном
@@ -27,6 +32,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
+from app.api.schemas import UserItem
 from app.auth import ldap as ldap_auth
 from app.auth.deps import get_current_user, require
 from app.auth.password import verify_password
@@ -94,6 +100,10 @@ class DirectoryCheck(BaseModel):
     ok: bool
     ms: int
     message: str
+
+
+class UserUpdate(BaseModel):
+    is_active: bool
 
 
 def _deny(request: Request, login_attempt: str) -> HTTPException:
@@ -187,6 +197,34 @@ async def _login_core(body: LoginBody, request: Request, conn: asyncpg.Connectio
     return user, TTL_LDAP_S
 
 
+def _user_item(row: asyncpg.Record) -> dict:
+    return {
+        "login": row["login"],
+        "full_name": row["full_name"],
+        "auth_source": row["auth_source"],
+        "is_active": row["is_active"],
+        "roles": list(row["roles"]),
+    }
+
+
+async def _patch_user_core(
+    login: str, body: UserUpdate, request: Request, conn: asyncpg.Connection, current_login: str
+) -> asyncpg.Record:
+    """Логика PATCH отдельно от Depends — тот же приём, что у _login_core, чтобы
+    selfcheck прогонял 400/404/аудит без реального HTTP-ответа (MOS-226, Ф-66)."""
+    target = await _load_user(conn, login)
+    if target is None:
+        raise HTTPException(404, f"пользователя «{login}» нет")
+    if login == current_login and not body.is_active:
+        raise HTTPException(400, "нельзя заблокировать себя")
+    old = target["is_active"]
+    await conn.execute(
+        "UPDATE ref.app_user SET is_active = $1 WHERE login = $2", body.is_active, login
+    )
+    request.state.audit_details = {"login": login, "old": old, "new": body.is_active}
+    return await _load_user(conn, login)
+
+
 @router.post("/login", response_model=AuthUser)
 async def login(
     body: LoginBody,
@@ -266,6 +304,35 @@ async def directory_check(_user: asyncpg.Record = Depends(require("settings.writ
     return {"ok": ok, "ms": ms, "message": message}
 
 
+@router.get("/users", response_model=list[UserItem])
+async def list_users(
+    conn: asyncpg.Connection = Depends(get_conn),
+    _user: asyncpg.Record = Depends(require("settings.read")),
+):
+    rows = await conn.fetch(
+        """
+        SELECT u.login, u.full_name, u.auth_source, u.is_active,
+               ARRAY(SELECT r.role_code FROM ref.user_role r
+                      WHERE r.login = u.login ORDER BY r.role_code) AS roles
+          FROM ref.app_user u
+         ORDER BY u.login
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+@router.patch("/users/{login}", response_model=UserItem)
+async def update_user(
+    login: str,
+    body: UserUpdate,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    user: asyncpg.Record = Depends(require("settings.write")),
+):
+    row = await _patch_user_core(login, body, request, conn, user["login"])
+    return _user_item(row)
+
+
 def _selfcheck():
     import asyncio
 
@@ -327,6 +394,9 @@ def _selfcheck():
                 login = args[0]
                 if login in self._users:
                     self._users[login]["roles"] = []
+            elif "UPDATE ref.app_user SET is_active" in sql:
+                is_active, login = args
+                self._users[login]["is_active"] = is_active
 
         async def executemany(self, sql, rows):
             if "ref.user_role" in sql:
@@ -433,6 +503,43 @@ def _selfcheck():
             os.environ.pop("LDAP_URI", None)
             os.environ.pop("LDAP_USER_TEMPLATE", None)
             os.environ.pop("LDAP_BASE_DN", None)
+
+        # PATCH /users — блокировка администратором (MOS-226, Ф-66).
+        conn = _FakeConn(
+            users={
+                "admin1": local_user("admin1", ["admin"]),
+                "tech2": local_user("tech2", ["technician"]),
+            },
+            role_map=[],
+        )
+
+        # 404 — логина нет.
+        try:
+            await _patch_user_core("ghost", UserUpdate(is_active=False), _FakeRequest(), conn, "admin1")
+        except HTTPException as e:
+            assert e.status_code == 404
+        else:
+            raise AssertionError("несуществующий логин должен дать 404")
+
+        # 400 — администратор блокирует сам себя.
+        try:
+            await _patch_user_core("admin1", UserUpdate(is_active=False), _FakeRequest(), conn, "admin1")
+        except HTTPException as e:
+            assert e.status_code == 400
+        else:
+            raise AssertionError("блокировка себя должна дать 400")
+
+        # Блокировка чужого — 200, is_active падает, audit_details несёт old/new.
+        req = _FakeRequest()
+        row = await _patch_user_core("tech2", UserUpdate(is_active=False), req, conn, "admin1")
+        assert row["is_active"] is False
+        assert req.state.audit_details == {"login": "tech2", "old": True, "new": False}
+
+        # Разблокировка обратно — old теперь False.
+        req = _FakeRequest()
+        row = await _patch_user_core("tech2", UserUpdate(is_active=True), req, conn, "admin1")
+        assert row["is_active"] is True
+        assert req.state.audit_details == {"login": "tech2", "old": False, "new": True}
 
     asyncio.run(run())
     print("selfcheck ok")
