@@ -190,6 +190,9 @@ frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на ис�
                     из docs/user-stories.md, тест на сценарий; конфигурация
                     frontend/playwright.config.ts, запуск npm run e2e
 deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
+deploy/ldap/        демонстрационный каталог LDAP (MOS-39, НФ-76): Dockerfile,
+                    slapd.conf, bootstrap.ldif (4 учётки, роли, область видимости),
+                    entrypoint.sh, block-user.sh — профиль compose ldap
 delivery/           check-all.sh — один прогон всех проверок;
                     check-a11y.mjs — доступность таблиц настоящим браузером (НФ-92),
                     check-map.mjs — экран схемы тем же браузером (М-05);
