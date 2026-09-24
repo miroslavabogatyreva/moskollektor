@@ -1,3 +1,4 @@
+import { apiFetch } from '../../lib/api'
 import type { ForecastListResponse } from './types'
 
 export interface ForecastQuery {
@@ -5,10 +6,6 @@ export interface ForecastQuery {
   to?: string
   offset?: number
 }
-
-// ponytail: вход без пароля, личность берётся из X-User-Login (backend/app/auth/deps.py).
-// Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
-const API_LOGIN = 'dispatcher1'
 
 function ожидаетсяСписок(body: unknown): body is ForecastListResponse {
   return (
@@ -31,10 +28,7 @@ export async function fetchForecasts(
   if (query.to) params.set('to', query.to)
   if (query.offset) params.set('offset', String(query.offset))
   const qs = params.toString()
-  const r = await fetch(`/api/forecasts${qs ? `?${qs}` : ''}`, {
-    headers: { 'X-User-Login': API_LOGIN },
-    signal,
-  })
+  const r = await apiFetch(`/api/forecasts${qs ? `?${qs}` : ''}`, { signal })
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()
   if (!ожидаетсяСписок(body)) {

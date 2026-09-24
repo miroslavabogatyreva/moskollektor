@@ -1,8 +1,5 @@
+import { apiFetch } from '../../lib/api'
 import type { OrderDetail, OrderListResponse } from './types'
-
-// ponytail: вход без пароля, личность берётся из X-User-Login (backend/app/auth/deps.py).
-// Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
-const API_LOGIN = 'dispatcher1'
 
 // До задачи 6.5 (MOS-60) GET /api/orders и GET /api/orders/{id} — заглушка
 // MOS-43, отвечает голым []. Пустой массив у списка read (`d.items`) дал бы
@@ -25,7 +22,7 @@ function ожидаетсяКарточка(body: unknown): body is OrderDetail 
 // и тот же потолок роста, что нашёлся у /api/forecasts, ждал и эту ручку.
 export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
   const qs = offset ? `?offset=${offset}` : ''
-  const r = await fetch(`/api/orders${qs}`, { headers: { 'X-User-Login': API_LOGIN } })
+  const r = await apiFetch(`/api/orders${qs}`)
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()
   if (!ожидаетсяСписок(body)) {
@@ -35,7 +32,7 @@ export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
 }
 
 export async function fetchOrder(orderId: string): Promise<OrderDetail | null> {
-  const r = await fetch(`/api/orders/${orderId}`, { headers: { 'X-User-Login': API_LOGIN } })
+  const r = await apiFetch(`/api/orders/${orderId}`)
   // 403 — чужая заявка или id вне области видимости (MOS-107), для экрана то же, что 404.
   if (r.status === 404 || r.status === 403) return null
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
