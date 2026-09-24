@@ -47,17 +47,24 @@ ON CONFLICT (role_code, permission_code) DO NOTHING;
 -- областей видимости. analyst1 и engineer1 из прежнего
 -- сида 044 отключила (is_active = false), строки остались ради внешних ключей.
 --
--- password_hash — argon2 (db/migrations/047_auth.sql, MOS-39). Пароли те же,
--- что показывает подсказка GET /api/auth/info (backend/app/api/auth.py,
--- DEMO_ACCOUNTS): демо обязано работать без каталога (решение Славы 24.09.2026).
--- Это ВСЕГДА локальные учётки, отдельные от одноимённых ldap_* в каталоге —
--- у обоих путей входа своя пара «логин/секрет», смешивать их нельзя.
+-- password_hash — argon2 (db/migrations/047_auth.sql, MOS-39). Пароли первых
+-- четырёх — те же, что показывает подсказка GET /api/auth/info
+-- (backend/app/api/auth.py, DEMO_ACCOUNTS): демо обязано работать без
+-- каталога (решение Славы 24.09.2026). Это ВСЕГДА локальные учётки, отдельные
+-- от одноимённых ldap_* в каталоге — у обоих путей входа своя пара
+-- «логин/секрет», смешивать их нельзя.
+--
+-- tech2 в DEMO_ACCOUNTS нарочно не входит (подопытный для проверки сложения
+-- областей видимости, не демо-учётка со страницы входа) — пароль записан
+-- только здесь: tech2123123. Хеш перегенерирован 24.09.2026 (MOS-226):
+-- первый, заведённый в MOS-39 (коммит b373c22), был нигде не записан и
+-- необратим — потерялся раньше, чем кто-либо им воспользовался.
 INSERT INTO ref.app_user (login, full_name, auth_source, password_hash) VALUES
     ('dispatcher1', 'Тестовый диспетчер',     'local', '$argon2id$v=19$m=65536,t=3,p=4$W3DAWpcjq6AWcOjKU8hXXg$bDZhR+9jFwI74Bg5IuB2yZsaMJ56mVYkCSwatPdrY0E'),
     ('ods1',        'Тестовый диспетчер ОДС', 'local', '$argon2id$v=19$m=65536,t=3,p=4$OP7Y01uuWH56hJrmN4ssLA$DSrZdqPpPn+s6XL+B00xTP+bu502QCJUHQOYCxw//S8'),
     ('tech1',       'Тестовый техник',        'local', '$argon2id$v=19$m=65536,t=3,p=4$VH5tU5alwapN3s4VKo3NfQ$8fMA7COqLtjQ5IlzFLU7Y+MIvmCnny+ENVITMG7yBH4'),
     ('admin1',      'Тестовый администратор', 'local', '$argon2id$v=19$m=65536,t=3,p=4$hi21eVs/+Z4TC+MviMr/qQ$fiWyF7z+LFJYhUBo/YKjDMBOn8c7hbnKcDFs1/4/ud4'),
-    ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$77SZiltSln//VD5QCqJUlA$K6RdNud8RSWIpZrG9gDRkGDRS9hBiN2Ml0I0ZiXp3Ms')
+    ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$qtIfrl0986Qq2OhfN4oJiw$/v/8MrUD81Y4oAS5ntGuG49UpxI5dL9NkWA4dfLF4+4')
 
 ON CONFLICT (login) DO UPDATE SET
     full_name     = excluded.full_name,

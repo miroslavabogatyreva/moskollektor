@@ -259,3 +259,11 @@ class SettingItem(BaseModel):
     unit: str | None
     changed_by: int | None
     changed_at: IsoDatetime
+
+
+class UserItem(BaseModel):
+    login: str
+    full_name: str
+    auth_source: str
+    is_active: bool
+    roles: list[str]
