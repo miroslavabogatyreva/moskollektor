@@ -67,7 +67,14 @@ def verify_session(token: str) -> str | None:
     except ValueError:
         return None
     expected = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(sig, expected):
+    # Сравнение байтами, не str (находка проверяющей 92, 24.09.2026):
+    # hmac.compare_digest(str, str) бросает TypeError на не-ASCII символах,
+    # а sig — из куки, которую прислал клиент. Starlette декодирует Cookie
+    # как latin-1, так что не-ASCII там долетает свободно; TypeError изнутри
+    # приложения отвечал бы 500 вместо 401 на GET /api/auth/me и везде,
+    # где стоит get_current_user. .encode() у str не бросает исключений
+    # ни на каких символах — в отличие от сравнения строк.
+    if not hmac.compare_digest(sig.encode(), expected.encode()):
         return None
     try:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
@@ -96,6 +103,11 @@ def _selfcheck():
     # Мусор вместо куки не падает исключением, а отвечает «нет сессии».
     assert verify_session("совсем не похоже на куку") is None
     assert verify_session("a.b.c") is None
+
+    # Не-ASCII в подписи — 401, а не TypeError/500 (находка 92, 24.09.2026):
+    # hmac.compare_digest(str, str) не принимает не-ASCII, а Starlette пускает
+    # такую куку в приложение (декодирует Cookie как latin-1).
+    assert verify_session("abc.ÿÿ") is None
 
     # LDAP-сессия короче локальной — тот же формат, другой срок в подписанной части.
     ldap_token = sign_session("ldap_admin1", TTL_LDAP_S)
