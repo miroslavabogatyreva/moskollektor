@@ -57,7 +57,7 @@ test('администратор блокирует и разблокирует 
 }) => {
   // request — своя, отдельная от page.request (у той нет newContext: cookie
   // от логина tech2 через неё не пойдёт и не спутается с сессией admin1
-  // в page). База — та же baseURL из playwright.config.ts (нашла 92, 24.09.2026).
+  // в page). База — та же baseURL из playwright.config.ts (нашла c8, 24.09.2026).
   const accounts = await demoAccounts(page)
   const admin = account(accounts, 'admin')
 
