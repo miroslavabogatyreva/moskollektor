@@ -8,6 +8,19 @@ pydantic==2.13.5
 uvicorn==0.52.4
 # app.worker.scheduler (Q3.4) — ветка 3.x, а не 4.x: обоснование в HLD разд. 7.1.2.
 apscheduler==3.11.3
+# app.auth.password (Q4.2) — argon2 для локальных учётных записей, лицензия MIT.
+argon2-cffi==25.1.0
+# app.auth.ldap (Q4.2) — simple bind и поиск групп, лицензия в стиле Python
+# (классификатор PyPI — PSF), не ldap3 (LGPLv3, запрещена HLD разд. 7.3).
+python-ldap==3.4.8
+# Транзитивные python-ldap/argon2-cffi — закреплены той же причиной, что idna
+# ниже: собраны в `.venv` командой `pip install argon2-cffi python-ldap`
+# 24.09.2026, не переписаны руками.
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+pycparser==3.0
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
 # Транзитивная зависимость anyio, версией не закреплена нигде выше — 21.09.2026
 # .venv и образ разошлись (3.19 против 3.20, оба образа пересобирали в разное
 # время), и docs/libraries.md соврал про один из двух. Закреплена явно, чтобы
