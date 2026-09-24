@@ -92,7 +92,16 @@ test('чужой next не уводит с сайта — открытый ре�
   // //host и /\host — оба способ задать хост без схемы: браузер (WHATWG URL,
   // "special"-схемы http/https) разбирает обратный слэш как прямой в начале
   // адреса, поэтому /\evil.example не менее опасен, чем //evil.example.
-  for (const next of ['https://evil.example/x', '//evil.example/x', '/\\evil.example']) {
+  // \t, \n, \r браузер вырезает из адреса ДО разбора — нашла 92 второй раз:
+  // /\t/evil.example/x после вырезания табуляции превращается в //evil.example/x.
+  for (const next of [
+    'https://evil.example/x',
+    '//evil.example/x',
+    '/\\evil.example',
+    '/\t/evil.example/x',
+    '/\n/evil.example/x',
+    '/\r/evil.example/x',
+  ]) {
     await page.goto(`/login?next=${encodeURIComponent(next)}`)
     const ownHost = new URL(page.url()).host
     await page.getByLabel('Логин').fill(someone.login)

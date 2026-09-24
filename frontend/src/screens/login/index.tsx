@@ -16,13 +16,23 @@ import type { DemoAccount } from './types'
 // Открытый редирект (нашла 92, 24.09.2026): next — часть адреса, значит
 // её пишет не только apiFetch, а кто угодно в ссылке жертве. window.location.href
 // без проверки увёл бы её на чужой хост чужим паролем от НАШЕГО экрана входа.
-// '//host' и '/\host' — оба способа задать хост без схемы: браузер разбирает
-// обратный слэш как прямой в начале адреса (WHATWG URL, ветка "special"
-// схем http/https), поэтому /\evil.example не менее опасен, чем //evil.example.
+// Список запрещённых символов чинить бесконечно: браузер вырезает \t, \n, \r
+// из адреса ПЕРЕД разбором (WHATWG URL Standard), и /\t/evil.example
+// становится //evil.example уже после проверки на '//' (нашла 92 второй
+// раз). Поэтому next разбирает тот же парсер, что и сам переход: любая
+// строка, которую браузер в итоге сведёт к чужому origin, будет поймана
+// здесь так же, как её поймал бы сам переход.
 function nextPath(): string {
   const next = new URLSearchParams(window.location.search).get('next')
-  const ok = next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
-  return ok && next !== '/login' ? next : '/dashboard'
+  if (!next) return '/dashboard'
+  try {
+    const u = new URL(next, window.location.origin)
+    return u.origin === window.location.origin && u.pathname !== '/login'
+      ? u.pathname + u.search + u.hash
+      : '/dashboard'
+  } catch {
+    return '/dashboard'
+  }
 }
 
 export function LoginScreen(_props: Record<string, unknown>) {
