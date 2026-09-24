@@ -100,6 +100,15 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       ML_URL: ${ML_URL}
       TZ: ${TZ}
+      # MOS-39, находка проверяющей 92: без этих шести api не увидит вход по
+      # паролю и каталог, даже когда все переменные заданы в .env — до сих
+      # пор ни один из них не перечислен в environment.
+      AUTH_SECRET: ${AUTH_SECRET:?задайте AUTH_SECRET}
+      AUTH_TRUST_HEADER: ${AUTH_TRUST_HEADER:-0}
+      AUTH_DEMO_HINTS: ${AUTH_DEMO_HINTS:-0}
+      LDAP_URI: ${LDAP_URI:-}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:-}
+      LDAP_USER_TEMPLATE: ${LDAP_USER_TEMPLATE:-}
     depends_on:
       db:
         condition: service_healthy
@@ -188,6 +197,22 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+
+  # Демонстрационный каталог LDAP (MOS-39, НФ-76). Сам не поднимается —
+  # только командой с двумя профилями:
+  #   docker compose --profile app --profile ldap up -d
+  # Заказчик не даёт доступа к своему каталогу («любой LDAP сервис» — ответ
+  # 31, docs/meetings/2026-09-17-эксперты.md), поэтому доказываем НФ-76 своим
+  # маленьким сервером, а не заглушкой в коде: настоящий bind, настоящий отказ
+  # bind после block-user.sh.
+  ldap:
+    profiles: ["ldap"]
+    build:
+      context: ..
+      dockerfile: deploy/ldap/Dockerfile
+    # Порт не публикуется наружу — api ходит по имени сервиса внутри сети
+    # compose (LDAP_URI=ldap://ldap:389 в .env).
     restart: unless-stopped
 
   # Накат миграций. Живёт секунды и выходит: HLD разд. 7.1 называет его
