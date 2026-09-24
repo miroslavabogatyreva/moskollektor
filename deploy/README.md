@@ -268,6 +268,49 @@ docker compose exec -T ml python -c "import urllib.request,json; print(json.load
 не выдать за прогноз. Подмена на образ Николая — правка `ML_IMAGE` в `.env`,
 код при этом не меняется.
 
+## Поднять каталог LDAP (демо, НФ-76, MOS-39)
+
+Заказчик каталога не даёт («любой LDAP сервис» — ответ 31, `docs/meetings/2026-09-17-эксперты.md`),
+поэтому НФ-76 доказываем своим маленьким сервером. Профиль отдельный от `app`, поднимается
+вторым флагом:
+
+```
+docker compose --profile app --profile ldap up -d
+```
+
+Проверить: любая из четырёх демо-учёток биндится, пароль у всех `LdapDemo#1`.
+
+```
+docker compose exec -T ldap ldapwhoami -x \
+  -D "uid=ldap_tech1,ou=people,dc=moskollektor,dc=local" -w 'LdapDemo#1' -H ldap://127.0.0.1
+# ждём: dn:uid=ldap_tech1,ou=people,dc=moskollektor,dc=local
+```
+
+**Заблокировать и вернуть учётку** — `deploy/ldap/block-user.sh`, отдельная команда,
+не трогает пароль (уводит DN в сторону, `ldapmodrdn`):
+
+```
+sh deploy/ldap/block-user.sh ldap_tech1          # bind после этого — Invalid credentials (49)
+sh deploy/ldap/block-user.sh --undo ldap_tech1   # bind снова проходит
+```
+
+**Подключить настоящий AD/LDAP заказчика вместо демо-каталога** — три переменные
+в `.env`, ни одной правки кода:
+
+```
+LDAP_URI=ldap://<их контроллер>:389
+LDAP_BASE_DN=<их base DN>
+LDAP_USER_TEMPLATE=uid={login},<их шаблон DN>   # {login} — обязательный плейсхолдер
+```
+
+Профиль `ldap` в `docker compose --profile app up -d` при этом просто не поднимать —
+контейнер demo-каталога и настоящий AD не должны стоять рядом одновременно.
+
+**Гасить только поимённо.** `docker compose down` без имени сервиса убирает ВСЕ
+контейнеры проекта, а не только профиль `ldap` — если рядом работает `db`/`nginx`
+(в том числе из другого worktree на этой же машине), они уедут тоже. Верно:
+`docker compose stop ldap && docker compose rm -f ldap`.
+
 ## Поднять API и выложить интерфейс
 
 **Найдено 16.09.2026: из шести контейнеров HLD на стенде работали три.** Контейнер `api`
