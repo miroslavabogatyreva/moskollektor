@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
+import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime } from '../lib/format'
 
@@ -24,8 +25,6 @@ interface ForecastDetail {
   order_ids?: number[]
 }
 
-const API_LOGIN = 'dispatcher1'
-
 export function ForecastCard({ forecastId }: { forecastId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ForecastDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -40,7 +39,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
     setData(null)
     setNotFound(false)
     setError(null)
-    fetch(`/api/forecasts/${forecastId}`, { headers: { 'X-User-Login': API_LOGIN } })
+    apiFetch(`/api/forecasts/${forecastId}`)
       .then((r) => {
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
         // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
