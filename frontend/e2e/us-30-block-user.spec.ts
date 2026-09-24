@@ -43,6 +43,11 @@ test('у своей строки нет кнопки блокировки', asyn
   await loginAs(page, admin.login, admin.password)
   await page.goto('/admin/users')
   const ownRow = page.getByRole('row', { name: new RegExp(admin.login) })
+  // Без этой строки toHaveCount(0) ловит момент до загрузки таблицы: строки
+  // ещё нет вовсе, кнопок 0 по любой причине — тест зелёный, даже если кнопка
+  // у своей строки есть (нашла c8 на стенде, 24.09.2026, прогон 605 мс вместо
+  // ожидаемых секунд — знак, что проверка ничего не ждала).
+  await expect(ownRow).toBeVisible()
   await expect(ownRow.getByRole('button')).toHaveCount(0)
 })
 
