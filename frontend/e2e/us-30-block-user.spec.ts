@@ -48,7 +48,11 @@ test('у своей строки нет кнопки блокировки', asyn
 
 test('администратор блокирует и разблокирует tech2 кнопкой в интерфейсе (Ф-66)', async ({
   page,
+  request,
 }) => {
+  // request — своя, отдельная от page.request (у той нет newContext: cookie
+  // от логина tech2 через неё не пойдёт и не спутается с сессией admin1
+  // в page). База — та же baseURL из playwright.config.ts (нашла 92, 24.09.2026).
   const accounts = await demoAccounts(page)
   const admin = account(accounts, 'admin')
 
@@ -60,22 +64,18 @@ test('администратор блокирует и разблокирует 
     await row.getByRole('button', { name: 'Заблокировать' }).click()
     await expect(row.getByText('заблокирована')).toBeVisible()
 
-    const blocked = await page.request.newContext()
-    const loginResp = await blocked.post('/api/auth/login', {
+    const loginResp = await request.post('/api/auth/login', {
       data: { login: 'tech2', password: TECH2_PASSWORD },
     })
     expect(loginResp.status()).toBe(401)
-    await blocked.dispose()
 
     await row.getByRole('button', { name: 'Разблокировать' }).click()
     await expect(row.getByText('активна')).toBeVisible()
 
-    const unblocked = await page.request.newContext()
-    const loginResp2 = await unblocked.post('/api/auth/login', {
+    const loginResp2 = await request.post('/api/auth/login', {
       data: { login: 'tech2', password: TECH2_PASSWORD },
     })
     expect(loginResp2.status()).toBe(200)
-    await unblocked.dispose()
   } finally {
     // Уборка: is_active должен остаться true независимо от того, где упал тест.
     await page.request.patch('/api/auth/users/tech2', { data: { is_active: true } })
