@@ -89,7 +89,7 @@ export function UsersScreen(_props: Record<string, unknown>) {
                     </span>
                   </td>
                   <td class="px-2 py-2">
-                    {u.login !== me?.login && (
+                    {me && u.login !== me.login && (
                       <button
                         type="button"
                         disabled={busyLogin === u.login}
