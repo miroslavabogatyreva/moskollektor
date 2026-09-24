@@ -12,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 
 from app.api.audit import router as audit_router
+from app.api.auth import router as auth_router
 from app.api.geo import router as geo_router
 from app.api.notifications import router as notifications_router
 from app.api.objects import router as objects_router
@@ -20,9 +21,11 @@ from app.api.routes import router
 from app.api.settings import router as settings_router
 from app.api.tech_events import router as tech_events_router
 from app.api.xml import to_xml, wants_xml
+from app.auth.session import require_secret
 from app.db import get_pool
 
 app = FastAPI(title="Москоллектор API")
+app.include_router(auth_router)
 app.include_router(router)
 app.include_router(orders_router)
 app.include_router(audit_router)
@@ -42,10 +45,15 @@ async def health():
 async def write_audit_log(request: Request, call_next):
     """MOS-47 (Q4.10): строка в audit.user_action на каждый запрос кроме /health.
 
-    Личность запроса та же, что видит get_current_user (заголовок X-User-Login),
-    но опознаём независимо от него: middleware обязан записать и отказ (401),
-    чтобы попытка неопознанного входа тоже осталась в журнале, а не выпала
-    из него потому, что Depends в маршруте прервал цепочку раньше.
+    Личность запроса берём из request.state.user_id (Q4.2, MOS-39) — его кладёт
+    либо get_current_user (backend/app/auth/deps.py) по куке mk_session или,
+    при AUTH_TRUST_HEADER=1, по заголовку X-User-Login, либо сам маршрут входа
+    (POST /api/auth/login, до этого куки у запроса ещё нет). До Q4.2 middleware
+    читал заголовок напрямую — после входа по паролю это записало бы в журнал
+    не того человека (НФ-85), опознаём независимо от исхода маршрута: middleware
+    обязан записать и отказ (401), чтобы попытка неопознанного входа тоже
+    осталась в журнале, а не выпала из него потому, что Depends прервал цепочку
+    раньше.
 
     MOS-110 (Q4.12): маршрут может положить request.state.audit_details ДО того,
     как отдаст ответ (см. app.api.settings.update_setting) — это тот же ряд,
@@ -56,14 +64,9 @@ async def write_audit_log(request: Request, call_next):
         return response
 
     pool = await get_pool()
-    login = request.headers.get("x-user-login")
+    user_id = getattr(request.state, "user_id", None)
     details = getattr(request.state, "audit_details", None)
     async with pool.acquire() as conn:
-        user_id = None
-        if login:
-            user_id = await conn.fetchval(
-                "SELECT user_id FROM ref.app_user WHERE login = $1", login,
-            )
         await conn.execute(
             """
             INSERT INTO audit.user_action (user_id, method, path, status_code, ip_address, details)
@@ -105,4 +108,5 @@ async def convert_to_xml(request: Request, call_next):
 
 
 if __name__ == "__main__":
+    require_secret()
     uvicorn.run(app, host="0.0.0.0", port=8000)
