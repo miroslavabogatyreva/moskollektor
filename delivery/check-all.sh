@@ -673,6 +673,18 @@ else
   skip_msg "Ф-66, НФ-76" "вход паролем — задайте BASE_URL"
 fi
 
+# Администратор блокирует пользователя из интерфейса (MOS-226, Q4.19): admin1
+# блокирует tech2 через PATCH /api/auth/users/tech2 → вход 401 и старая кука 401 →
+# разблокирует → вход 200; в конце is_active tech2 как был в начале. Пароль tech2
+# в подсказку входа не попадает, поэтому он приходит переменной TECH2_PASSWORD.
+if [ -n "${BASE_URL:-}" ] && [ -n "${TECH2_PASSWORD:-}" ]; then
+  run "Ф-66, НФ-77"  "блокировка пользователя администратором" \
+    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" TECH2_PASSWORD="$TECH2_PASSWORD" \
+    "$PY" code/check_block_user.py
+else
+  skip_msg "Ф-66"    "блокировка пользователя — задайте BASE_URL и TECH2_PASSWORD"
+fi
+
 # На стенде AUTH_TRUST_HEADER=1, у эксперта 0. Разовый контейнер того же образа api
 # с 0 обязан ответить 401 на поддельный X-User-Login; контроль с 1 — 200.
 if [ -n "${STAND_SSH:-}" ]; then
