@@ -231,6 +231,9 @@ echo
 echo "=== самопроверки модулей ==="
 run "Ф-73"         "объяснение риска"        env PYTHONPATH=backend "$PY" -m app.domain.explain
 run "НФ-43"        "роли и доступ"           env PYTHONPATH=backend "$PY" -m app.auth.deps
+# Поток тревог зовёт get_current_user напрямую, мимо Depends: смена сигнатуры в MOS-39
+# уронила его в 500 у всех, и ни одна самопроверка deps этого не видела.
+run "НФ-43"        "поток тревог: вызов входа" env PYTHONPATH=backend "$PY" -m app.api.notifications
 run "—"            "запись прогноза"         env PYTHONPATH=backend "$PY" -m app.worker.publish
 run "—"            "клиент модели"           env PYTHONPATH=backend "$PY" -m app.mlclient.client
 run "—"            "выбор факторов"          env PYTHONPATH=backend "$PY" -m app.worker.run --selfcheck
