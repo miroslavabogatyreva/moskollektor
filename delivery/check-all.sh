@@ -231,6 +231,9 @@ echo
 echo "=== самопроверки модулей ==="
 run "Ф-73"         "объяснение риска"        env PYTHONPATH=backend "$PY" -m app.domain.explain
 run "НФ-43"        "роли и доступ"           env PYTHONPATH=backend "$PY" -m app.auth.deps
+# Поток тревог зовёт get_current_user напрямую, мимо Depends: смена сигнатуры в MOS-39
+# уронила его в 500 у всех, и ни одна самопроверка deps этого не видела.
+run "НФ-43"        "поток тревог: вызов входа" env PYTHONPATH=backend "$PY" -m app.api.notifications
 run "—"            "запись прогноза"         env PYTHONPATH=backend "$PY" -m app.worker.publish
 run "—"            "клиент модели"           env PYTHONPATH=backend "$PY" -m app.mlclient.client
 run "—"            "выбор факторов"          env PYTHONPATH=backend "$PY" -m app.worker.run --selfcheck
@@ -655,6 +658,28 @@ if [ -n "${BASE_URL:-}" ]; then
   run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 < tech2 < ods1" check_scope
 else
   skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
+fi
+
+# Вход паролем, как войдёт эксперт, без заголовка X-User-Login (MOS-39, Q4.2).
+# Каждый пароль из подсказки на экране входа реально входит; кука по договору;
+# отказы одним текстом; tech1 < ods1 уже с кукой. С DATABASE_URL — журнал пишет
+# вошедшего (НФ-77); с LDAP_LOGIN/LDAP_PASSWORD/STAND_SSH — блокировка в каталоге
+# и возврат учётки (НФ-76). Самопроверка разбора куки идёт всегда.
+run "—"            "вход: разбор куки"       "$PY" code/check_auth.py --selfcheck
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-66, НФ-43, НФ-76, НФ-77" "вход паролем и каталогом" \
+    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_auth.py
+else
+  skip_msg "Ф-66, НФ-76" "вход паролем — задайте BASE_URL"
+fi
+
+# На стенде AUTH_TRUST_HEADER=1, у эксперта 0. Разовый контейнер того же образа api
+# с 0 обязан ответить 401 на поддельный X-User-Login; контроль с 1 — 200.
+if [ -n "${STAND_SSH:-}" ]; then
+  run "НФ-43"        "подделка заголовка при AUTH_TRUST_HEADER=0" \
+    env STAND_SSH="$STAND_SSH" "$PY" code/check_trust_header.py
+else
+  skip_msg "НФ-43"   "подделка заголовка — задайте STAND_SSH"
 fi
 
 # Геометрия участков в GeoJSON и WKT (MOS-45, Q4.8). Ф-81 просит геометрию одного
