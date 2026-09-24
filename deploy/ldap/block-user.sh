@@ -38,8 +38,12 @@ exists() {
         -b "$1" -s base dn >/dev/null 2>&1
 }
 
+# -r (deleteoldrdn): без него старое значение uid остаётся на записи вторым
+# значением атрибута uid — заблокированная запись отзывалась бы на
+# (uid=<login>) поиском, хотя bind по старому DN уже не проходит (находка
+# оркестратора 24.09.2026).
 modrdn() {
-    compose_exec ldapmodrdn -x -D "$ADMIN_DN" -w "$ADMIN_PW" -H ldap://127.0.0.1 "$1" "$2"
+    compose_exec ldapmodrdn -r -x -D "$ADMIN_DN" -w "$ADMIN_PW" -H ldap://127.0.0.1 "$1" "$2"
 }
 
 ACTIVE_DN="uid=${LOGIN},${PEOPLE_DN}"
