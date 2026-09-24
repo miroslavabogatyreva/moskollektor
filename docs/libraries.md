@@ -109,6 +109,22 @@ Foundation License`, `docs/HLD.md` разд. 3.5) — не GPL/LGPL/AGPL, `на�
 |---|---|---|
 | nginx | 1.31 | BSD-2-Clause |
 
+## Образ `ldap` (демо-каталог, MOS-39, НФ-76)
+
+Шестой контейнер, не входит в счёт «117/124 пакета» выше — это не Python и не npm,
+а два системных пакета Debian (`deploy/ldap/Dockerfile`), проверено 24.09.2026:
+
+| Пакет | Версия | Лицензия |
+|---|---|---|
+| slapd | 2.6.10+dfsg-1 | OpenLDAP-2.8 |
+| ldap-utils | 2.6.10+dfsg-1 | OpenLDAP-2.8 |
+
+**Два разных «2.x», не путать.** `2.6.10` — версия самого ПО (`slapd -VV` печатает
+`$OpenLDAP: slapd 2.6.10+dfsg-1$`). `OpenLDAP-2.8` — имя лицензии в
+`/usr/share/doc/slapd/copyright`: это номер версии **текста** OpenLDAP Public
+License, а не программы. Сама лицензия — BSD-подобная, под GPL/LGPL/AGPL
+не подпадает (`docs/HLD.md` разд. 7.3).
+
 ## Фронт
 
 **Проверка этого раздела в `delivery/check-all.sh` помечена «НФ-82 наполовину»
