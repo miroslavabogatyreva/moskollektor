@@ -12,9 +12,17 @@ import type { DemoAccount } from './types'
 // next — куда вернуться после входа (apiFetch дописывает его при 401).
 // Не уводим повторно на /login: без проверки список демо-учёток из
 // GET /api/auth/info привёл бы сюда самого себя строкой в адресе.
+//
+// Открытый редирект (нашла 92, 24.09.2026): next — часть адреса, значит
+// её пишет не только apiFetch, а кто угодно в ссылке жертве. window.location.href
+// без проверки увёл бы её на чужой хост чужим паролем от НАШЕГО экрана входа.
+// '//host' и '/\host' — оба способа задать хост без схемы: браузер разбирает
+// обратный слэш как прямой в начале адреса (WHATWG URL, ветка "special"
+// схем http/https), поэтому /\evil.example не менее опасен, чем //evil.example.
 function nextPath(): string {
   const next = new URLSearchParams(window.location.search).get('next')
-  return next && next !== '/login' ? next : '/dashboard'
+  const ok = next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\')
+  return ok && next !== '/login' ? next : '/dashboard'
 }
 
 export function LoginScreen(_props: Record<string, unknown>) {

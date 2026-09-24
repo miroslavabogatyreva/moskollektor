@@ -69,8 +69,38 @@ test('неверный пароль показывает ошибку по-ру�
   await page.getByLabel('Логин').fill(someone.login)
   await page.getByLabel('Пароль').fill(`${someone.password}-неверный`)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await expect(page.locator('form p')).toBeVisible()
+  // Не просто «абзац есть» — а что в нём настоящий текст на русском, а не
+  // "401 Unauthorized" (это был бы запасной путь login() в lib/auth.ts,
+  // если бы разбор поля detail из ответа сервера сломался).
+  await expect(page.locator('form p')).toHaveText(/[а-яё]/i)
   await expect(page).toHaveURL(/\/login$/)
+})
+
+test('чужой next не уводит с сайта — открытый редирект (нашла 92, 24.09.2026)', async ({
+  page,
+}) => {
+  const accounts = await demoAccounts(page)
+  const someone = accounts[0]
+  // Матчер по хосту, а не по подстроке URL: /login?next=...evil.example...
+  // сам содержит эту подстроку в query-строке, и '**evil.example**' перехватил
+  // бы загрузку САМОЙ страницы входа, а не переход после входа.
+  await page.route(
+    (url) => new URL(url).hostname === 'evil.example',
+    (route) => route.fulfill({ status: 200, contentType: 'text/html', body: 'чужой сайт' }),
+  )
+
+  // //host и /\host — оба способ задать хост без схемы: браузер (WHATWG URL,
+  // "special"-схемы http/https) разбирает обратный слэш как прямой в начале
+  // адреса, поэтому /\evil.example не менее опасен, чем //evil.example.
+  for (const next of ['https://evil.example/x', '//evil.example/x', '/\\evil.example']) {
+    await page.goto(`/login?next=${encodeURIComponent(next)}`)
+    const ownHost = new URL(page.url()).host
+    await page.getByLabel('Логин').fill(someone.login)
+    await page.getByLabel('Пароль').fill(someone.password)
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    await page.waitForURL((url) => url.pathname !== '/login')
+    expect(new URL(page.url()).host, `next=${next}`).toBe(ownHost)
+  }
 })
 
 test('выход возвращает на /login и закрывает сессию', async ({ page }) => {
