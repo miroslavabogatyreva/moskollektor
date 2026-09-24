@@ -13,17 +13,22 @@ technician, admin. Роли складываются: они лежат в ref.u
 скрытия пункта меню в интерфейсе — значит проверка обязана жить на сервере,
 а не во фронте, и её место здесь.
 
-ponytail: пока личность берётся из заголовка X-User-Login без пароля — вход
-(LDAP simple bind, локальный пароль argon2, сессия в httpOnly-куке, docs/HLD.md
-разд. 3.5) заводит задача Q4.2 (backend/app/auth/ldap.py), она идёт следующей
-в очереди блока. get_current_user — тот шов, который 4.2 заменит; остальные
-методы API зависят от неё, а не от механизма входа, и переделка 4.2 их не заденет.
+Личность определяется здесь и только здесь (Q4.2, MOS-39): сперва кука
+mk_session (backend/app/auth/session.py, подпись HMAC-SHA256), заголовок
+X-User-Login без пароля принимается лишь при AUTH_TRUST_HEADER=1 — заглушка
+Q4.1 держится на нём же (19 файлов проверок), но на приёмке эксперта переменная
+стоит 0, и подделка заголовка отвечает 401. get_current_user кладёт user_id
+в request.state — middleware аудита (app.api.main) читает оттуда, а не
+из заголовка, иначе после входа по паролю журнал записал бы не того человека
+(НФ-85).
 """
 import asyncio
+import os
 
 import asyncpg
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException, Request
 
+from app.auth.session import TTL_LOCAL_S, sign_session, verify_session
 from app.db import get_conn
 from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
 
@@ -41,23 +46,29 @@ SELECT u.section_id
 
 
 async def get_current_user(
+    request: Request,
+    mk_session: str | None = Cookie(None),
     x_user_login: str | None = Header(None),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> asyncpg.Record:
-    if not x_user_login:
-        raise HTTPException(401, "нужен заголовок X-User-Login")
+    login = verify_session(mk_session) if mk_session else None
+    if login is None and os.environ.get("AUTH_TRUST_HEADER") == "1" and x_user_login:
+        login = x_user_login
+    if login is None:
+        raise HTTPException(401, "нужен вход")
     user = await conn.fetchrow(
         """
-        SELECT u.user_id, u.login,
+        SELECT u.user_id, u.login, u.full_name, u.auth_source,
                ARRAY(SELECT r.role_code FROM ref.user_role r
                       WHERE r.login = u.login ORDER BY r.role_code) AS roles
           FROM ref.app_user u
          WHERE u.login = $1 AND u.is_active
         """,
-        x_user_login,
+        login,
     )
     if user is None:
         raise HTTPException(401, "учётная запись не найдена или заблокирована")
+    request.state.user_id = user["user_id"]
     return user
 
 
@@ -107,7 +118,7 @@ async def проверить_участок(user, conn, section_id: int | None) 
 
 
 def _selfcheck():
-    """Логика require() и области видимости без базы: подставной conn."""
+    """Логика require(), области видимости и входа без базы: подставной conn."""
 
     class _FakeConn:
         def __init__(self, users, grants, scope):
@@ -124,6 +135,12 @@ def _selfcheck():
         async def fetch(self, _sql, login):
             return [{"section_id": s} for s in self._scope.get(login, [])]
 
+    class _FakeRequest:
+        """У request.state в FastAPI нет схемы — любой атрибут пишется на лету."""
+
+        def __init__(self):
+            self.state = type("_State", (), {})()
+
     def u(login, *roles):
         return {"user_id": 1, "login": login, "roles": list(roles)}
 
@@ -135,21 +152,64 @@ def _selfcheck():
         )
 
         try:
-            await get_current_user(x_user_login=None, conn=conn)
+            await get_current_user(
+                request=_FakeRequest(), mk_session=None, x_user_login=None, conn=conn
+            )
         except HTTPException as e:
             assert e.status_code == 401
         else:
-            raise AssertionError("должен упасть без заголовка")
+            raise AssertionError("должен упасть без куки")
 
+        # НФ-43: AUTH_TRUST_HEADER=0 (значение на приёмке) — заголовок X-User-Login
+        # не пускает, даже с существующим логином. Подделка заголовка отвечает 401.
+        os.environ.pop("AUTH_TRUST_HEADER", None)
         try:
-            await get_current_user(x_user_login="ghost", conn=conn)
+            await get_current_user(
+                request=_FakeRequest(), mk_session=None, x_user_login="disp1", conn=conn
+            )
         except HTTPException as e:
             assert e.status_code == 401
         else:
-            raise AssertionError("должен упасть на неизвестном логине")
+            raise AssertionError("AUTH_TRUST_HEADER=0 не должен пускать по заголовку")
 
-        user = await get_current_user(x_user_login="disp1", conn=conn)
+        # AUTH_TRUST_HEADER=1 — путь по заголовку жив для старых проверок (19 файлов).
+        os.environ["AUTH_TRUST_HEADER"] = "1"
+        try:
+            req = _FakeRequest()
+            user = await get_current_user(
+                request=req, mk_session=None, x_user_login="disp1", conn=conn
+            )
+            assert user["login"] == "disp1"
+            assert req.state.user_id == user["user_id"]
+
+            try:
+                await get_current_user(
+                    request=_FakeRequest(), mk_session=None, x_user_login="ghost", conn=conn
+                )
+            except HTTPException as e:
+                assert e.status_code == 401
+            else:
+                raise AssertionError("должен упасть на неизвестном логине")
+        finally:
+            os.environ.pop("AUTH_TRUST_HEADER", None)
+
+        # Кука — основной путь, работает и при AUTH_TRUST_HEADER=0.
+        token = sign_session("disp1", TTL_LOCAL_S)
+        req = _FakeRequest()
+        user = await get_current_user(request=req, mk_session=token, x_user_login=None, conn=conn)
         assert user["roles"] == ["dispatcher"]
+        assert req.state.user_id == user["user_id"]
+
+        # Подделанная подпись куки — 401 (последний символ подписи испорчен).
+        forged = token[:-1] + ("0" if token[-1] != "0" else "1")
+        try:
+            await get_current_user(
+                request=_FakeRequest(), mk_session=forged, x_user_login=None, conn=conn
+            )
+        except HTTPException as e:
+            assert e.status_code == 401
+        else:
+            raise AssertionError("подделанная подпись куки должна дать 401")
 
         allowed = require("risks.read")
         assert (await allowed(user=user, conn=conn))["login"] == "disp1"
