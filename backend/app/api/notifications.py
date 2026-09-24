@@ -193,6 +193,19 @@ async def ack(
     }
 
 
+async def _current_user_for_stream(request: Request, x_user_login: str | None, conn) -> asyncpg.Record:
+    """Форма вызова get_current_user для alerts_stream, отдельной функцией:
+    так самопроверка ниже проверяет ровно тот код, что вызывает alerts_stream,
+    а не отдельную его копию, которая может разойтись с настоящим вызовом
+    молча (регрессия MOS-39, 24.09.2026 — см. _selfcheck)."""
+    return await get_current_user(
+        request=request,
+        mk_session=request.cookies.get("mk_session"),
+        x_user_login=x_user_login,
+        conn=conn,
+    )
+
+
 @router.get(
     "/alerts/stream",
     # response_class=StreamingResponse (без media_type в самом классе — он None,
@@ -207,7 +220,7 @@ async def alerts_stream(request: Request, x_user_login: str | None = Header(None
     pool = await get_pool()
     checker = require("notifications.read")
     async with pool.acquire() as conn:
-        user = await get_current_user(x_user_login=x_user_login, conn=conn)
+        user = await _current_user_for_stream(request, x_user_login, conn)
         await checker(user=user, conn=conn)
         участки = await видимые_участки(user, conn)
 
@@ -243,3 +256,45 @@ async def alerts_stream(request: Request, x_user_login: str | None = Header(None
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def _selfcheck():
+    """Регрессия MOS-39, 24.09.2026: alerts_stream зовёт get_current_user()
+    напрямую, а не через Depends (см. докстринг файла) — при смене сигнатуры
+    в app.auth.deps (добавился request) вызов молча разошёлся с функцией
+    и падал TypeError на каждый запрос, /api/alerts/stream отвечал 500 всем.
+    Depends сам бы это не поймал: FastAPI не проверяет сигнатуру функции,
+    вызванной вручную внутри тела метода. Проверяем ту же форму вызова,
+    что делает alerts_stream, а не только что get_current_user работает
+    вообще (это уже покрыто app.auth.deps._selfcheck)."""
+    import asyncio
+    import os
+
+    os.environ["AUTH_TRUST_HEADER"] = "1"
+
+    class _FakeRequest:
+        def __init__(self):
+            self.cookies = {}
+            self.state = type("_State", (), {})()
+
+    class _FakeConn:
+        async def fetchrow(self, _sql, login):
+            return {
+                "user_id": 1, "login": login, "full_name": login,
+                "auth_source": "local", "roles": ["dispatcher"],
+            }
+
+    async def run():
+        request = _FakeRequest()
+        user = await _current_user_for_stream(request, "disp1", _FakeConn())
+        assert user["login"] == "disp1"
+
+    try:
+        asyncio.run(run())
+    finally:
+        os.environ.pop("AUTH_TRUST_HEADER", None)
+    print("selfcheck ok")
+
+
+if __name__ == "__main__":
+    _selfcheck()

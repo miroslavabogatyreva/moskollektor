@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { Router, route } from 'preact-router'
 import { Nav } from './Nav'
 import { ROUTES } from './routes'
+import { fetchMe, type AuthUser } from './lib/auth'
 import { DashboardScreen } from './screens/dashboard'
 import { MapScreen } from './screens/map'
 import { LogScreen } from './screens/log'
@@ -9,6 +10,8 @@ import { OrdersScreen } from './screens/orders'
 import { OrderCard } from './screens/orders/OrderCard'
 import { ObjectCard } from './components/ObjectCard'
 import { ForecastCard } from './components/ForecastCard'
+import { LoginScreen } from './screens/login'
+import { DirectoryScreen } from './screens/directory'
 
 function NotFound(_props: Record<string, unknown>) {
   return (
@@ -22,6 +25,7 @@ function NotFound(_props: Record<string, unknown>) {
 
 export function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
+  const [me, setMe] = useState<AuthUser | null>(null)
 
   useEffect(() => {
     if (window.location.pathname === '/') route('/dashboard', true)
@@ -32,10 +36,23 @@ export function App() {
     document.title = label ? `${label} — Москоллектор` : 'Москоллектор'
   }, [currentPath])
 
+  // Один раз на загрузку страницы, и не на /login: там Nav не рисуется
+  // вовсе, результат было бы некому показать, а сам запрос без сессии
+  // получил бы честный 401 — Chromium логирует любой такой ответ в консоль
+  // как ошибку независимо от того, что код его штатно обработал (нашли
+  // при проверке DevTools против стенда, 24.09.2026).
+  useEffect(() => {
+    if (window.location.pathname === '/login') return
+    fetchMe()
+      .then(setMe)
+      .catch(() => setMe(null))
+  }, [])
+
   return (
     <>
-      <Nav currentPath={currentPath} />
+      {currentPath !== '/login' && <Nav currentPath={currentPath} me={me} />}
       <Router onChange={(e) => setCurrentPath(e.url)}>
+        <LoginScreen path="/login" />
         <DashboardScreen path="/dashboard" />
         <MapScreen path="/map" />
         <LogScreen path="/log" />
@@ -43,6 +60,7 @@ export function App() {
         <OrderCard path="/orders/:orderId" />
         <ObjectCard path="/objects/:sectionId" />
         <ForecastCard path="/forecasts/:forecastId" />
+        <DirectoryScreen path="/admin/directory" />
         <NotFound default />
       </Router>
     </>

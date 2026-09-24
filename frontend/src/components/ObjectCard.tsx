@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
+import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime } from '../lib/format'
 import { rowLink } from '../lib/a11y'
@@ -79,10 +80,6 @@ interface Reading {
   value_num: number | null
 }
 
-// ponytail: вход без пароля, личность берётся из X-User-Login (backend/app/auth/deps.py).
-// Заглушка до экрана логина (Q4.2, LDAP) — заменить константу сессией пользователя.
-const API_LOGIN = 'dispatcher1'
-
 export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
@@ -116,7 +113,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     // readFrom/readTo === '' и выходит, не тронув readings (нашла ab, 22.09.2026:
     // 12 NaN-rect и один RangeError на переходе 2204 → 2157).
     setReadings(null)
-    fetch(`/api/objects/${sectionId}`, { headers: { 'X-User-Login': API_LOGIN } })
+    apiFetch(`/api/objects/${sectionId}`)
       .then((r) => {
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
         // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
@@ -137,9 +134,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     setChannelFaults(null)
     setChannelFaultsError(null)
     // limit=200: на участке бывает до 100 каналов (MOS-151), с запасом на вырост.
-    fetch(`/api/objects/${sectionId}/channels?limit=200`, {
-      headers: { 'X-User-Login': API_LOGIN },
-    })
+    apiFetch(`/api/objects/${sectionId}/channels?limit=200`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<ChannelFaultsResponse>
@@ -175,9 +170,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     let отменено = false
     setReadings(null)
     setReadingsError(null)
-    fetch(`/api/objects/${sectionId}/readings?from=${readFrom}&to=${readTo}`, {
-      headers: { 'X-User-Login': API_LOGIN },
-    })
+    apiFetch(`/api/objects/${sectionId}/readings?from=${readFrom}&to=${readTo}`)
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<Reading[]>
