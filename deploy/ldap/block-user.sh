@@ -26,16 +26,43 @@ if [ -z "$LOGIN" ]; then
     exit 1
 fi
 
-modrdn() {
+compose_exec() {
     docker compose -f "${COMPOSE_DIR}/docker-compose.yml" --project-directory "${COMPOSE_DIR}" \
-        --profile ldap exec -T ldap \
-        ldapmodrdn -x -D "$ADMIN_DN" -w "$ADMIN_PW" -H ldap://127.0.0.1 "$1" "$2"
+        --profile ldap exec -T ldap "$@"
 }
 
+# Идемпотентность (находка 92): перед modrdn смотрим, где DN сейчас стоит,
+# а не бьём наугад — повторный block/--undo не должен падать кодом 32.
+exists() {
+    compose_exec ldapsearch -x -D "$ADMIN_DN" -w "$ADMIN_PW" -H ldap://127.0.0.1 \
+        -b "$1" -s base dn >/dev/null 2>&1
+}
+
+modrdn() {
+    compose_exec ldapmodrdn -x -D "$ADMIN_DN" -w "$ADMIN_PW" -H ldap://127.0.0.1 "$1" "$2"
+}
+
+ACTIVE_DN="uid=${LOGIN},${PEOPLE_DN}"
+BLOCKED_DN="uid=${LOGIN}${SUFFIX},${PEOPLE_DN}"
+
 if [ "$UNDO" = "1" ]; then
-    modrdn "uid=${LOGIN}${SUFFIX},${PEOPLE_DN}" "uid=${LOGIN}"
-    echo "учётка ${LOGIN} разблокирована"
+    if exists "$ACTIVE_DN"; then
+        echo "учётка ${LOGIN} уже активна"
+    elif exists "$BLOCKED_DN"; then
+        modrdn "$BLOCKED_DN" "uid=${LOGIN}"
+        echo "учётка ${LOGIN} разблокирована"
+    else
+        echo "учётка ${LOGIN} не найдена ни активной, ни заблокированной" >&2
+        exit 1
+    fi
 else
-    modrdn "uid=${LOGIN},${PEOPLE_DN}" "uid=${LOGIN}${SUFFIX}"
-    echo "учётка ${LOGIN} заблокирована"
+    if exists "$BLOCKED_DN"; then
+        echo "учётка ${LOGIN} уже заблокирована"
+    elif exists "$ACTIVE_DN"; then
+        modrdn "$ACTIVE_DN" "uid=${LOGIN}${SUFFIX}"
+        echo "учётка ${LOGIN} заблокирована"
+    else
+        echo "учётка ${LOGIN} не найдена ни активной, ни заблокированной" >&2
+        exit 1
+    fi
 fi
