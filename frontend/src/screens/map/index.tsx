@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { apiFetch } from '../../lib/api'
 import { errorMessage } from '../../lib/format'
 import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
@@ -23,10 +24,6 @@ import type { ViewRange } from './viewport'
    их участки друг на друга (275 позиций, 575 участков из 3 173 — нашла e8) —
    поэтому под коллектором рисуется по одной линии AxisLine.tsx на префикс,
    каждая со своим масштабом (5.15, MOS-126, арифметика — в viewport.ts). */
-
-// ponytail: логин без входа, как в screens/dashboard/api.ts — заглушка до экрана
-// логина (Q4.2, LDAP), заменить константу сессией пользователя.
-const API_LOGIN = 'dispatcher1'
 
 // Порядок легенды (MOS-170) — те же три состояния, что красит риск.ts. Слова
 // должны дословно совпасть с легендой на дашборде (зона fe) — текст согласован
@@ -56,7 +53,7 @@ export function MapScreen(_props: Record<string, unknown>) {
   }, [])
 
   useEffect(() => {
-    fetch('/api/risks', { headers: { 'X-User-Login': API_LOGIN } })
+    apiFetch('/api/risks')
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<RiskClassRow[]>
@@ -85,7 +82,8 @@ export function MapScreen(_props: Record<string, unknown>) {
     return [...byId.entries()].sort((a, b) => a[0] - b[0])
   }, [sections])
 
-  const collectorName = collectors.find(([c]) => c === collector)?.[1].name ?? String(collector ?? '')
+  const collectorName =
+    collectors.find(([c]) => c === collector)?.[1].name ?? String(collector ?? '')
 
   const onAxis = useMemo(
     () => (sections && collector != null ? sections.filter((s) => s.collector === collector) : []),
