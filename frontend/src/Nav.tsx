@@ -1,12 +1,15 @@
 import { ROUTES } from './routes'
 import { logout, roleLabels, type AuthUser } from './lib/auth'
 
-const ADMIN_ROUTE = { path: '/admin/directory', label: 'Служба каталогов' }
+const ADMIN_ROUTES = [
+  { path: '/admin/directory', label: 'Служба каталогов' },
+  { path: '/admin/users', label: 'Пользователи' },
+]
 
 export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
   // Пункт меню виден только администратору — сервер всё равно отвечает 403
   // остальным (НФ-43: скрытие пункта не заменяет отказ по прямому адресу).
-  const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ADMIN_ROUTE] : ROUTES
+  const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ...ADMIN_ROUTES] : ROUTES
 
   return (
     <header

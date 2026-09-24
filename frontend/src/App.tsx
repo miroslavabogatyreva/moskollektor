@@ -12,6 +12,7 @@ import { ObjectCard } from './components/ObjectCard'
 import { ForecastCard } from './components/ForecastCard'
 import { LoginScreen } from './screens/login'
 import { DirectoryScreen } from './screens/directory'
+import { UsersScreen } from './screens/users'
 
 function NotFound(_props: Record<string, unknown>) {
   return (
@@ -61,6 +62,7 @@ export function App() {
         <ObjectCard path="/objects/:sectionId" />
         <ForecastCard path="/forecasts/:forecastId" />
         <DirectoryScreen path="/admin/directory" />
+        <UsersScreen path="/admin/users" />
         <NotFound default />
       </Router>
     </>
