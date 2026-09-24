@@ -21,6 +21,7 @@ from app.api.routes import router
 from app.api.settings import router as settings_router
 from app.api.tech_events import router as tech_events_router
 from app.api.xml import to_xml, wants_xml
+from app.auth.session import require_secret
 from app.db import get_pool
 
 app = FastAPI(title="Москоллектор API")
@@ -107,4 +108,5 @@ async def convert_to_xml(request: Request, call_next):
 
 
 if __name__ == "__main__":
+    require_secret()
     uvicorn.run(app, host="0.0.0.0", port=8000)

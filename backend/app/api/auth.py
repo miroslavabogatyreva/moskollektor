@@ -14,17 +14,23 @@ tech1, admin1) и одноимённые учётки каталога (ldap_dis
 куки mk_session короче у LDAP-сессии (1 ч) — учётку каталога администратор
 AD может заблокировать в любой момент, у local (8 ч) это единственный запасной
 вход, чаще перелогиниваться незачем.
+
+Блокирующие вызовы (LDAP-сокет, argon2 — память 64 МБ на хеш) идут через
+`run_in_threadpool` (находка проверяющей 92, 24.09.2026): без этого один
+запрос входа держит весь event loop event до 3 секунд на попытку, пока
+каталог не ответит, и весь api стоит для всех остальных запросов разом.
 """
 import os
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import ldap as ldap_auth
 from app.auth.deps import get_current_user, require
 from app.auth.password import verify_password
-from app.auth.session import TTL_LDAP_S, TTL_LOCAL_S, sign_session
+from app.auth.session import TTL_LDAP_S, TTL_LOCAL_S, sign_session, verify_session
 from app.db import get_conn
 
 router = APIRouter(prefix="/api/auth")
@@ -113,27 +119,32 @@ async def _load_user(conn: asyncpg.Connection, login: str) -> asyncpg.Record | N
 async def _sync_ldap_user(conn: asyncpg.Connection, login: str, roles: list[str], scope: list[int]) -> None:
     """Заводит/обновляет ref.app_user при входе через каталог и пересобирает
     роли и область видимости заново — так блокировка «убрать из групп» тоже
-    действует немедленно, без отдельного признака в базе."""
-    await conn.execute(
-        """
-        INSERT INTO ref.app_user (login, full_name, auth_source, password_hash)
-        VALUES ($1, $1, 'ldap', NULL)
-        ON CONFLICT (login) DO UPDATE SET auth_source = 'ldap', password_hash = NULL
-        """,
-        login,
-    )
-    await conn.execute("DELETE FROM ref.user_role WHERE login = $1", login)
-    if roles:
-        await conn.executemany(
-            "INSERT INTO ref.user_role (login, role_code) VALUES ($1, $2)",
-            [(login, r) for r in roles],
+    действует немедленно, без отдельного признака в базе.
+
+    Одной транзакцией (находка 92, необязательная, но дешёвая): без неё сбой
+    между DELETE и INSERT ролей оставил бы человека без единой роли до
+    следующего успешного входа."""
+    async with conn.transaction():
+        await conn.execute(
+            """
+            INSERT INTO ref.app_user (login, full_name, auth_source, password_hash)
+            VALUES ($1, $1, 'ldap', NULL)
+            ON CONFLICT (login) DO UPDATE SET auth_source = 'ldap', password_hash = NULL
+            """,
+            login,
         )
-    await conn.execute("DELETE FROM ref.user_scope WHERE login = $1", login)
-    if scope:
-        await conn.executemany(
-            "INSERT INTO ref.user_scope (login, object_id) VALUES ($1, $2)",
-            [(login, s) for s in scope],
-        )
+        await conn.execute("DELETE FROM ref.user_role WHERE login = $1", login)
+        if roles:
+            await conn.executemany(
+                "INSERT INTO ref.user_role (login, role_code) VALUES ($1, $2)",
+                [(login, r) for r in roles],
+            )
+        await conn.execute("DELETE FROM ref.user_scope WHERE login = $1", login)
+        if scope:
+            await conn.executemany(
+                "INSERT INTO ref.user_scope (login, object_id) VALUES ($1, $2)",
+                [(login, s) for s in scope],
+            )
 
 
 async def _login_core(body: LoginBody, request: Request, conn: asyncpg.Connection) -> tuple[asyncpg.Record, int]:
@@ -146,7 +157,11 @@ async def _login_core(body: LoginBody, request: Request, conn: asyncpg.Connectio
     auth_source = user["auth_source"] if user is not None else "ldap"
 
     if auth_source == "local":
-        if user is None or user["password_hash"] is None or not verify_password(user["password_hash"], body.password):
+        if user is None or user["password_hash"] is None:
+            raise _deny(request, body.login)
+        # argon2 — память 64 МБ на проверку, блокирующий вызов вне event loop.
+        password_ok = await run_in_threadpool(verify_password, user["password_hash"], body.password)
+        if not password_ok:
             raise _deny(request, body.login)
         if not user["roles"]:
             raise _deny(request, body.login)
@@ -155,14 +170,11 @@ async def _login_core(body: LoginBody, request: Request, conn: asyncpg.Connectio
     if not os.environ.get("LDAP_URI"):
         raise _deny(request, body.login)
     try:
-        ok = ldap_auth.bind(body.login, body.password)
+        # bind и поиск групп — сокет, тоже вне event loop (см. докстринг модуля).
+        group_cns = await run_in_threadpool(ldap_auth.authenticate, body.login, body.password)
     except ldap_auth.DirectoryUnavailable:
         raise _deny(request, body.login)
-    if not ok:
-        raise _deny(request, body.login)
-    try:
-        group_cns = ldap_auth.groups(body.login)
-    except ldap_auth.DirectoryUnavailable:
+    if group_cns is None:
         raise _deny(request, body.login)
     role_map_rows = await conn.fetch("SELECT group_cn, role_code, object_id FROM ref.ldap_role_map")
     roles, scope = ldap_auth.map_groups_to_roles(
@@ -200,8 +212,20 @@ async def login(
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response):
+async def logout(
+    request: Request,
+    response: Response,
+    mk_session: str | None = Cookie(None),
+    conn: asyncpg.Connection = Depends(get_conn),
+):
     response.delete_cookie("mk_session", path="/")
+    # Необязательно (находка 92), но дёшево: без этого журнал видел бы выход
+    # как анонимный запрос, хотя кука ещё называла вышедшего.
+    login = verify_session(mk_session) if mk_session else None
+    if login is not None:
+        request.state.user_id = await conn.fetchval(
+            "SELECT user_id FROM ref.app_user WHERE login = $1", login
+        )
 
 
 @router.get("/me", response_model=AuthUser)
@@ -238,7 +262,7 @@ async def directory(
 
 @router.post("/directory/check", response_model=DirectoryCheck)
 async def directory_check(_user: asyncpg.Record = Depends(require("settings.write"))):
-    ok, ms, message = ldap_auth.check_connection()
+    ok, ms, message = await run_in_threadpool(ldap_auth.check_connection)
     return {"ok": ok, "ms": ms, "message": message}
 
 
@@ -267,10 +291,20 @@ def _selfcheck():
         база, где строку пишет предыдущий execute.
         """
 
+        class _NoopTransaction:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
         def __init__(self, users, role_map):
             self._users = {login: dict(row) for login, row in users.items()}
             self._role_map = role_map
             self.inserted_app_user = False
+
+        def transaction(self):
+            return self._NoopTransaction()
 
         async def fetchrow(self, _sql, login):
             row = self._users.get(login)
@@ -348,14 +382,14 @@ def _selfcheck():
         user, ttl = await _login_core(LoginBody(login="admin1", password="Пароль12345"), _FakeRequest(), conn)
         assert user["login"] == "admin1" and ttl == TTL_LOCAL_S
 
-        # LDAP: каталог настроен, но bind даёт ноль ролей (человека убрали из групп) — 401.
+        # LDAP: каталог настроен, но группа не сопоставлена (человека убрали
+        # из групп) — authenticate() возвращает пустой список, не None. 401.
         os.environ["LDAP_URI"] = "ldap://demo.invalid"
         os.environ["LDAP_USER_TEMPLATE"] = "uid={login},ou=people,dc=x"
         os.environ["LDAP_BASE_DN"] = "dc=x"
-        orig_bind, orig_groups = ldap_auth.bind, ldap_auth.groups
+        orig_authenticate = ldap_auth.authenticate
         try:
-            ldap_auth.bind = lambda login, password: True
-            ldap_auth.groups = lambda login: []  # ноль групп
+            ldap_auth.authenticate = lambda login, password: []  # bind ок, ноль групп
             conn = _FakeConn(users={}, role_map=[("role-admin", "admin", None)])
             try:
                 await _login_core(LoginBody(login="ldap_admin1", password="x"), _FakeRequest(), conn)
@@ -364,8 +398,18 @@ def _selfcheck():
             else:
                 raise AssertionError("ноль групп должно дать 401")
 
+            # LDAP: неверный пароль (в т.ч. пустой, RFC 4513 5.1.2) — authenticate() вернёт None.
+            ldap_auth.authenticate = lambda login, password: None
+            conn = _FakeConn(users={}, role_map=[])
+            try:
+                await _login_core(LoginBody(login="ldap_admin1", password=""), _FakeRequest(), conn)
+            except HTTPException as e:
+                assert e.status_code == 401
+            else:
+                raise AssertionError("неверные логин/пароль (пустой пароль) должны дать 401")
+
             # LDAP: bind ок, группа сопоставлена — вход, ttl короче (1 ч), запись заведена.
-            ldap_auth.groups = lambda login: ["role-admin"]
+            ldap_auth.authenticate = lambda login, password: ["role-admin"]
             conn = _FakeConn(users={}, role_map=[("role-admin", "admin", None)])
             user, ttl = await _login_core(LoginBody(login="ldap_admin1", password="x"), _FakeRequest(), conn)
             assert user["auth_source"] == "ldap" and ttl == TTL_LDAP_S
@@ -376,7 +420,7 @@ def _selfcheck():
             def _unavailable(login, password=None):
                 raise ldap_auth.DirectoryUnavailable("таймаут")
 
-            ldap_auth.bind = _unavailable
+            ldap_auth.authenticate = _unavailable
             conn = _FakeConn(users={}, role_map=[])
             try:
                 await _login_core(LoginBody(login="ldap_admin1", password="x"), _FakeRequest(), conn)
@@ -385,7 +429,7 @@ def _selfcheck():
             else:
                 raise AssertionError("недоступный каталог должен дать 401, не 500")
         finally:
-            ldap_auth.bind, ldap_auth.groups = orig_bind, orig_groups
+            ldap_auth.authenticate = orig_authenticate
             os.environ.pop("LDAP_URI", None)
             os.environ.pop("LDAP_USER_TEMPLATE", None)
             os.environ.pop("LDAP_BASE_DN", None)

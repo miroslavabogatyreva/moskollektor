@@ -119,6 +119,7 @@ async def проверить_участок(user, conn, section_id: int | None) 
 
 def _selfcheck():
     """Логика require(), области видимости и входа без базы: подставной conn."""
+    os.environ.setdefault("AUTH_SECRET", "x" * 32)  # sign_session/verify_session читают лениво
 
     class _FakeConn:
         def __init__(self, users, grants, scope):
