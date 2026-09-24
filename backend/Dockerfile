@@ -1,10 +1,23 @@
 # Общий образ для api, worker и migrate — HLD разд. 7.1: код общий процентов
 # на восемьдесят, различается только командой запуска в docker-compose.yml.
 # Контекст сборки — корень репозитория (deploy/docker-compose.yml: context: ..).
-FROM python:3.14-slim
-WORKDIR /app
+#
+# Двухступенчатая сборка (MOS-39): python-ldap собирается из исходников и
+# требует gcc + заголовки libldap/libsasl на этапе сборки, а в рантайме
+# нужна только сама библиотека libldap2 без gcc и без -dev пакетов.
+FROM python:3.14-slim AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libldap-dev libsasl2-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM python:3.14-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libldap2 libsasl2-2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /install /usr/local
+WORKDIR /app
 COPY backend/app ./app
 # Миграции вшиты в образ, а не примонтированы — правка любого файла в
 # db/migrations/ требует пересборки, иначе migrate.py увидит внутри

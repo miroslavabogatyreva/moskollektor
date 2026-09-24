@@ -10,7 +10,9 @@
 
 - `api`, `worker` — `.venv` разработчика (`backend/requirements.txt` ставится
   туда же, откуда его берёт `backend/Dockerfile`), метаданные читает
-  `importlib.metadata`: **16 пакетов**. Один образ на оба контейнера
+  `importlib.metadata`: **23 пакета** (16 было 17.09.2026, семь добавила
+  MOS-39 24.09.2026 — `python-ldap` и `argon2-cffi` со своими транзитивными).
+  Один образ на оба контейнера
   (`docs/HLD.md` разд. 7.1) — набор один и тот же. **Это не сама сборка, а
   приближение к ней** (находка проверяющей 58, 17.09.2026): `.venv` может
   разойтись с образом версией пакета или лишним инструментом разработки.
@@ -28,7 +30,7 @@
 - фронт — `frontend/node_modules` (то же дерево, что даёт `npm ls --all`),
   `dependencies` и `devDependencies` вместе: **100 пакетов**.
 
-Итого **117 пакетов**. Проверка — `python3 code/check_licenses.py`, строка
+Итого **124 пакета**. Проверка — `python3 code/check_licenses.py`, строка
 в `delivery/check-all.sh` под НФ-82.
 
 ## Три места, не одно
@@ -66,18 +68,36 @@
 | annotated-doc | 0.0.5 | MIT |
 | annotated-types | 0.8.0 | MIT |
 | anyio | 4.15.1 | MIT |
+| argon2-cffi | 25.1.0 | MIT |
+| argon2-cffi-bindings | 26.1.0 | MIT |
 | asyncpg | 0.31.0 | Apache-2.0 |
+| cffi | 2.1.1 | MIT-0 |
 | click | 8.5.0 | BSD-3-Clause |
 | fastapi | 0.141.1 | MIT |
 | h11 | 0.16.0 | MIT |
 | idna | 3.20 | BSD-3-Clause |
+| pyasn1 | 0.6.4 | BSD-2-Clause |
+| pyasn1_modules | 0.4.2 | BSD |
+| pycparser | 3.0 | BSD-3-Clause |
 | pydantic | 2.13.5 | MIT |
 | pydantic_core | 2.46.5 | MIT |
+| python-ldap | 3.4.8 | python-ldap |
 | starlette | 1.6.0 | BSD-3-Clause |
 | typing-inspection | 0.4.4 | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | tzlocal | 5.4.4 | MIT |
 | uvicorn | 0.52.4 | BSD-3-Clause |
+
+**`python-ldap` — «python-ldap», не SPDX-имя.** `code/check_licenses.py` сверяет
+строку поля `License` дословно, а PyPI-метаданные пакета несут в этом поле
+буквально имя пакета, не название лицензии. По содержанию это лицензия в стиле
+Python (классификатор PyPI — `License :: OSI Approved :: Python Software
+Foundation License`, `docs/HLD.md` разд. 3.5) — не GPL/LGPL/AGPL, `нарушает()`
+не красит её ни по одному из двух источников. Так же у `pyasn1_modules` поле
+несёт `BSD`, а не `BSD-2-Clause`, как у самого `pyasn1` — два разных пакета,
+два разных значения одного поля, оба не GPL. Найдено 24.09.2026, MOS-39:
+первый прогон скрипта после установки семи пакетов дал СБОЙ по обеим строкам —
+доказывает, что сверка по факту, а не по тому, что «должно быть».
 
 `ruff` (0.16.8, MIT) в этот список не входит — инструмент разработки, форматирует
 код по хуку `.claude/hooks/format.sh`, в образ `api`/`worker` не попадает

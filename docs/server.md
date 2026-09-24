@@ -309,6 +309,16 @@ docker exec moskollektor-db-1 psql -U moskollektor -d moskollektor -c "SELECT co
 `docker compose exec -T` читает стандартный ввод и съедает остаток скрипта,
 переданного через `ssh bash -s` — закрывайте ввод явно, `< /dev/null`.
 
+## Каталог LDAP (демо, MOS-39, НФ-76)
+
+Седьмой контейнер, `ldap` (`docs/HLD.md` разд. 7.1), под профилем compose `ldap` —
+поднимается вместе с `app` второй опцией `--profile`, как включить и как подключить
+настоящий AD заказчика вместо демо-каталога — `deploy/README.md`, раздел «Поднять
+каталог LDAP». На этом сервере в `/srv/moskollektor/deploy/.env` (файл не в git)
+дописаны шесть переменных: `AUTH_SECRET`, `AUTH_TRUST_HEADER=1` (заголовок
+`X-User-Login` держит 19 файлов проверок, поэтому здесь не 0, как в поставке),
+`AUTH_DEMO_HINTS=1`, `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_USER_TEMPLATE`.
+
 ## Ручной прогон на стенде: срез задавать всегда
 
 **Ручной прогон без `--as-of` на стенде больше не работает, и это не поломка.**

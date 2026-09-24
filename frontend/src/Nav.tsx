@@ -1,6 +1,13 @@
 import { ROUTES } from './routes'
+import { logout, roleLabels, type AuthUser } from './lib/auth'
 
-export function Nav({ currentPath }: { currentPath: string }) {
+const ADMIN_ROUTE = { path: '/admin/directory', label: 'Служба каталогов' }
+
+export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
+  // Пункт меню виден только администратору — сервер всё равно отвечает 403
+  // остальным (НФ-43: скрытие пункта не заменяет отказ по прямому адресу).
+  const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ADMIN_ROUTE] : ROUTES
+
   return (
     <header
       class="flex items-center gap-5 px-5 py-2.5 min-h-16 text-white"
@@ -13,7 +20,7 @@ export function Nav({ currentPath }: { currentPath: string }) {
         <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>
       </div>
       <nav aria-label="Разделы" class="flex gap-0.5">
-        {ROUTES.map((r) => {
+        {menuRoutes.map((r) => {
           const active = currentPath === r.path
           return (
             <a
@@ -32,6 +39,21 @@ export function Nav({ currentPath }: { currentPath: string }) {
           )
         })}
       </nav>
+      {me && (
+        <div class="flex items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
+          <span>
+            {me.full_name || me.login} · {roleLabels(me.roles)}
+          </span>
+          <button
+            type="button"
+            onClick={() => logout().then(() => (window.location.href = '/login'))}
+            class="px-2 py-1 rounded-sm no-underline"
+            style="background:transparent; border:1px solid #4A6690; color:#CFE0F5"
+          >
+            Выйти
+          </button>
+        </div>
+      )}
     </header>
   )
 }
