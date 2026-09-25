@@ -23,6 +23,7 @@ predicted_failure_at и lead_hours убраны: момент as_of + horizon_h 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
+from app.api.schemas import OrderDetail, OrderList
 from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import get_conn
 
@@ -50,7 +51,7 @@ LIST_SQL = f"""
 SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
- ORDER BY n.due_at
+ ORDER BY n.due_at, n.id, wo.id
  LIMIT $2 OFFSET $3
 """
 
@@ -103,7 +104,7 @@ def _часов(от, до) -> float:
     return round((до - от).total_seconds() / 3600, 1)
 
 
-@router.get("/orders")
+@router.get("/orders", response_model=OrderList)
 async def list_orders(
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
@@ -132,7 +133,7 @@ async def list_orders(
     }
 
 
-@router.get("/orders/{order_id}")
+@router.get("/orders/{order_id}", response_model=OrderDetail)
 async def get_order(
     order_id: int,
     conn: asyncpg.Connection = Depends(get_conn),

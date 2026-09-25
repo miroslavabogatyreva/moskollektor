@@ -231,6 +231,9 @@ echo
 echo "=== самопроверки модулей ==="
 run "Ф-73"         "объяснение риска"        env PYTHONPATH=backend "$PY" -m app.domain.explain
 run "НФ-43"        "роли и доступ"           env PYTHONPATH=backend "$PY" -m app.auth.deps
+# Поток тревог зовёт get_current_user напрямую, мимо Depends: смена сигнатуры в MOS-39
+# уронила его в 500 у всех, и ни одна самопроверка deps этого не видела.
+run "НФ-43"        "поток тревог: вызов входа" env PYTHONPATH=backend "$PY" -m app.api.notifications
 run "—"            "запись прогноза"         env PYTHONPATH=backend "$PY" -m app.worker.publish
 run "—"            "клиент модели"           env PYTHONPATH=backend "$PY" -m app.mlclient.client
 run "—"            "выбор факторов"          env PYTHONPATH=backend "$PY" -m app.worker.run --selfcheck
@@ -503,6 +506,18 @@ else
   skip_msg "М-06" "постраничность журнала — задайте BASE_URL"
 fi
 
+# MOS-223 (Q4.17), нашла 98 при сверке хешей для MOS-221: ORDER BY n.due_at
+# у /api/orders без второго ключа отдавал разный набор id на странице у
+# заявок с одинаковым сроком. Проверка проходит страницы orders/forecasts/
+# audit/channels и требует множество id без повторов (у forecasts — без
+# повторов внутри первых пяти страниц, весь день без этого стоил бы 108
+# запросов на каждый прогон).
+if [ -n "${BASE_URL:-}" ]; then
+  run "М-06, М-16"  "постраничность без повторов и пропусков" env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_stable_paging.py
+else
+  skip_msg "М-06, М-16" "постраничность без повторов и пропусков — задайте BASE_URL"
+fi
+
 # MOS-44 (Q4.7): XML — middleware backend/app/api/main.py, сериализатор
 # backend/app/api/xml.py. Код 200 и разбор ElementTree.fromstring не доказывают,
 # что сериализатор не потерял поле — сверяем каждый лист XML-дерева со значением
@@ -643,6 +658,133 @@ if [ -n "${BASE_URL:-}" ]; then
   run "Ф-66, НФ-43, НФ-44" "область видимости: tech1 < tech2 < ods1" check_scope
 else
   skip_msg "Ф-66, НФ-43, НФ-44" "область видимости — задайте BASE_URL"
+fi
+
+# Вход паролем, как войдёт эксперт, без заголовка X-User-Login (MOS-39, Q4.2).
+# Каждый пароль из подсказки на экране входа реально входит; кука по договору;
+# отказы одним текстом; tech1 < ods1 уже с кукой. С DATABASE_URL — журнал пишет
+# вошедшего (НФ-77); с LDAP_LOGIN/LDAP_PASSWORD/STAND_SSH — блокировка в каталоге
+# и возврат учётки (НФ-76). Самопроверка разбора куки идёт всегда.
+run "—"            "вход: разбор куки"       "$PY" code/check_auth.py --selfcheck
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-66, НФ-43, НФ-76, НФ-77" "вход паролем и каталогом" \
+    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" "$PY" code/check_auth.py
+else
+  skip_msg "Ф-66, НФ-76" "вход паролем — задайте BASE_URL"
+fi
+
+# Администратор блокирует пользователя из интерфейса (MOS-226, Q4.19): admin1
+# блокирует tech2 через PATCH /api/auth/users/tech2 → вход 401 и старая кука 401 →
+# разблокирует → вход 200; в конце is_active tech2 как был в начале. Пароль tech2
+# в подсказку входа не попадает; он записан комментарием в db/seed/rbac.sql.
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-66, НФ-77"  "блокировка пользователя администратором" \
+    env BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" TECH2_PASSWORD="${TECH2_PASSWORD:-tech2123123}" \
+    "$PY" code/check_block_user.py
+else
+  skip_msg "Ф-66"    "блокировка пользователя — задайте BASE_URL"
+fi
+
+# На стенде AUTH_TRUST_HEADER=1, у эксперта 0. Разовый контейнер того же образа api
+# с 0 обязан ответить 401 на поддельный X-User-Login; контроль с 1 — 200.
+if [ -n "${STAND_SSH:-}" ]; then
+  run "НФ-43"        "подделка заголовка при AUTH_TRUST_HEADER=0" \
+    env STAND_SSH="$STAND_SSH" "$PY" code/check_trust_header.py
+else
+  skip_msg "НФ-43"   "подделка заголовка — задайте STAND_SSH"
+fi
+
+# Геометрия участков в GeoJSON и WKT (MOS-45, Q4.8). Ф-81 просит геометрию одного
+# участка в обоих форматах, совпадение координат и названную систему координат.
+# Координаты сверяем разбором обоих ответов, а не глазами. Участков с геометрией
+# ods1 получает столько же, сколько строк /api/risks, tech1 — только свои.
+# Формат — ?geometry=, а ?format=xml и Accept: application/xml отдают XML (Ф-80).
+# С DATABASE_URL: geo_object_id у всех участков ref.object_xref; коллекторов
+# и частей MultiLineString столько, сколько дают данные — коллекторы участков
+# по УЧАСТКИ_КОЛЛЕКТОРА и пары «коллектор, префикс» (сегодня 16 и 32); длина
+# каждого участка отличается от 10 м по пикетам не больше чем на 1 %.
+check_geo() {
+  BASE_URL="$BASE_URL" CURL_OPTS="${CURL_OPTS:-}" PYTHONPATH=backend "$PY" -c '
+import json, os, re, ssl, urllib.error, urllib.request
+base = os.environ["BASE_URL"].rstrip("/")
+ctx = ssl._create_unverified_context() if "-k" in os.environ["CURL_OPTS"].split() else None
+
+def raw(path, login, accept=None):
+    h = {"X-User-Login": login}
+    if accept:
+        h["Accept"] = accept
+    req = urllib.request.Request(base + path, headers=h)
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=120) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, "", b""
+
+def get(path, login):
+    code, ctype, body = raw(path, login)
+    return code, ctype, json.loads(body) if code == 200 else None
+
+code, ctype, gj = get("/api/geo/sections?geometry=geojson&section_id=1490", "ods1")
+assert code == 200, f"geojson: {code}"
+assert ctype.startswith("application/geo+json"), f"geojson: тип {ctype}"
+for path, accept in (("/api/geo/sections?section_id=1490&format=xml", None),
+                     ("/api/geo/sections?section_id=1490", "application/xml")):
+    code, ctype, body = raw(path, "ods1", accept)
+    assert code == 200 and ctype.startswith("application/xml") and b"FeatureCollection" in body, \
+        f"XML {path} Accept={accept}: {code} {ctype}"
+code, _, wk = get("/api/geo/sections?geometry=wkt&section_id=1490", "ods1")
+assert code == 200, f"wkt: {code}"
+for name, body in (("geojson", gj), ("wkt", wk)):
+    crs, src = body.get("crs"), body.get("geometry_source")
+    assert crs == "EPSG:4326", f"{name}: crs {crs}"
+    assert src == "synthetic", f"{name}: geometry_source {src}"
+a = [x for pt in gj["features"][0]["geometry"]["coordinates"] for x in pt]
+b = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", wk["items"][0]["wkt"])]
+assert a == b, f"координаты разошлись: geojson {a}, wkt {b}"
+
+n_risks = len(get("/api/risks", "ods1")[2])
+n_geo = len(get("/api/geo/sections?geometry=geojson", "ods1")[2]["features"])
+assert n_geo == n_risks, f"геометрия у {n_geo} участков, рисков {n_risks}"
+n_tech = len(get("/api/geo/sections?geometry=wkt", "tech1")[2]["items"])
+n_tech_risks = len(get("/api/risks", "tech1")[2])
+assert n_tech == n_tech_risks < n_geo, f"tech1: геометрия {n_tech}, риски {n_tech_risks}, всего {n_geo}"
+extra = ""
+if os.environ.get("DATABASE_URL"):
+    import asyncio, asyncpg
+    from app.worker.run_v3 import УЧАСТКИ_КОЛЛЕКТОРА
+    async def db():
+        c = await asyncpg.connect(os.environ["DATABASE_URL"])
+        ждём = await c.fetchrow(f"""
+            WITH u AS ({УЧАСТКИ_КОЛЛЕКТОРА})
+            SELECT count(DISTINCT u.collector_id) AS коллекторов,
+                   count(DISTINCT (u.collector_id, split_part(x.smvu_key, $1, 1))) AS частей
+              FROM u JOIN ref.object_xref x USING (section_id)
+        """, ":")
+        r = await c.fetchrow("""
+            SELECT (SELECT count(*) FROM ref.object_xref WHERE geo_object_id IS NULL) AS без_геометрии,
+                   (SELECT count(*) FROM geo.geo_object WHERE kind_code = $1) AS коллекторов,
+                   (SELECT sum(ST_NumGeometries(geom)) FROM geo.geo_object WHERE kind_code = $1) AS частей,
+                   (SELECT max(abs(ST_Length(geom::geography) - 10) / 10 * 100)
+                      FROM geo.geo_object WHERE kind_code = $2) AS худшее
+        """, "collector", "collector_section")
+        await c.close()
+        return r, ждём
+    r, ждём = asyncio.run(db())
+    bez, kol, chast, hud = r["без_геометрии"], r["коллекторов"], r["частей"], r["худшее"]
+    ж_kol, ж_chast = ждём["коллекторов"], ждём["частей"]
+    assert bez == 0, f"без геометрии {bez} участков"
+    assert (kol, chast) == (ж_kol, ж_chast), f"коллекторов {kol}, частей {chast}; по данным {ж_kol} и {ж_chast}"
+    assert hud <= 1, f"длина участка разошлась с пикетами на {hud:.4f} %"
+    extra = f"; коллекторов {kol}, частей {chast}, худшее отклонение длины {hud:.4f} %"
+print(f"участок 1490: координаты GeoJSON = WKT ({len(a) // 2} точки), EPSG:4326, synthetic; "
+      f"геометрия у {n_geo} участков из {n_risks}, tech1 {n_tech}{extra}")
+'
+}
+
+if [ -n "${BASE_URL:-}" ]; then
+  run "Ф-81"        "геометрия GeoJSON = WKT" check_geo
+else
+  skip_msg "Ф-81" "геометрия GeoJSON и WKT — задайте BASE_URL"
 fi
 
 # Доступность таблиц (НФ-92, часть III). Проверяет не нажатия, а дерево

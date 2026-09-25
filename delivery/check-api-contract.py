@@ -14,7 +14,7 @@
    ответа, у тела есть её обязательные ключи верхнего уровня. Валидатора
    jsonschema в .venv нет, поэтому сверяем только ключи. Схемы в openapi нет
    вовсе — это СБОЙ, а не пропуск: условие готовности Q4 требует схему.
-   Закрывает его MOS-221 (response_model у всех методов);
+   Закрывает его response_model у метода: MOS-221, у маршрутов MOS-42 — сама MOS-42;
 3. запрос с заведомо пустым результатом — даты в 2000 году, offset за краем,
    несуществующий id в фильтре — даёт 200 и пустой список, а не 404 и не 500.
    Метод без параметров-фильтров под условие не попадает, и итог это считает;
@@ -33,7 +33,11 @@ path, status_code и логином.
 именем. Источника нет — это СБОЙ с именем параметра, а не молчаливый пропуск.
 
 Не покрывает: POST и PUT (PUT /api/settings/{key} меняет настройки, звать его
-вслепую нельзя) и SSE-поток — берутся только GET, отвечающие JSON.
+вслепую нельзя) и тело SSE-потока. Поток узнаём по ответу Content-Type
+text/event-stream, а не по openapi: /api/alerts/stream объявлен там как
+application/json. Тело потока не кончается, читать его — повесить check-all,
+поэтому у потока проверяем только п. 1, код 200 и журнал, а в итоге называем
+его «не покрыт».
 
 Запуск:
     BASE_URL=https://135.106.216.101 CURL_OPTS=-k .venv/bin/python delivery/check-api-contract.py
@@ -55,6 +59,11 @@ from datetime import date, timedelta
 ПУСТОЙ_ДЕНЬ = date(2000, 1, 1)
 
 _ctx = ssl._create_unverified_context() if "-k" in os.environ.get("CURL_OPTS", "").split() else None
+# Методы, открытые без входа по договору API MOS-39: подсказка экрана входа нужна
+# до того, как человек вошёл. Без логина — 200, а не 401; личность такой метод не
+# выясняет, поэтому строка журнала у него без логина, даже если заголовок пришёл.
+ОТКРЫТЫЕ = {"/api/auth/info"}
+ПОТОК = object()  # тело SSE-потока: не читаем, оно не кончается
 
 
 def запрос(base, путь, логин=ЛОГИН, params=None):
@@ -63,6 +72,8 @@ def запрос(base, путь, логин=ЛОГИН, params=None):
     req = urllib.request.Request(url, headers={"X-User-Login": логин} if логин else {})
     try:
         with urllib.request.urlopen(req, context=_ctx, timeout=120) as r:
+            if r.headers.get("Content-Type", "").startswith("text/event-stream"):
+                return r.status, ПОТОК
             код, сырое = r.status, r.read()
     except urllib.error.HTTPError as e:
         код, сырое = e.code, e.read()
@@ -75,30 +86,50 @@ def запрос(base, путь, логин=ЛОГИН, params=None):
 
 
 def записи(тело):
-    """Список записей, как бы метод его ни завернул; None — это не список."""
+    """Список записей, как бы метод его ни завернул: голым списком, в items или,
+    у GeoJSON FeatureCollection, в features. None — это не список."""
     if isinstance(тело, list):
         return тело
-    if isinstance(тело, dict) and isinstance(тело.get("items"), list):
-        return тело["items"]
+    for ключ in ("items", "features"):
+        if isinstance(тело, dict) and isinstance(тело.get(ключ), list):
+            return тело[ключ]
     return None
 
 
-def схема(spec, op):
-    """Схема ответа 200 с раскрытым $ref; {} — схемы нет."""
-    s = op.get("responses", {}).get("200", {}).get("content", {}).get("application/json", {}).get("schema", {})
+def раскрыть(spec, s):
     while "$ref" in s:
         s = spec["components"]["schemas"][s["$ref"].rsplit("/", 1)[1]]
     return s
 
 
+def схема(spec, op):
+    """Схема ответа 200 с раскрытым $ref; {} — схемы нет."""
+    s = op.get("responses", {}).get("200", {}).get("content", {}).get("application/json", {}).get("schema", {})
+    return раскрыть(spec, s)
+
+
 def нет_ключей(spec, s, тело):
-    """Обязательные ключи верхнего уровня, которых нет в теле."""
+    """Обязательные ключи верхнего уровня, которых нет в теле.
+
+    anyOf/oneOf (response_model вида `A | B`, у /api/geo/sections — GeoJSON или WKT):
+    своего required у такой схемы нет, и без разбора ветвей сверка шла бы вхолостую.
+    Тело обязано подойти хотя бы под одну ветвь; не подошло ни под одну — называем
+    пропуски той ветви, к которой оно ближе всего.
+    """
+    ветви = s.get("anyOf") or s.get("oneOf")
+    if ветви:
+        пропуски = []
+        for в in ветви:
+            в = раскрыть(spec, в)
+            if в.get("type") == "null":
+                пропуски.append([] if тело is None else ["<не null>"])
+            else:
+                пропуски.append(нет_ключей(spec, в, тело))
+        return [] if any(not п for п in пропуски) else min(пропуски, key=len)
     if s.get("type") == "array" and isinstance(тело, list):
         if not тело:
             return []
-        s, тело = s.get("items", {}), тело[0]
-        while "$ref" in s:
-            s = spec["components"]["schemas"][s["$ref"].rsplit("/", 1)[1]]
+        return нет_ключей(spec, раскрыть(spec, s.get("items", {})), тело[0])
     if not isinstance(тело, dict):
         return ["<тело не объект>"] if s.get("required") else []
     return [k for k in s.get("required", []) if k not in тело]
@@ -175,12 +206,24 @@ def подставить_путь(путь, списки):
 
 def _selfcheck():
     assert записи([]) == [] and записи({"total": 0, "items": []}) == []
+    assert записи({"type": "FeatureCollection", "features": []}) == [], "GeoJSON (MOS-45)"
     assert записи({"data_edge": "x"}) is None
     spec = {"components": {"schemas": {"R": {"type": "object", "required": ["a", "b"]}}}}
     op = {"responses": {"200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/R"}}}}}}
     assert нет_ключей(spec, схема(spec, op), {"a": 1}) == ["b"]
     assert нет_ключей(spec, {"type": "array", "items": {"$ref": "#/components/schemas/R"}}, [{"a": 1, "b": 2}]) == []
     assert нет_ключей(spec, {}, {"что": "угодно"}) == [], "схемы нет — сверять нечего"
+    # anyOf, как у /api/geo/sections: GeoSections | WktSections.
+    spec["components"]["schemas"]["Geo"] = {"type": "object", "required": ["type", "crs", "features"]}
+    spec["components"]["schemas"]["Wkt"] = {"type": "object", "required": ["crs", "items"]}
+    гео = {"anyOf": [{"$ref": "#/components/schemas/Geo"}, {"$ref": "#/components/schemas/Wkt"}]}
+    assert нет_ключей(spec, гео, {"type": "FeatureCollection", "crs": "x", "features": []}) == []
+    assert нет_ключей(spec, гео, {"crs": "x", "items": []}) == [], "подошла вторая ветвь"
+    assert нет_ключей(spec, гео, {"type": "FeatureCollection", "crs": "x"}) == ["features"], (
+        "без features не подходит ни одна ветвь — называем ближайшую"
+    )
+    assert нет_ключей(spec, {"anyOf": [{"$ref": "#/components/schemas/R"}, {"type": "null"}]}, None) == []
+    assert нет_ключей(spec, {"type": "array", "items": гео}, [{"crs": "x"}]) in (["type", "features"], ["items"])
     op_дат = {"parameters": [
         {"name": "from", "in": "query", "schema": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}},
         {"name": "to", "in": "query", "schema": {"type": "string", "format": "date"}},
@@ -199,7 +242,28 @@ def _selfcheck():
         pass
     else:
         raise AssertionError("параметр без источника обязан быть СБОЕМ")
-    print("самопроверка ok: форма списка, ключи схемы, пустой запрос, подстановка пути")
+    # Поток шлёт пинг и не закрывается: запрос обязан вернуться по заголовку, не читая тело.
+    import http.server, threading, time
+
+    class Поток(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b": ping\n\n")
+            self.wfile.flush()
+            time.sleep(3)
+
+        def log_message(self, *a):
+            pass
+
+    сервер = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Поток)
+    threading.Thread(target=сервер.serve_forever, daemon=True).start()
+    t = time.time()
+    assert запрос(f"http://127.0.0.1:{сервер.server_port}", "/stream") == (200, ПОТОК), "SSE читать нельзя"
+    assert time.time() - t < 2, "SSE: запрос ждал конца тела"
+    сервер.shutdown()
+    print("самопроверка ok: форма списка, ключи схемы, пустой запрос, подстановка пути, SSE-поток")
 
 
 def main():
@@ -222,7 +286,7 @@ def main():
     for путь, op in методы:
         if "{" not in путь and not any(p.get("required") and p["in"] == "query" for p in op.get("parameters", [])):
             к, тело = запрос(base, путь, params={"limit": 1} if any(p["name"] == "limit" for p in op.get("parameters", [])) else None)
-            if к == 200:
+            if к == 200 and тело is not ПОТОК:
                 списки[путь] = тело
 
     к, тело = запрос(base, "/api/audit", params={"limit": 1})
@@ -235,7 +299,7 @@ def main():
 
     сегодня = date.today()
     вызовы = []  # (path, status, login) — ищем их потом в журнале
-    сбои, без_фильтра = [], []
+    сбои, без_фильтра, потоки = [], [], []
 
     for шаблон, op in методы:
         if шаблон == "/health":
@@ -250,19 +314,25 @@ def main():
         # 1. Без заголовка.
         к, тело = запрос(base, путь, логин=None, params=обяз or None)
         вызовы.append((путь, к, None))
-        if к not in (401, 403):
+        if шаблон in ОТКРЫТЫЕ:
+            if к != 200:
+                сбои.append(f"{шаблон}: открытый метод без входа ответил {к}, ждали 200")
+        elif к not in (401, 403):
             сбои.append(f"{шаблон}: без X-User-Login ответ {к}, ждали 401 или 403 (НФ-43)")
 
         # 2. С правом.
         к, тело = запрос(base, путь, params=обяз or None)
-        вызовы.append((путь, к, ЛОГИН))
+        вызовы.append((путь, к, None if шаблон in ОТКРЫТЫЕ else ЛОГИН))
         s = схема(spec, op)
         if к != 200:
             сбои.append(f"{шаблон}: под {ЛОГИН} ответ {к}, ждали 200")
+        elif тело is ПОТОК:
+            потоки.append(шаблон)
+            continue
         elif тело is None:
             сбои.append(f"{шаблон}: ответ 200, но тело не JSON")
         elif not s:
-            сбои.append(f"{шаблон}: в openapi нет схемы ответа, ключи сверять не с чем — закроет MOS-221")
+            сбои.append(f"{шаблон}: в openapi нет схемы ответа (response_model), ключи сверять не с чем")
         elif нет := нет_ключей(spec, s, тело):
             сбои.append(f"{шаблон}: в ответе нет ключей схемы {нет}")
 
@@ -309,7 +379,9 @@ def main():
 
     всего = len(методы) - 1
     print(f"методов GET в openapi: {всего} без /health; вызовов {len(вызовы)}, "
-          f"пустой результат проверен у {всего - len(без_фильтра)}, фильтров нет у {len(без_фильтра)}")
+          f"пустой результат проверен у {всего - len(без_фильтра) - len(потоки)}, фильтров нет у {len(без_фильтра)}")
+    if потоки:
+        print(f"ВНИМАНИЕ: тело не проверено у SSE-потоков ({len(потоки)}): {', '.join(потоки)} — только отказ, 200 и журнал")
     for с in сбои:
         print(f"СБОЙ {с}")
     if not сбои:

@@ -19,13 +19,14 @@ from datetime import datetime
 import asyncpg
 from fastapi import APIRouter, Depends, Query
 
+from app.api.schemas import AuditList
 from app.auth.deps import require
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
 
-@router.get("/audit")
+@router.get("/audit", response_model=AuditList)
 async def list_audit(
     from_: datetime | None = Query(None, alias="from", description="момент начала периода, включительно"),
     to: datetime | None = Query(None, description="момент конца периода, включительно"),
@@ -58,7 +59,7 @@ async def list_audit(
         FROM audit.user_action a
         LEFT JOIN ref.app_user u ON u.user_id = a.user_id
         {where}
-        ORDER BY a.occurred_at DESC
+        ORDER BY a.occurred_at DESC, a.action_id DESC
         LIMIT $3 OFFSET $4
         """,
         from_, to, limit, offset,

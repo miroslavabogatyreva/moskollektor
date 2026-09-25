@@ -27,8 +27,15 @@ def копируемые(текст: str) -> set[str]:
     итог = set()
     for строка in текст.splitlines():
         слова = строка.strip().split()
-        if len(слова) >= 3 and слова[0] == "COPY":
-            итог.add(слова[1].split("/", 1)[0])
+        if not слова or слова[0] != "COPY":
+            continue
+        флаги = [с for с in слова[1:] if с.startswith("--")]
+        пути = [с for с in слова[1:] if not с.startswith("--")]
+        # COPY --from=<стадия> берёт файлы из другой стадии сборки, а не из дерева
+        # (двухступенчатый backend/Dockerfile, MOS-39): везти на стенд тут нечего.
+        if any(ф.startswith("--from=") for ф in флаги) or len(пути) < 2:
+            continue
+        итог.add(пути[0].split("/", 1)[0])
     return итог
 
 
@@ -59,6 +66,9 @@ def _selfcheck():
     assert копируемые("RUN pip install\nCOPY a\n") == set(), (
         "не COPY источник назначение"
     )
+    # Копия из стадии сборки — не каталог дерева; флаг перед путём не прячет каталог.
+    assert копируемые("COPY --from=builder /install /usr/local\n") == set()
+    assert копируемые("COPY --chown=app:app deploy/x ./x\n") == {"deploy"}
     команда = (
         "текст\ngit archive origin/master backend db code contracts | ssh root@x \\\n"
     )

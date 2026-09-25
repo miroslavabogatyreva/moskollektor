@@ -1,7 +1,8 @@
 -- rbac.sql — какие разрешения даёт каждая роль, четыре тестовые учётные записи,
 -- их роли и область видимости. Таблицы заводят db/migrations/008_rbac.sql
--- (ref.app_user, ref.role_permission) и 044_roles_scope.sql (ref.user_role,
--- ref.user_scope), этот файл их только наполняет.
+-- (ref.app_user, ref.role_permission), 044_roles_scope.sql (ref.user_role,
+-- ref.user_scope) и 047_auth.sql (password_hash, ref.ldap_role_map),
+-- этот файл их только наполняет.
 --
 -- Коды разрешений называются по методу, который они открывают: risks.read
 -- закрывает GET /api/risks (Q4.3), forecasts.read — GET /api/forecasts(/{id})
@@ -16,7 +17,7 @@
 -- диспетчер отличается от техника — не разрешениями, а областью видимости
 -- (ref.user_scope, backend/app/auth/deps.py).
 --
--- Накатывать после db/migrations/044_roles_scope.sql:
+-- Накатывать после db/migrations/047_auth.sql:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/rbac.sql
 
 INSERT INTO ref.role_permission (role_code, permission_code) VALUES
@@ -45,16 +46,43 @@ ON CONFLICT (role_code, permission_code) DO NOTHING;
 -- Четыре тестовые записи, по одной на роль, и пятая — tech2 для проверки сложения
 -- областей видимости. analyst1 и engineer1 из прежнего
 -- сида 044 отключила (is_active = false), строки остались ради внешних ключей.
-INSERT INTO ref.app_user (login, full_name, auth_source) VALUES
-    ('dispatcher1', 'Тестовый диспетчер',     'local'),
-    ('ods1',        'Тестовый диспетчер ОДС', 'local'),
-    ('tech1',       'Тестовый техник',        'local'),
-    ('admin1',      'Тестовый администратор', 'local'),
-    ('tech2',       'Тестовый техник двух коллекторов', 'local')
+--
+-- password_hash — argon2 (db/migrations/047_auth.sql, MOS-39). Пароли первых
+-- четырёх — те же, что показывает подсказка GET /api/auth/info
+-- (backend/app/api/auth.py, DEMO_ACCOUNTS): демо обязано работать без
+-- каталога (решение Славы 24.09.2026). Это ВСЕГДА локальные учётки, отдельные
+-- от одноимённых ldap_* в каталоге — у обоих путей входа своя пара
+-- «логин/секрет», смешивать их нельзя.
+--
+-- tech2 в DEMO_ACCOUNTS нарочно не входит (подопытный для проверки сложения
+-- областей видимости, не демо-учётка со страницы входа) — пароль записан
+-- только здесь: tech2123123. Хеш перегенерирован 24.09.2026 (MOS-226):
+-- первый, заведённый в MOS-39 (коммит b373c22), был нигде не записан и
+-- необратим — потерялся раньше, чем кто-либо им воспользовался.
+INSERT INTO ref.app_user (login, full_name, auth_source, password_hash) VALUES
+    ('dispatcher1', 'Тестовый диспетчер',     'local', '$argon2id$v=19$m=65536,t=3,p=4$W3DAWpcjq6AWcOjKU8hXXg$bDZhR+9jFwI74Bg5IuB2yZsaMJ56mVYkCSwatPdrY0E'),
+    ('ods1',        'Тестовый диспетчер ОДС', 'local', '$argon2id$v=19$m=65536,t=3,p=4$OP7Y01uuWH56hJrmN4ssLA$DSrZdqPpPn+s6XL+B00xTP+bu502QCJUHQOYCxw//S8'),
+    ('tech1',       'Тестовый техник',        'local', '$argon2id$v=19$m=65536,t=3,p=4$VH5tU5alwapN3s4VKo3NfQ$8fMA7COqLtjQ5IlzFLU7Y+MIvmCnny+ENVITMG7yBH4'),
+    ('admin1',      'Тестовый администратор', 'local', '$argon2id$v=19$m=65536,t=3,p=4$hi21eVs/+Z4TC+MviMr/qQ$fiWyF7z+LFJYhUBo/YKjDMBOn8c7hbnKcDFs1/4/ud4'),
+    ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$qtIfrl0986Qq2OhfN4oJiw$/v/8MrUD81Y4oAS5ntGuG49UpxI5dL9NkWA4dfLF4+4')
 
 ON CONFLICT (login) DO UPDATE SET
-    full_name   = excluded.full_name,
-    auth_source = excluded.auth_source;
+    full_name     = excluded.full_name,
+    auth_source   = excluded.auth_source,
+    password_hash = excluded.password_hash;
+
+-- Каталог демо-стенда (deploy/ldap/bootstrap.ldif, MOS-39/8a): группа → роль
+-- ИЛИ область видимости, cn согласованы между 41 и 8a 24.09.2026. Учётки
+-- ldap_dispatcher1/ldap_ods1/ldap_tech1/ldap_admin1 сюда не заводим — их
+-- ref.app_user создаёт сам вход при первом успешном bind (backend/app/auth/ldap.py).
+INSERT INTO ref.ldap_role_map (group_cn, role_code, object_id) VALUES
+    ('role-dispatcher', 'dispatcher',     NULL),
+    ('role-ods',        'ods_dispatcher', NULL),
+    ('role-tech',       'technician',     NULL),
+    ('role-admin',      'admin',          NULL),
+    ('scope-tech-6',    NULL,             6)
+
+ON CONFLICT (group_cn) DO NOTHING;
 
 INSERT INTO ref.user_role (login, role_code) VALUES
     ('dispatcher1', 'dispatcher'),
