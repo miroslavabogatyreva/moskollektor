@@ -21,13 +21,14 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.schemas import ObjectChannelList, ObjectDetail, ObjectReading
 from app.auth.deps import require, проверить_участок
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
 
 
-@router.get("/objects/{section_id}")
+@router.get("/objects/{section_id}", response_model=ObjectDetail)
 async def get_object(
     section_id: int,
     conn: asyncpg.Connection = Depends(get_conn),
@@ -113,7 +114,7 @@ async def get_object(
     }
 
 
-@router.get("/objects/{section_id}/readings")
+@router.get("/objects/{section_id}/readings", response_model=list[ObjectReading])
 async def get_object_readings(
     section_id: int,
     from_: date = Query(..., alias="from", description="дата начала окна, включительно"),
@@ -148,7 +149,7 @@ async def get_object_readings(
     return [dict(r) for r in rows]
 
 
-@router.get("/objects/{section_id}/channels")
+@router.get("/objects/{section_id}/channels", response_model=ObjectChannelList)
 async def list_object_channels(
     section_id: int,
     limit: int = Query(200, ge=1, le=1000),

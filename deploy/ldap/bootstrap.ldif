@@ -1,0 +1,75 @@
+# Демонстрационный каталог MOS-39: четыре учётки по числу ролей заказчика
+# (Ф-66) плюс одна группа области видимости — коллектор 6 «объект Бета»,
+# тот же узел, что у локального tech1 (docs/HLD.md разд. 4, строка 717).
+# Пароль всех четырёх учёток одинаковый — LdapDemo#1, {SSHA}-хеш ниже:
+# это demo-каталог без публикации порта наружу, а не граница безопасности.
+#
+# Логины отдельные от локальных демо-учёток (dispatcher1/ods1/tech1/admin1
+# в ref.app_user, auth_source='local') — согласовано с 41.
+
+dn: dc=moskollektor,dc=local
+objectClass: dcObject
+objectClass: organization
+dc: moskollektor
+o: Москоллектор
+
+dn: ou=people,dc=moskollektor,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=moskollektor,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=ldap_dispatcher1,ou=people,dc=moskollektor,dc=local
+objectClass: inetOrgPerson
+uid: ldap_dispatcher1
+cn: ldap_dispatcher1
+sn: dispatcher1
+userPassword: {SSHA}Mf6DrTShgApyubdF0PGapoxCnBlK85XM
+
+dn: uid=ldap_ods1,ou=people,dc=moskollektor,dc=local
+objectClass: inetOrgPerson
+uid: ldap_ods1
+cn: ldap_ods1
+sn: ods1
+userPassword: {SSHA}Mf6DrTShgApyubdF0PGapoxCnBlK85XM
+
+dn: uid=ldap_tech1,ou=people,dc=moskollektor,dc=local
+objectClass: inetOrgPerson
+uid: ldap_tech1
+cn: ldap_tech1
+sn: tech1
+userPassword: {SSHA}Mf6DrTShgApyubdF0PGapoxCnBlK85XM
+
+dn: uid=ldap_admin1,ou=people,dc=moskollektor,dc=local
+objectClass: inetOrgPerson
+uid: ldap_admin1
+cn: ldap_admin1
+sn: admin1
+userPassword: {SSHA}Mf6DrTShgApyubdF0PGapoxCnBlK85XM
+
+dn: cn=role-dispatcher,ou=groups,dc=moskollektor,dc=local
+objectClass: groupOfNames
+cn: role-dispatcher
+member: uid=ldap_dispatcher1,ou=people,dc=moskollektor,dc=local
+
+dn: cn=role-ods,ou=groups,dc=moskollektor,dc=local
+objectClass: groupOfNames
+cn: role-ods
+member: uid=ldap_ods1,ou=people,dc=moskollektor,dc=local
+
+dn: cn=role-tech,ou=groups,dc=moskollektor,dc=local
+objectClass: groupOfNames
+cn: role-tech
+member: uid=ldap_tech1,ou=people,dc=moskollektor,dc=local
+
+dn: cn=role-admin,ou=groups,dc=moskollektor,dc=local
+objectClass: groupOfNames
+cn: role-admin
+member: uid=ldap_admin1,ou=people,dc=moskollektor,dc=local
+
+dn: cn=scope-tech-6,ou=groups,dc=moskollektor,dc=local
+objectClass: groupOfNames
+cn: scope-tech-6
+member: uid=ldap_tech1,ou=people,dc=moskollektor,dc=local
