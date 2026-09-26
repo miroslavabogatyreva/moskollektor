@@ -23,12 +23,23 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
 
   useEffect(() => {
     if (!orderId) return
+    // Флажок отмены — та же гонка, что в ForecastCard.tsx (MOS-178): без него
+    // ответ прошлого orderId, пришедший позже ответа нового, тихо подменяет
+    // карточку — на экране целая заявка, но не та, что в адресе.
+    let отменено = false
     setData(null)
     setNotFound(false)
     setError(null)
     fetchOrder(orderId)
-      .then((d) => (d ? setData(d) : setNotFound(true)))
-      .catch((e) => setError(errorMessage(e)))
+      .then((d) => {
+        if (!отменено) (d ? setData(d) : setNotFound(true))
+      })
+      .catch((e) => {
+        if (!отменено) setError(errorMessage(e))
+      })
+    return () => {
+      отменено = true
+    }
   }, [orderId])
 
   if (notFound) {

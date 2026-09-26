@@ -27,12 +27,23 @@ export function OrdersScreen(_props: Record<string, unknown>) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // Флажок отмены — та же гонка, что в ObjectCard.tsx (MOS-178): offset
+    // в зависимостях перезапускает эффект на каждое «дальше», и ответ
+    // прошлой страницы, пришедший позже нового, клал чужие строки в таблицу.
+    let отменено = false
     fetchOrders(offset)
       .then((r) => {
-        setItems(r.items)
-        setTotal(r.total)
+        if (!отменено) {
+          setItems(r.items)
+          setTotal(r.total)
+        }
       })
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => {
+        if (!отменено) setError(errorMessage(e))
+      })
+    return () => {
+      отменено = true
+    }
   }, [offset])
 
   return (
