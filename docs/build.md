@@ -35,7 +35,7 @@ Dockerfile на оба) и образ `ml`-заглушки. `nginx` — гот�
 ## 2. Сборка `api`/`worker`/`migrate`
 
 Один Dockerfile на все три, контекст сборки — корень репозитория (не `backend/`):
-образ вшивает и `db/migrations/`, и `contracts/`, а не только код `app/`.
+образ вшивает `db/migrations/`, `db/seed/` и `contracts/`, а не только код `app/`.
 
 ```
 docker build -t moskollektor-api -f backend/Dockerfile .
@@ -53,6 +53,12 @@ docker build -t moskollektor-api -f backend/Dockerfile .
 примонтированы томом: `backend/app/migrate.py` сверяет sha256 файла внутри
 контейнера со значением в `public.schema_migration`, и без пересборки
 внутри останется старое содержимое.
+
+**Правка файла в `db/seed/` требует пересборки образа по той же причине.**
+Сиды контейнер `migrate` накатывает после миграций, и в образ они входят строкой
+`COPY db/seed ./db/seed` рядом с `COPY db/migrations ./db/migrations`. Без
+пересборки `migrate` возьмёт старый файл из образа: журнал
+`public.schema_migration` сиды не записывает, сверять их не с чем.
 
 ## 3. Сборка `ml` (заглушка)
 

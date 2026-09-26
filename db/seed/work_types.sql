@@ -34,9 +34,12 @@
 -- потребности нужна отдельная колонка или связь с ref.setpoint (метан),
 -- не выдумываю её сейчас, раз задача о ней не просила.
 --
--- Накатывать после того, как есть permit.permit_work_type/permit_work_subtype
+-- Накатывает контейнер migrate после миграций, заново на каждом прогоне
+-- (MOS-119): вставки идемпотентные, повтор строк не удваивает. Порядок —
+-- после того, как есть permit.permit_work_type/permit_work_subtype
 -- (003_permits.sql — уже накатан на стенде), порядок с 013_setpoints.sql
--- не важен, таблицы разных схем:
+-- не важен, таблицы разных схем. Руками — когда нужен один файл, а не весь
+-- migrate:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/work_types.sql
 
 INSERT INTO permit.permit_work_type

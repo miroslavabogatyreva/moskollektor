@@ -32,7 +32,9 @@
 -- НФ-65) — другая приёмочная строка и, по-хорошему, отдельная задача
 -- заявок (Q6), не наш ref.norm_period.
 --
--- Накатывать после 013_setpoints.sql:
+-- Накатывает контейнер migrate после миграций, заново на каждом прогоне
+-- (MOS-119): вставки идемпотентные, повтор строк не удваивает. Порядок —
+-- после 013_setpoints.sql. Руками — когда нужен один файл, а не весь migrate:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/lifetimes.sql
 
 INSERT INTO ref.norm_period
