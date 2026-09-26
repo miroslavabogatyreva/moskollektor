@@ -1,0 +1,7 @@
+{
+  "orders": 352,
+  "orders_with_next_incident_in_window": 316,
+  "deadline_before_next_incident": 149,
+  "share": 0.4715,
+  "limitation": "Deadlines are operational response targets, not predicted failure times or evidence of completed maintenance. Unmatched tail windows are censored."
+}
