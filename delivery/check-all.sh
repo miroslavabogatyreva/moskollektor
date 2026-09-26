@@ -167,6 +167,7 @@ run "—"            "счётчики каталогов"      "$PY" code/check
 echo
 echo "=== схема и миграции ==="
 run "—"            "порядок миграций"        "$PY" code/check_schema.py
+run "НФ-80"        "минимум PostgreSQL 15"   "$PY" code/check_pg_version.py
 
 # Строки приёмки у задачи MOS-158 нет — файл contracts/examples/section_xref.csv
 # отдан Николаю, а не заказчику. Проверка стоит здесь потому, что файл выгружен
