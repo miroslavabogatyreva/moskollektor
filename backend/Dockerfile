@@ -23,6 +23,11 @@ COPY backend/app ./app
 # db/migrations/ требует пересборки, иначе migrate.py увидит внутри
 # контейнера старое содержимое и sha256 разойдётся с public.schema_migration.
 COPY db/migrations ./db/migrations
+# Сиды вшиты рядом с миграциями и тоже требуют пересборки при правке: контейнер
+# migrate накатывает их после миграций на каждом прогоне (MOS-119). Без этой
+# строки каталога db/seed в образе нет, и права в базе отстают от git — 18.09.2026
+# admin получал 403 на GET /api/settings, пока сид не накатали руками.
+COPY db/seed ./db/seed
 # 22 признака в contracts/features.v1.yaml — их порядок сам является контрактом
 # (docs/plan.md, Q7.2), и backend/app/mlclient/client.py читает файл в рантайме,
 # а не только на этапе разработки.

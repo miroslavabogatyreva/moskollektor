@@ -121,6 +121,8 @@ docker compose --profile app run --rm migrate
 список накатанного — в `public.schema_migration`. Повторный прогон ничего не
 накатывает заново и выходит с кодом 0 — так и проверять, что накат прошёл
 целиком: `docker compose --profile app run --rm migrate` второй раз подряд.
+Сиды из `db/seed/*.sql` тот же контейнер накатывает после миграций — порядок
+и ручной обход описаны в конце раздела.
 
 **Проверять так можно только после заливки справочников, и вот почему.** Миграция
 `029_ml_readonly.sql` заводит представление `smvu.channel_collector` и самопроверкой
@@ -161,7 +163,28 @@ docker compose exec -T api sh -c 'python -m app.ingest.synthetic_geometry --dsn 
 `deploy/bootstrap-schema-migration.sql` — второй раз этот сценарий заводить
 незачем.
 
-Сиды из `db/seed/` накатом не занимаются, их отдельно:
+**Сиды накатывает тот же контейнер `migrate`, сразу после миграций.** Берёт
+`db/seed/*.sql` по имени файла, каждый файл в своей транзакции, как миграции.
+Сиды идемпотентные: вставки написаны `INSERT … ON CONFLICT`, поэтому повторный
+прогон применяет их заново и не удваивает строки. Руками накатывать
+сиды больше не нужно. Раньше накат сидами не занимался, и 18.09.2026 на стенде
+это выстрелило: права в `ref.role_permission` отстали от git, и admin получал
+ответ 403 (доступ запрещён) на запрос `GET /api/settings`, пока `db/seed/rbac.sql`
+не накатали руками.
+
+**Исключение одно.** Вставка учётных записей в `db/seed/rbac.sql` идёт в
+`ref.app_user` с `ON CONFLICT (login) DO UPDATE` по одной колонке `full_name`:
+`password_hash` и `auth_source` у существующего логина она не трогает. Первый
+вход через каталог LDAP ставит `auth_source='ldap'` и `password_hash=NULL`
+(`backend/app/api/auth.py:142`), и повторный накат сида с перезаписью этих
+колонок вернул бы ldap-пользователю `auth_source='local'` и демо-хеш argon2 —
+то есть снял бы вход по каталогу и подменил пароль. Колонку `is_active` сид тоже
+не трогает: блокировка пользователя из интерфейса (MOS-226) обязана переживать
+перезаливку.
+
+**Ручной обход — когда накатывать надо один файл, а не порядок установки.**
+Например, вы поправили справочник в `db/seed/setpoints.sql` и не хотите гонять
+весь `migrate`:
 
 ```
 docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < ../db/seed/<файл>.sql
@@ -326,13 +349,20 @@ LDAP_USER_TEMPLATE=uid={login},<их шаблон DN>   # {login} — обяза
 rsync -a --delete --exclude '__pycache__' backend/app/ root@СЕРВЕР:/srv/moskollektor/backend/app/
 rsync -a backend/Dockerfile backend/requirements.txt root@СЕРВЕР:/srv/moskollektor/backend/
 rsync -a db/migrations/ root@СЕРВЕР:/srv/moskollektor/db/migrations/
+rsync -a db/seed/ root@СЕРВЕР:/srv/moskollektor/db/seed/
 rsync -a contracts/ root@СЕРВЕР:/srv/moskollektor/contracts/
 rsync -a deploy/docker-compose.yml root@СЕРВЕР:/srv/moskollektor/deploy/
 ```
 
+**Каталог `db/seed/` нужен на сервере ради сборки образа.** `backend/Dockerfile`
+вшивает сиды строкой `COPY db/seed ./db/seed` рядом с `COPY db/migrations
+./db/migrations`, контекст сборки — корень репозитория на сервере, и без каталога
+`db/seed/` сборка упадёт.
+
 **Потом образ и контейнер.** `migrate` поднимется сам: `api` ждёт его через
-`condition: service_completed_successfully`, накат идёт по журналу и повторно ничего
-не делает.
+`condition: service_completed_successfully`, миграции накатываются по журналу
+и повторно ничего не делают, а сиды применяются заново каждый раз — это их
+устройство, а не ошибка.
 
 ```
 cd /srv/moskollektor

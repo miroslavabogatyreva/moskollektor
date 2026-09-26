@@ -17,7 +17,10 @@
 -- диспетчер отличается от техника — не разрешениями, а областью видимости
 -- (ref.user_scope, backend/app/auth/deps.py).
 --
--- Накатывать после db/migrations/047_auth.sql:
+-- Накатывает контейнер migrate после миграций, заново на каждом прогоне
+-- (MOS-119): вставки идемпотентные, повтор строк не удваивает. Порядок —
+-- после db/migrations/047_auth.sql. Руками — когда нужен один файл, а не весь
+-- migrate:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/rbac.sql
 
 INSERT INTO ref.role_permission (role_code, permission_code) VALUES
@@ -59,6 +62,18 @@ ON CONFLICT (role_code, permission_code) DO NOTHING;
 -- только здесь: tech2123123. Хеш перегенерирован 24.09.2026 (MOS-226):
 -- первый, заведённый в MOS-39 (коммит b373c22), был нигде не записан и
 -- необратим — потерялся раньше, чем кто-либо им воспользовался.
+--
+-- Вставка идемпотентная, но ОБНОВЛЯЕТ ТОЛЬКО full_name, и это сознательно
+-- (MOS-119, 26.09.2026): сид накатывается заново на каждом старте migrate,
+-- и любая другая колонка здесь была бы дырой.
+--   * password_hash не трогаем: администратор меняет пароль, а следующая
+--     выкладка вернула бы демо-хеш — подмена пароля вместо наката сида.
+--   * auth_source не трогаем: первый вход через каталог LDAP ставит
+--     auth_source='ldap' и password_hash=NULL (backend/app/api/auth.py:142),
+--     и DO UPDATE с excluded вернул бы ldap-учётке 'local' и демо-хеш — снял бы
+--     вход по каталогу и оставил учётку с известным паролем.
+--   * is_active не трогаем и не включаем в SET: блокировка из интерфейса
+--     (MOS-226) обязана переживать перезаливку сида.
 INSERT INTO ref.app_user (login, full_name, auth_source, password_hash) VALUES
     ('dispatcher1', 'Тестовый диспетчер',     'local', '$argon2id$v=19$m=65536,t=3,p=4$W3DAWpcjq6AWcOjKU8hXXg$bDZhR+9jFwI74Bg5IuB2yZsaMJ56mVYkCSwatPdrY0E'),
     ('ods1',        'Тестовый диспетчер ОДС', 'local', '$argon2id$v=19$m=65536,t=3,p=4$OP7Y01uuWH56hJrmN4ssLA$DSrZdqPpPn+s6XL+B00xTP+bu502QCJUHQOYCxw//S8'),
@@ -67,20 +82,33 @@ INSERT INTO ref.app_user (login, full_name, auth_source, password_hash) VALUES
     ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$qtIfrl0986Qq2OhfN4oJiw$/v/8MrUD81Y4oAS5ntGuG49UpxI5dL9NkWA4dfLF4+4')
 
 ON CONFLICT (login) DO UPDATE SET
-    full_name     = excluded.full_name,
-    auth_source   = excluded.auth_source,
-    password_hash = excluded.password_hash;
+    full_name = excluded.full_name;
 
 -- Каталог демо-стенда (deploy/ldap/bootstrap.ldif, MOS-39/8a): группа → роль
 -- ИЛИ область видимости, cn согласованы между 41 и 8a 24.09.2026. Учётки
 -- ldap_dispatcher1/ldap_ods1/ldap_tech1/ldap_admin1 сюда не заводим — их
 -- ref.app_user создаёт сам вход при первом успешном bind (backend/app/auth/ldap.py).
-INSERT INTO ref.ldap_role_map (group_cn, role_code, object_id) VALUES
-    ('role-dispatcher', 'dispatcher',     NULL),
-    ('role-ods',        'ods_dispatcher', NULL),
-    ('role-tech',       'technician',     NULL),
-    ('role-admin',      'admin',          NULL),
-    ('scope-tech-6',    NULL,             6)
+--
+-- Строки с object_id кладутся только тогда, когда объект уже есть в
+-- smvu.object_tree, а дерево приходит выгрузкой заказчика, а не миграцией.
+-- На чистой базе его ещё нет, и вставка, которая упёрлась бы во внешний ключ,
+-- уронила бы migrate ДО загрузки выгрузки: api и worker ждут migrate через
+-- condition: service_completed_successfully и не поднялись бы вовсе, а выгрузку
+-- льют через контейнер api. Залить её стало бы нечем. Поэтому строки с object_id
+-- пропускаются, а не валят накат: сид накатывается на каждом старте migrate,
+-- и следующий прогон докладывает недостающее само, как только дерево появилось.
+-- Сколько должно быть строк: ref.ldap_role_map — 5, ref.user_scope — 4.
+INSERT INTO ref.ldap_role_map (group_cn, role_code, object_id)
+SELECT v.group_cn, v.role_code, v.object_id
+FROM (VALUES
+    ('role-dispatcher', 'dispatcher'::text,     NULL::integer),
+    ('role-ods',        'ods_dispatcher'::text, NULL::integer),
+    ('role-tech',       'technician'::text,     NULL::integer),
+    ('role-admin',      'admin'::text,          NULL::integer),
+    ('scope-tech-6',    NULL::text,             6::integer)
+) AS v(group_cn, role_code, object_id)
+WHERE v.object_id IS NULL
+   OR EXISTS (SELECT 1 FROM smvu.object_tree t WHERE t.object_id = v.object_id)
 
 ON CONFLICT (group_cn) DO NOTHING;
 
@@ -100,10 +128,19 @@ ON CONFLICT DO NOTHING;
 -- обязано дать 79 + 9 = 88 участков — строго больше, чем у tech1, и строго меньше
 -- 3 173. Пара «техник + диспетчер района» дала бы 3 173 и прошла бы проверку
 -- даже при сломанном объединении, потому что район в выгрузке один.
-INSERT INTO ref.user_scope (login, object_id) VALUES
+-- Как и в ref.ldap_role_map выше, строки кладутся только по уже известным
+-- объектам: smvu.object_tree приходит выгрузкой, на чистой базе его нет, и
+-- упавший по внешнему ключу сид остановил бы migrate до загрузки выгрузки.
+-- Пропуск — не потеря: сид накатывается на каждом старте migrate. Сколько
+-- должно быть строк: ref.user_scope — 4.
+INSERT INTO ref.user_scope (login, object_id)
+SELECT v.login, v.object_id
+FROM (VALUES
     ('dispatcher1', 5773),
     ('tech1',       6),
     ('tech2',       6),
     ('tech2',       4068)
+) AS v(login, object_id)
+WHERE EXISTS (SELECT 1 FROM smvu.object_tree t WHERE t.object_id = v.object_id)
 
 ON CONFLICT DO NOTHING;

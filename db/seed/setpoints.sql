@@ -20,8 +20,11 @@
 -- беру более точные годовые из thermal_anomaly_rules.py, docstring
 -- r1_absolute(), это подтверждено self-check самого файла.
 --
--- Накатывать после 013_setpoints.sql. Роль/база — POSTGRES_USER/POSTGRES_DB
--- из deploy/.env, на стенде moskollektor/moskollektor:
+-- Накатывает контейнер migrate после миграций, заново на каждом прогоне
+-- (MOS-119): вставки идемпотентные, повтор строк не удваивает. Порядок —
+-- после 013_setpoints.sql. Руками — когда нужен один файл, а не весь migrate.
+-- Роль/база — POSTGRES_USER/POSTGRES_DB из deploy/.env, на стенде
+-- moskollektor/moskollektor:
 --   docker compose exec -T db psql -U moskollektor -d moskollektor -f /dev/stdin < db/seed/setpoints.sql
 
 INSERT INTO ref.setpoint
