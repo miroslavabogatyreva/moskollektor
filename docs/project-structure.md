@@ -141,7 +141,7 @@ moskollektor/
 │                        examples/orders/ — карточка заявки и строка списка,
 │                        по ним пишутся экран заявок и GET /api/orders
 ├── deploy/         15   стенд: docker-compose, nginx, сертификат, проверка TLS
-├── code/           55   прототипы и считалки: то, по чему пишется продукт
+├── code/           58   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
@@ -159,6 +159,10 @@ moskollektor/
 │   ├── check_seed_rbac.py    набор пар (роль, право) в git против
 │   │                          ref.role_permission стенда: расхождение — это 403
 │   │                          на методе, MOS-119
+│   ├── check_pg_version.py   минимум PostgreSQL 15 в install.md
+│   │                          и на базе (НФ-80)
+│   ├── check_no_auto_verdict.py  worker не пишет вердикты, в базе
+│   │                          нет вердиктов не от диспетчера (Ф-75)
 │   ├── load_weather.py       архив погоды из Open-Meteo в dataset/weather.csv
 │   ├── predictive_metrics.py методика метрик приёмки
 │   └── *.json                справочники из Регламента: нормативы, виды работ
