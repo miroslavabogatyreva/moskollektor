@@ -61,6 +61,7 @@ interface CurrentRisk {
   is_stale: boolean
   direction: Direction
   explanation_ru: string | null
+  computed_at: string // время расчёта текущего риска (US-06 сц. 4)
 }
 
 interface ObjectDetail {
@@ -246,7 +247,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
-          <code class="num">{data.smvu_key}</code> · <a href={`/map?section=${data.section_id}`}>на схеме</a>
+          <code class="num">{data.smvu_key}</code> ·{' '}
+          <a href={`/map?section=${data.section_id}`}>на схеме</a>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
@@ -383,13 +385,18 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                 названо в тикете): одно число обязано на экране называться одним
                 словом, иначе диспетчер читает две подписи как два разных факта —
                 ровно та беда, ради которой этот тикет и заведён. */}
+            {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
+                ними и есть «данные участка устарели». */}
+            <div style="color:var(--text-secondary)">
+              Расчёт от {new Date(risk.computed_at).toLocaleString('ru-RU')}
+            </div>
             <div style="color:var(--text-secondary)">
               Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
               и не последняя запись по этому участку
             </div>
             <div style="color:var(--text-secondary)">
               {data.last_reading_at
-                ? `Последняя запись этого участка — ${new Date(data.last_reading_at).toLocaleDateString('ru-RU')}: позже неё датчики участка не писали ничего`
+                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleDateString('ru-RU')}: позже неё датчики участка не писали ничего`
                 : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
             </div>
           </div>
