@@ -6,4 +6,6 @@ export interface AppUser {
   auth_source: 'local' | 'ldap'
   is_active: boolean
   roles: string[]
+  // хранит ли сервис хеш пароля; у учётки каталога false — пароль проверяет LDAP (US-24)
+  has_password: boolean
 }
