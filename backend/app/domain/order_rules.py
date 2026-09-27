@@ -33,6 +33,7 @@ v3 это `warning_expires_at` модели, на прежнем — as_of + hor
 """
 
 import asyncio
+import json
 import os
 import sys
 from datetime import datetime, timedelta
@@ -323,19 +324,49 @@ def заявки_по_предупреждениям(предупреждени�
 
 
 async def план_заявок(conn, предупреждения: list[dict], в_прогоне: set[int]) -> dict:
-    """Заявки, которых ещё нет: читается ДО записи прогноза.
+    """Фиксируем участки при первом открытии; повторы не читают новый рейтинг.
 
-    До записи, потому что участки плана publish.записать обязан положить в журнал
-    этого прогона (MOS-180): заявка ссылается на строку журнала, а мёртвая зона её
-    пропустила бы. Набор «уже заведено» здесь только сужает этот список — повтор
-    всё равно отсекает индекс uq_notif_forecast_key при вставке.
+    Снимок сохраняется до publish, чтобы после сбоя повторить тот же выбор.
+    ON CONFLICT сериализует конкурирующий первый выбор. Существующие заявки
+    старого worker запечатывают предупреждение без добавления новых участков.
     """
-    план, вне = заявки_по_предупреждениям(
-        предупреждения, в_прогоне, await _веса(conn), await _сколько_худших(conn))
-    уже = {r["source_key"] for r in await conn.fetch(
-        "SELECT source_key FROM maint.notification "
-        "WHERE source_system = $1 AND source_key = ANY($2::text[])",
-        ИСТОЧНИК, [з["ключ"] for з in план.values()])}
+    веса, сколько = await _веса(conn), await _сколько_худших(conn)
+    план, вне = {}, []
+    async with conn.transaction():
+        for п in sorted(предупреждения, key=lambda п: (п["pfx"], п["opened_at"])):
+            открыто = момент_файла(п["opened_at"])
+            сохранён = await conn.fetchval(
+                "SELECT plan FROM pred.warning_order_selection WHERE pfx=$1 AND opened_at=$2",
+                п["pfx"], открыто)
+            if сохранён is None:
+                # Migration 050 seals historical warnings; also catch orders made
+                # by an old worker between migration and deployment of this code.
+                было = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM maint.notification "
+                    "WHERE source_system=$1 AND split_part(source_key, ':', 1)='warn' "
+                    "AND split_part(source_key, ':', 2)=$2 AND warning_opened_at=$3)",
+                    ИСТОЧНИК, п["pfx"], открыто)
+                выбор, _ = заявки_по_предупреждениям([п], в_прогоне, веса, сколько)
+                if было:
+                    выбор = {}  # история не дополняется даже при числе меньше top
+                elif not выбор:
+                    вне.append(п["pfx"])
+                    continue  # нет доступных участков — можно повторить позже
+                await conn.execute(
+                    "INSERT INTO pred.warning_order_selection(pfx,opened_at,plan) "
+                    "VALUES($1,$2,$3::text::jsonb) ON CONFLICT(pfx,opened_at) DO NOTHING",
+                    п["pfx"], открыто, json.dumps(выбор, ensure_ascii=False))
+                сохранён = await conn.fetchval(
+                    "SELECT plan FROM pred.warning_order_selection WHERE pfx=$1 AND opened_at=$2",
+                    п["pfx"], открыто)
+            снимок = json.loads(сохранён) if isinstance(сохранён, str) else сохранён
+            if any(int(sid) not in в_прогоне for sid in снимок):
+                вне.append(п["pfx"])
+            план.update({int(sid): з for sid, з in снимок.items() if int(sid) in в_прогоне})
+        уже = {r["source_key"] for r in await conn.fetch(
+            "SELECT source_key FROM maint.notification "
+            "WHERE source_system=$1 AND source_key=ANY($2::text[])",
+            ИСТОЧНИК, [з["ключ"] for з in план.values()])}
     return {"участки": {sid: з for sid, з in план.items() if з["ключ"] not in уже},
             "уже": len(уже), "вне_прогона": вне}
 

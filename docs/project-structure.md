@@ -303,3 +303,14 @@ delivery/           check-all.sh — один прогон всех провер
 | как подключиться к серверу и забрать выгрузку | `docs/server.md` |
 | как работать над проектом | `CLAUDE.md` |
 | как писать документы | `docs/CLAUDE.md` |
+
+
+### MOS-184: фиксированный выбор участков предупреждения (27.09.2026)
+
+`db/migrations/050_warning_order_selection.sql` добавляет
+`pred.warning_order_selection(pfx, opened_at, plan)` и ставит лимит 3.
+`backend/app/domain/order_rules.py::план_заявок` сохраняет первый выбор участков
+до записи прогнозов и повторяет его после смены весов. Старые предупреждения
+с заявками не дополняются. Формат `score.json`, признаки, веса ML и горизонт 720 ч
+этой правкой не меняются. Проверка на отдельной PostgreSQL:
+`backend/tests/test_warning_selection.py`.
