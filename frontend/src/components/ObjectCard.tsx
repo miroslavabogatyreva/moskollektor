@@ -71,6 +71,14 @@ interface ObjectDetail {
   channels: Channel[]
   current_risk: CurrentRisk | null
   recent_forecasts: RecentForecast[]
+  // Узлы дерева диспетчера участка (MOS-101, 5.9). Опционально: бандл может
+  // доехать до стенда раньше API, и старый ответ этого поля не несёт.
+  dispatcher_objects?: {
+    node_id: number
+    node_name: string
+    collector_id: number
+    collector_name: string
+  }[]
 }
 
 interface Reading {
@@ -244,6 +252,13 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             </>
           )}
         </p>
+        {/* Имена, которые диспетчер знает наизусть, — section_id ему ничего не
+            говорит. По строке на узел: у 564 участков из 3 173 их несколько (5.9). */}
+        {data.dispatcher_objects?.map((d) => (
+          <p key={d.node_id} data-testid="dispatcher-object" style="color:var(--text-secondary)">
+            Объект диспетчера: {d.node_name} → {d.collector_name}
+          </p>
+        ))}
       </div>
 
       <section>

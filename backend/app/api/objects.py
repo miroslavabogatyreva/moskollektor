@@ -21,11 +21,56 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.schemas import ObjectChannelList, ObjectDetail, ObjectReading
-from app.auth.deps import require, проверить_участок
+from app.api.schemas import ObjectChannelList, ObjectDetail, ObjectReading, TreeCollector
+from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
+
+# Узлы дерева диспетчера и участки под ними (MOS-101, план 5.9). Принадлежность —
+# по активным каналам: участок относится к КАЖДОМУ узлу и коллектору, где у него
+# есть канал (у 564 участков из 3 173 узлов больше одного, у участка 1490 — два коллектора).
+# Ось схемы по-прежнему раскладывает участок по большинству каналов
+# (УЧАСТКИ_КОЛЛЕКТОРА в app.worker.run_v3) — дерево это правило не трогает,
+# иначе участок пропадал бы из узла, где у него меньшинство каналов.
+# Узлы без каналов на участках в дерево не попадают: на стенде таких 11 из 78 —
+# диспетчерские пункты и шкафы ОПС, 275 каналов которых не привязаны к пикету.
+УЗЛЫ_ДЕРЕВА = """
+SELECT p.object_id AS collector_id, p.name AS collector_name,
+       n.object_id, n.name, n.kind, count(*) AS channels,
+       array_agg(DISTINCT c.section_id ORDER BY c.section_id) AS section_ids
+  FROM smvu.channel c
+  JOIN smvu.object_tree n ON n.object_id = c.object_id
+  JOIN smvu.object_tree p ON p.object_id = n.parent_id AND p.level = 2
+ WHERE c.is_active AND c.section_id IS NOT NULL
+   AND ($1::int[] IS NULL OR c.section_id = ANY($1))
+ GROUP BY p.object_id, p.name, n.object_id, n.name, n.kind
+ ORDER BY p.object_id, n.name, n.object_id
+"""
+
+
+@router.get("/objects/tree", response_model=list[TreeCollector])
+async def get_tree(
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("objects.read")),
+):
+    """Дерево «коллектор → узел» для экрана карты (5.9, М-05). Стоит ВЫШЕ
+    /objects/{section_id}: иначе FastAPI сопоставил бы «tree» с целым section_id
+    и ответил 422. Область видимости — та же, что у GET /api/risks (MOS-107):
+    фильтр по участкам стоит в WHERE, поэтому узел без видимых участков и
+    коллектор без видимых узлов выпадают сами, и число каналов у узла считается
+    только по видимым участкам."""
+    участки = await видимые_участки(user, conn)
+    коллекторы: dict[int, dict] = {}
+    for r in await conn.fetch(УЗЛЫ_ДЕРЕВА, участки):
+        к = коллекторы.setdefault(
+            r["collector_id"],
+            {"object_id": r["collector_id"], "name": r["collector_name"], "nodes": []},
+        )
+        к["nodes"].append(
+            {k: r[k] for k in ("object_id", "name", "kind", "channels", "section_ids")}
+        )
+    return list(коллекторы.values())
 
 
 @router.get("/objects/{section_id}", response_model=ObjectDetail)
@@ -106,9 +151,23 @@ async def get_object(
         section_id,
     )
 
+    dispatcher_objects = await conn.fetch(
+        """
+        SELECT DISTINCT n.object_id AS node_id, n.name AS node_name,
+               p.object_id AS collector_id, p.name AS collector_name
+          FROM smvu.channel c
+          JOIN smvu.object_tree n ON n.object_id = c.object_id
+          JOIN smvu.object_tree p ON p.object_id = n.parent_id AND p.level = 2
+         WHERE c.section_id = $1 AND c.is_active
+         ORDER BY p.object_id, n.object_id
+        """,
+        section_id,
+    )
+
     return {
         **dict(passport),
         "channels": [dict(c) for c in channels],
+        "dispatcher_objects": [dict(d) for d in dispatcher_objects],
         "current_risk": dict(current_risk) if current_risk else None,
         "recent_forecasts": [dict(f) for f in recent_forecasts],
     }
@@ -230,3 +289,23 @@ async def list_object_channels(
         section_id, limit, offset,
     )
     return {"total": total, "items": [dict(r) for r in rows]}
+
+
+def _selfcheck():
+    """Порядок маршрутов: GET /api/objects/tree обязан попасть в get_tree, а не в
+    /objects/{section_id}. Переставь их — «tree» уйдёт в целочисленный section_id,
+    и стенд ответит 422 (так было до MOS-101). Без стенда и без базы: только
+    сопоставление маршрутов Starlette."""
+    from starlette.routing import Match
+
+    # Порядок, который решает, — внутри этого router: оба пути объявлены здесь.
+    scope = {"type": "http", "path": "/api/objects/tree", "method": "GET"}
+    первый = next(r for r in router.routes if r.matches(scope)[0] == Match.FULL)
+    assert первый.path == "/api/objects/tree", (
+        f"/api/objects/tree достался маршруту {первый.path} — /objects/tree должен стоять выше"
+    )
+    print("objects selfcheck ok: /api/objects/tree → get_tree")
+
+
+if __name__ == "__main__":
+    _selfcheck()
