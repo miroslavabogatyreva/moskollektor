@@ -20,9 +20,19 @@ function ожидаетсяКарточка(body: unknown): body is OrderDetail 
 
 // offset — М-06/М-16 (MOS-117): без него метод отдавал журнал заявок целиком,
 // и тот же потолок роста, что нашёлся у /api/forecasts, ждал и эту ручку.
-export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
-  const qs = offset ? `?offset=${offset}` : ''
-  const r = await apiFetch(`/api/orders${qs}`)
+// dueFrom/dueTo — период срока, московские даты ГГГГ-ММ-ДД, обе включительно
+// (US-18 сц. 2): пустая строка — граница не задана.
+export async function fetchOrders(
+  offset = 0,
+  dueFrom = '',
+  dueTo = '',
+): Promise<OrderListResponse> {
+  const p = new URLSearchParams()
+  if (offset) p.set('offset', String(offset))
+  if (dueFrom) p.set('due_from', dueFrom)
+  if (dueTo) p.set('due_to', dueTo)
+  const qs = p.toString()
+  const r = await apiFetch(`/api/orders${qs ? `?${qs}` : ''}`)
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const body: unknown = await r.json()
   if (!ожидаетсяСписок(body)) {
