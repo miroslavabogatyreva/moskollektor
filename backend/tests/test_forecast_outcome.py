@@ -104,9 +104,35 @@ def test_missing_forecast_is_404():
     assert e.value.status_code == 404
 
 
-def test_horizon_expired_counts_from_as_of():
+def test_horizon_expired_counts_from_issue_time():
     сейчас = datetime(2026, 9, 27, 12, tzinfo=timezone.utc)
-    as_of = сейчас - timedelta(hours=24)
-    assert routes.горизонт_истёк(as_of, 23, сейчас) is True
-    assert routes.горизонт_истёк(as_of, 24, сейчас) is False
-    assert routes.горизонт_истёк(as_of, 720, сейчас) is False
+    выдан = сейчас - timedelta(hours=24)
+    assert routes.горизонт_истёк(выдан, 23, сейчас) is True
+    assert routes.горизонт_истёк(выдан, 24, сейчас) is False
+    assert routes.горизонт_истёк(выдан, 720, сейчас) is False
+
+
+class Журнал:
+    """Страница журнала из одной строки: прогноз посчитан час назад на срезе
+    данных трёхмесячной давности — так на стенде, где край выгрузки 30.06.2026."""
+
+    def __init__(self, сейчас):
+        self.строка = {"forecast_id": 1, "section_id": 7, "direction": "channel",
+                       "horizon_h": 720, "probability": 0.5, "risk_rank": 1,
+                       "as_of": сейчас - timedelta(days=90),
+                       "computed_at": сейчас - timedelta(hours=1), "write_reason": "change"}
+
+    async def fetchval(self, sql, *args):
+        return 1
+
+    async def fetch(self, sql, *args):
+        return [self.строка] if "FROM pred.forecast f" in sql else []
+
+
+def test_horizon_counts_from_computed_at_not_data_slice():
+    # Горизонт — окно после выдачи прогноза. as_of — срез данных: на стенде это край
+    # архива, и от него 720 ч истекли у всех прогнозов, даже у посчитанных сегодня.
+    ответ = asyncio.run(routes.list_forecasts(
+        from_=None, to=None, section_id=None, limit=200, offset=0,
+        conn=Журнал(datetime.now(timezone.utc)), user=ДИСПЕТЧЕР))
+    assert ответ["items"][0]["horizon_expired"] is False
