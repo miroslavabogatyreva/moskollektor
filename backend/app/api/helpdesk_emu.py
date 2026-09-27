@@ -41,6 +41,7 @@ Python не гарантирует одну и ту же последовате�
 
 import hashlib
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -176,7 +177,27 @@ if __name__ == "__main__":
     бригады = {шаги_цикла(f"AF{n:010d}", завед, срок)[0][2] for n in range(20)}
     assert len(бригады) > 1, "все двадцать заявок достались одной бригаде — хеш не разводит номера"
 
+    # Ф-96: contracts/examples/orders/external_status.json — не выдуманный образец,
+    # а настоящий ответ. Ключи каждого тикета обязаны совпадать с полями модели
+    # Тикет — ни пятого поля из request (было раньше, поймала проверяющая), ни
+    # пропущенного поля ответа.
+    import json
+
+    образец = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/examples/orders/external_status.json")
+        .read_text("utf-8")
+    )
+    for т in образец["response"]["tickets"]:
+        assert set(т) == set(Тикет.model_fields), (
+            f"ключи тикета в образце {sorted(т)} не совпадают с полями модели "
+            f"{sorted(Тикет.model_fields)}"
+        )
+    assert set(образец["request"]) == {"notification_no", "reported_at", "due_at"}, (
+        "request образца должен быть тремя списками — так их шлёт order_status.адрес()"
+    )
+
     print(
         "selfcheck эмулятора хелпдеска ok: цикл монотонен, границы 30 мин / 4 ч / due_at "
-        "соблюдены, исполнитель стабилен на заявке, детерминизм по notification_no"
+        "соблюдены, исполнитель стабилен на заявке, детерминизм по notification_no, "
+        "образец Ф-96 совпадает с моделью ответа"
     )

@@ -23,10 +23,12 @@
 
 import asyncio
 import gzip
+import io
 import os
 import sys
 import threading
 import time
+from contextlib import redirect_stdout
 from pathlib import Path
 
 КОРЕНЬ = Path(__file__).resolve().parent.parent
@@ -77,21 +79,63 @@ async def проверить(сервер):
         assert await c.fetchval("SELECT count(*) FROM ext.weather_hourly") == 25
         assert (await weather_status(c, None))["stale"] is False, "повтор не обновил fetched_at"
 
-        # 4. Источник лёг: планировщик не падает, данные устаревают.
+        # 4. MOS-241: тик сразу после успеха — данные ещё свежие (< ПОГОДА_СВЕЖА_МИН),
+        # идти за новым часом не нужно. Планировщик зовёт тик раз в минуту, а не
+        # раз в час, и без этой проверки каждая минута слала бы лишний HTTP-запрос.
+        до = await c.fetchval("SELECT max(fetched_at) FROM ext.weather_hourly")
+        await scheduler.тик_погода()
+        после = await c.fetchval("SELECT max(fetched_at) FROM ext.weather_hourly")
+        assert после == до, "тик сразу после успеха тронул fetched_at — свежие данные не пропущены"
+
+        # 5. MOS-241: отказ не откладывает следующую попытку на час, а журнал не
+        # повторяет одну и ту же строку на каждую минуту простоя. Ломаем источник
+        # подменой функции забора (не самого HTTP-сервера — эмулятор ещё нужен ниже)
+        # на ДВА тика подряд, третий — источник снова жив.
+        await c.execute("UPDATE ext.weather_hourly SET fetched_at = now() - interval '2 hours'")
+        исходный_забор = scheduler.забрать_погоду
+
+        async def _сломанный_забор(*a, **kw):
+            raise RuntimeError("источник недоступен (симуляция MOS-241)")
+
+        буфер = io.StringIO()
+        with redirect_stdout(буфер):
+            scheduler.забрать_погоду = _сломанный_забор
+            try:
+                await scheduler.тик_погода()
+                assert (await weather_status(c, None))["stale"] is True, "отказ должен оставить stale"
+                await scheduler.тик_погода()  # второй отказ подряд — строки быть не должно
+            finally:
+                scheduler.забрать_погоду = исходный_забор
+            await scheduler.тик_погода()  # источник снова жив
+        строки = буфер.getvalue().splitlines()
+        недоступен = [с for с in строки if с.startswith("погода: источник недоступен")]
+        снова = [с for с in строки if с.startswith("погода: источник снова отвечает")]
+        assert len(недоступен) == 1, (
+            f"два отказа подряд напечатали {len(недоступен)} строк «недоступен», "
+            f"ждали одну (MOS-241):\n{строки}"
+        )
+        assert len(снова) == 1, f"восстановление напечатано {len(снова)} раз, ждали одно:\n{строки}"
+        assert (await weather_status(c, None))["stale"] is False, (
+            "повтор сразу после отказа не забрал данные — MOS-241 не работает"
+        )
+
+        # 6. Источник лёг по-настоящему (сам эмулятор выключен): планировщик
+        # не падает, данные устаревают.
         await c.execute("UPDATE ext.weather_hourly SET fetched_at = now() - interval '2 hours'")
         сервер.should_exit = True
         await asyncio.sleep(0.5)
         await scheduler.тик_погода()
         assert (await weather_status(c, None))["stale"] is True
 
-        # 5. Пустая таблица — stale, а не ошибка.
+        # 7. Пустая таблица — stale, а не ошибка.
         await c.execute("TRUNCATE ext.weather_hourly")
         ст = await weather_status(c, None)
         assert ст["stale"] is True and ст["fetched_at"] is None, ст
     finally:
         await c.close()
     print(f"погода ok: 25 ч до среза 02.06 00:30, час 00:00 = архив {','.join(архив[1:])}; "
-          "повтор без дублей; источник лёг — stale; пусто — stale")
+          "повтор без дублей; свежие данные не трогает; отказ не откладывает попытку на час "
+          "(MOS-241); источник лёг — stale; пусто — stale")
 
 
 def main():
