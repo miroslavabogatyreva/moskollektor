@@ -103,7 +103,8 @@ interface Reading {
 
 export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
-  const [notFound, setNotFound] = useState(false)
+  // 404 — участка нет; 403 — участок вне района или комплекса пользователя (US-16 сц. 3).
+  const [notFound, setNotFound] = useState<404 | 403 | false>(false)
   const [error, setError] = useState<string | null>(null)
 
   // Пустая строка = "дефолт ещё не посчитан от last_reading_at". Даты можно
@@ -139,7 +140,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
         // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
         if (r.status === 404 || r.status === 403) {
-          if (!отменено) setNotFound(true)
+          if (!отменено) setNotFound(r.status)
           return null
         }
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
@@ -229,8 +230,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   if (notFound) {
     return (
       <main class="p-5">
-        <p style="color:var(--text-muted)">
-          Участок {sectionId} не найден или вне вашей области видимости.
+        <p data-testid="out-of-scope" style="color:var(--text-muted)">
+          {notFound === 403
+            ? `Участок ${sectionId} вне вашего района или комплекса — его карточку откроет диспетчер ОДС или диспетчер того района.`
+            : `Участок ${sectionId} не найден.`}
         </p>
       </main>
     )

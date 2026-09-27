@@ -1,11 +1,13 @@
-"""Ф-75 наполовину: worker сам не пишет вердикты в pred.feedback.
+"""Ф-75 наполовину: worker сам не пишет вердикты в pred.feedback и исходы
+в pred.forecast_outcome (US-10, миграция 056).
 
 Строка Ф-75 (docs/acceptance-test.md): «Сервис не должен закрывать инцидент
 сам: вердикт по прогнозу ставит человек». Проверка стоит наполовину: она не
 доказывает, что человек вердикт поставил, — она доказывает, что его не поставил
 автомат. Две половины:
 
-  А (код) — worker не содержит INSERT/UPDATE по pred.feedback (и записи через
+  А (код) — worker не содержит INSERT/UPDATE по pred.feedback или
+  pred.forecast_outcome (и записи через
   copy_records_to_table). Если содержит, кто-то вкатил автозакрытие и строка
   Ф-75 рушится. Ищем по всему тексту файла, включая подкаталоги; строки-
   комментарии перед поиском выкидываем, чтобы цитата в комментарии не считалась
@@ -37,10 +39,10 @@ WORKER = ROOT / "backend" / "app" / "worker"
 # Два вида записи в таблицу вердиктов. Оба без учёта регистра, DOTALL — вдруг
 # SQL разложен по строкам или отформатирован.
 ПИШЕТ_В_ФИДБЕК = re.compile(
-    r'(INSERT\s+INTO|UPDATE)\s+pred\."?feedback"?', re.IGNORECASE | re.DOTALL
+    r'(INSERT\s+INTO|UPDATE)\s+pred\."?(feedback|forecast_outcome)"?', re.IGNORECASE | re.DOTALL
 )
 ПИШЕТ_ЧЕРЕЗ_COPY = re.compile(
-    r'copy_records_to_table\(\s*["\']feedback["\']', re.IGNORECASE | re.DOTALL
+    r'copy_records_to_table\(\s*["\'](feedback|forecast_outcome)["\']', re.IGNORECASE | re.DOTALL
 )
 
 
@@ -80,10 +82,10 @@ def проверка_а(каталог: Path) -> tuple[bool, str]:
                 фрагмент = совпадение.group(0).replace("\n", " ")
                 return (
                     False,
-                    f"СБОЙ: worker пишет pred.feedback — {имя_файла(файл)}:{номер}: "
+                    f"СБОЙ: worker пишет вердикт или исход — {имя_файла(файл)}:{номер}: "
                     f"{фрагмент}",
                 )
-    return True, f"OK: worker не пишет pred.feedback, файлов просмотрено {n}"
+    return True, f"OK: worker не пишет pred.feedback и pred.forecast_outcome, файлов просмотрено {n}"
 
 
 def _база(запрос: str):
@@ -129,7 +131,7 @@ def проверка_б() -> tuple[bool, str]:
     return True, f"OK: pred.feedback — строк {всего}, без роли диспетчера {без_роли}"
 
 
-# Семь образцов проверки А: (имя, путь файла относительно временного каталога,
+# Восемь образцов проверки А: (имя, путь файла относительно временного каталога,
 # содержимое, ожидаемый ответ чисто?, маркер, который обязан быть в сообщении).
 # Маркер отличает находку от N=0: «пишет» говорит, что нашли именно запись.
 СЛУЧАИ = [
@@ -148,6 +150,13 @@ def проверка_б() -> tuple[bool, str]:
         "OK",
     ),
     ("пустой каталог", None, None, False, "N=0"),
+    (
+        "исход прогноза пишет автомат (US-10)",
+        "outcome.py",
+        'cur.execute("INSERT INTO pred.forecast_outcome VALUES (1)")',
+        False,
+        "пишет",
+    ),
     (
         "INSERT, разложенный по двум строкам",
         "multi.py",
@@ -180,7 +189,7 @@ def проверка_б() -> tuple[bool, str]:
 
 
 def selftest() -> int:
-    """Семь образцов: находки, чистые файлы, пустой каталог, подкаталог."""
+    """Восемь образцов: находки, чистые файлы, пустой каталог, подкаталог."""
     всего_ошибок = 0
     for имя, путь, содержимое, ждём_чисто, маркер in СЛУЧАИ:
         with tempfile.TemporaryDirectory(prefix="f75-") as врем:
@@ -203,7 +212,7 @@ def selftest() -> int:
     if всего_ошибок:
         print(f"SELFTEST СБОЙ: провалено проверок {всего_ошибок}")
         return 1
-    print("SELFTEST OK: семь образцов дали семь ожидаемых ответов")
+    print("SELFTEST OK: восемь образцов дали восемь ожидаемых ответов")
     return 0
 
 
