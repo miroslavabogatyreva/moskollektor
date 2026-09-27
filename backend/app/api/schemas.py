@@ -175,6 +175,14 @@ class DispatcherObject(BaseModel):
     collector_name: str
 
 
+class OpenPermit(BaseModel):
+    id: int
+    number: str
+    work_type_name: str
+    valid_from: IsoDatetime
+    valid_to: IsoDatetime
+
+
 class ObjectDetail(BaseModel):
     section_id: int
     smvu_key: str
@@ -186,6 +194,8 @@ class ObjectDetail(BaseModel):
     # Узлы дерева диспетчера, где у участка есть активный канал (MOS-101, 5.9):
     # у 564 участков из 3 173 их больше одного, поэтому список, а не поле.
     dispatcher_objects: list[DispatcherObject]
+    # Действующие наряды-допуски (US-13 сц. 1): пусто — участок не в работах.
+    open_permits: list[OpenPermit] = []
 
 
 class TreeNode(BaseModel):
