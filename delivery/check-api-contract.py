@@ -38,7 +38,7 @@ text/event-stream, а не по openapi: /api/alerts/stream объявлен т�
 application/json. Тело потока не кончается, читать его — повесить check-all,
 поэтому у потока проверяем только п. 1, код 200 и журнал, а в итоге называем
 его «не покрыт». Эмуляторы `/emu/…` тоже не зовём: наружу nginx их не отдаёт,
-их контракт проверяет code/check_weather.py (MOS-239).
+их контракт проверяют code/check_weather.py и code/check_order_status.py (MOS-239).
 
 Запуск:
     BASE_URL=https://135.106.216.101 CURL_OPTS=-k .venv/bin/python delivery/check-api-contract.py
@@ -69,7 +69,7 @@ _ctx = ssl._create_unverified_context() if "-k" in os.environ.get("CURL_OPTS", "
 # не отдаёт — по BASE_URL на /emu/… приходит 200 с HTML фронта. Worker зовёт их внутри
 # сети, на http://api:8000. Пропускаем явным префиксом, а не списком из nginx.conf:
 # любой другой непроксированный путь обязан падать здесь громко. Контракт эмулятора
-# погоды проверяет code/check_weather.py (строка Ф-85 в check-all).
+# погоды проверяет code/check_weather.py (Ф-85), хелпдеска — code/check_order_status.py (Ф-87).
 ЭМУЛЯТОРЫ = "/emu/"
 
 
@@ -391,7 +391,7 @@ def main():
           f"пустой результат проверен у {всего - len(без_фильтра) - len(потоки)}, фильтров нет у {len(без_фильтра)}")
     if эмуляторы:
         print(f"ВНИМАНИЕ: не опубликованы наружу, пропущены ({len(эмуляторы)}): {', '.join(эмуляторы)}"
-              " — контракт проверяет check_weather.py")
+              " — контракт проверяют check_weather.py и check_order_status.py")
     if потоки:
         print(f"ВНИМАНИЕ: тело не проверено у SSE-потоков ({len(потоки)}): {', '.join(потоки)} — только отказ, 200 и журнал")
     for с in сбои:
