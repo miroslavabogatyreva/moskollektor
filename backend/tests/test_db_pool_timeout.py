@@ -24,3 +24,22 @@ def test_pool_has_statement_and_command_timeout(monkeypatch):
 
     assert seen["command_timeout"] == 60
     assert seen["server_settings"] == {"statement_timeout": "60s"}
+
+
+def test_audit_pool_has_the_same_timeouts(monkeypatch):
+    # Пул журнала действий (задача 1.4): middleware ждёт INSERT журнала, прежде чем
+    # отдать ответ, поэтому без потолка зависшая запись повесила бы ответ API.
+    seen = {}
+
+    async def fake_create_pool(dsn, **kw):
+        seen.update(kw)
+        return object()
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x@127.0.0.1/x")
+    monkeypatch.setattr(asyncpg, "create_pool", fake_create_pool)
+    monkeypatch.setattr(db, "_audit_pool", None)
+    asyncio.run(db.get_audit_pool())
+
+    assert seen["command_timeout"] == 60
+    assert seen["server_settings"] == {"statement_timeout": "60s"}
+    assert seen["max_size"] == 2

@@ -581,7 +581,7 @@ fail2ban-regex systemd-journal /etc/fail2ban/filter.d/sshd.conf \
 «лицензии: сборка»:
 
 ```
-DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 sh deploy/check-db-access.sh
+DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 API_CONTAINER=moskollektor-api-1 sh deploy/check-db-access.sh
 ```
 
 Ждём `OK 127.0.0.1 в контейнере: неверный пароль отклонён`, `OK пароль базы
@@ -589,8 +589,8 @@ DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 sh deploy/
 `::1` на стенде должна быть `OK`: там в контейнере есть IPv6, а в облачной
 песочнице, где проверку писали, его нет, и там она печатает `ПРОПУСК`.
 
-**`AUTH_SECRET` на стенде проверить руками один раз:** `docker exec moskollektor-api-1
-sh -c 'printf %s "$AUTH_SECRET" | wc -c'` должен ответить 64. Если в `deploy/.env`
+**`AUTH_SECRET` проверяет та же команда:** с `API_CONTAINER` она печатает
+`OK AUTH_SECRET в контейнере: знаков 64, не заглушка`. Если в `deploy/.env`
 стенда осталась заглушка `СМЕНИ-МЕНЯ`, куки входа подпишет любой, кто читал git:
 заменить на `openssl rand -hex 32` и пересоздать `api` (`docker compose up -d api`),
 все сессии при этом разлогинятся.
@@ -610,15 +610,18 @@ sh -c 'printf %s "$AUTH_SECRET" | wc -c'` должен ответить 64. Ес
 
 ```
 DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 sh deploy/check-backup.sh
-ssh root@135.106.216.101 'cd /srv/moskollektor/deploy && docker compose exec backup sh /backup.sh --drill'
 ssh root@135.106.216.101 'df -h /var/lib/docker'
+ssh root@135.106.216.101 'cd /srv/moskollektor/deploy && docker compose --profile app stop worker emulator-smvu && docker compose exec -T backup sh /backup.sh --drill; docker compose --profile app start worker emulator-smvu'
 ```
 
 Первая проверяет, что архив журнала идёт. Про журнал копий она будет красной
-до первой ночной копии — это правильно. Вторая — учения восстановления: время
-в секундах ляжет строкой в журнал копий, это и есть замер НФ-39. Учениям нужно
-свободного места столько же, сколько весит база, около 55 ГБ; третья команда
-показывает, есть ли оно.
+до первой ночной копии — это правильно. Вторая — сколько свободно на диске:
+учениям нужно столько же, сколько весит база, плюс 10 %, около 61 ГБ, и без
+этого числа третью команду не запускать. Не хватает — учения идут на отдельный
+том, `docs/restore.md`, «Место на диске». Третья — сами учения: останавливает
+`worker` и `emulator-smvu`, иначе сверка разойдётся на строках, записанных
+по ходу, и запускает их обратно, даже если учения упали (`;`, а не `&&`). Время
+в секундах ляжет строкой в журнал копий, это и есть замер НФ-39.
 
 ## Демо-стенд рядом с основным (задача 1.10)
 
@@ -628,5 +631,8 @@ ssh root@135.106.216.101 'df -h /var/lib/docker'
 только по паролю, сертификат Let's Encrypt на `135-106-216-101.sslip.io`
 в `deploy/nginx/certs-demo`. Порт 80 для проверки Let's Encrypt держит основной
 nginx: у него `location /.well-known/acme-challenge/` смотрит в `deploy/nginx/acme`.
+Всё остальное с http nginx уводит на https с портом из `HTTPS_PORT`
+(шаблон `deploy/nginx/templates/https-redirect.conf.template`): основной — на 443,
+демо — на 8443.
 Порядок подъёма и проверка — `deploy/README.md`, раздел «Демо-стенд». Места демо
 занимает столько же, сколько основная база: 55 ГБ.

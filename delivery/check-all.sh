@@ -963,7 +963,7 @@ fi
 if ! command -v docker >/dev/null 2>&1; then
   skip_msg "—" "доступ к базе — нет docker"
 else
-  run "—"           "доступ к базе: пароль и pg_hba" env DB_CONTAINER="${DB_CONTAINER:-}" sh deploy/check-db-access.sh
+  run "—"           "доступ к базе: пароль и pg_hba" env DB_CONTAINER="${DB_CONTAINER:-}" API_CONTAINER="${API_CONTAINER:-}" sh deploy/check-db-access.sh
   [ -z "${DB_CONTAINER:-}" ] && echo "        только образец .env: база стенда — DB_CONTAINER=moskollektor-db-1 с DOCKER_HOST=ssh://root@СЕРВЕР"
 fi
 

@@ -444,7 +444,9 @@ sh check-tls.sh ::1       > ../docs/protocol-tls-ipv6.md
 ```
 DB_CONTAINER=moskollektor-db-1 sh check-backup.sh     # копии идут?
 docker compose exec backup sh /backup.sh              # копия сейчас
-docker compose exec backup sh /backup.sh --drill      # учения: восстановить рядом и сверить
+docker compose --profile app stop worker emulator-smvu    # учения: сначала остановить писателей,
+docker compose exec backup sh /backup.sh --drill           # восстановить рядом и сверить,
+docker compose --profile app start worker emulator-smvu   # вернуть писателей
 tail /var/lib/docker/volumes/moskollektor_backups/_data/backup.log   # журнал копий
 ```
 

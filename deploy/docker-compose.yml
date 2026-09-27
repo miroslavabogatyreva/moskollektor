@@ -50,9 +50,9 @@ services:
     # Архив журнала (задача 1.18, НФ-39): каждый заполненный сегмент WAL база
     # сама сжимает и кладёт в том backups, а archive_timeout выгоняет сегмент
     # не реже раза в 15 минут — отсюда потеря не больше 15 минут при норме в час.
-    # Копирование через .tmp и mv: оборванная запись не оставит битый файл
-    # с правильным именем, а test ! -f не даст перезаписать уже лежащий.
-    # Копии кластера снимает служба backup ниже (deploy/backup.sh).
+    # Сегмент кладёт deploy/archive-wal.sh: через .tmp, sync и mv, повтор того же
+    # сегмента — успех, чужой сегмент с тем же именем — ошибка (разбор в самом
+    # скрипте). Копии кластера снимает служба backup ниже (deploy/backup.sh).
     command:
       - postgres
       - -c
@@ -62,7 +62,7 @@ services:
       - -c
       - archive_timeout=900
       - -c
-      - archive_command=f=/backups/wal/%f.zst; test ! -f $$f && zstd -q -f -o $$f.tmp %p && mv $$f.tmp $$f
+      - archive_command=sh /archive-wal.sh %p %f
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -73,6 +73,7 @@ services:
       TZ: ${TZ}
     volumes:
       - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./archive-wal.sh:/archive-wal.sh:ro
       # В PostgreSQL 18 каталог данных переехал: PGDATA теперь
       # /var/lib/postgresql/18/docker, а VOLUME объявлен на /var/lib/postgresql.
       # Смонтировать том на .../data, как делали до 17-й ветки, — значит отдать
@@ -122,6 +123,8 @@ services:
 
   nginx:
     image: nginx:1.31-alpine
+    environment:
+      HTTPS_PORT: ${HTTPS_PORT:-443}
     ports:
       # Порты и сертификат — переменными ради демо-стенда (задача 1.10): он
       # поднимается вторым проектом compose на 8080/8443 со своим сертификатом.
@@ -133,6 +136,9 @@ services:
       # Проверочные файлы Let's Encrypt для сертификата демо-стенда
       # (deploy/demo-cert.sh): удостоверяющий центр читает их по порту 80.
       - ./nginx/acme:/var/www/acme:ro
+      # Шаблон редиректа с http на https: образ nginx подставляет HTTPS_PORT при
+      # старте и кладёт готовый файл в /etc/nginx/conf.d (задача 1.10).
+      - ./nginx/templates:/etc/nginx/templates:ro
       # Заглушка «Стенд поднят» (в git) и собранный фронт (кладёт deploy.sh,
       # в git его нет) — разные каталоги, задача 1.11. nginx отдаёт app,
       # а заглушку — только пока app пуст.
