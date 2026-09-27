@@ -396,7 +396,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
             </div>
             <div style="color:var(--text-secondary)">
               {data.last_reading_at
-                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleDateString('ru-RU')}: позже неё датчики участка не писали ничего`
+                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleString('ru-RU')}: позже неё датчики участка не писали ничего`
                 : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
             </div>
           </div>
