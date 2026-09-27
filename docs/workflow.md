@@ -34,6 +34,11 @@
 Документы `.md` и данные не трогает: в `docs/` вёрстка ручная, а
 `frontend/public/data/sections.json` на 220 КБ prettier только раздует.
 
+В облачной сессии (claude.ai/code) ни `.venv`, ни `frontend/node_modules` нет, и без
+них хук молча ничего не делает. Поэтому на старте облачной сессии
+`.claude/hooks/cloud-setup.sh` ставит `ruff==0.16.8`, `backend/requirements*.txt`
+и `npm ci`. На Маке он выходит сразу: там не задана `CLAUDE_CODE_REMOTE`.
+
 **Старый Python хук пропускает нарочно.** Мы писали код с ручным выравниванием: ключ
 на одной строке, русское объяснение под ним с отступом. Ruff это схлопывает — в
 `code/check_schema.py` строка `"geo.geo_object.smvu_id":` и её объяснение стали бы
