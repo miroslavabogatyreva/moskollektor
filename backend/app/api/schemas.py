@@ -272,6 +272,26 @@ class ObjectChannelList(BaseModel):
     items: list[ObjectChannelStat]
 
 
+class ChannelEpisodeChannel(BaseModel):
+    channel_id: int
+    name: str
+    sensor_kind: str | None
+    system_kind: str | None
+
+
+class ChannelEpisode(BaseModel):
+    started_at: IsoDatetime
+    ended_at: IsoDatetime | None
+    duration_h: float | None
+    fault_value: str
+
+
+class ChannelEpisodeList(BaseModel):
+    channel: ChannelEpisodeChannel
+    total: int
+    items: list[ChannelEpisode]
+
+
 class OrderListItem(BaseModel):
     id: int
     object_name: str
