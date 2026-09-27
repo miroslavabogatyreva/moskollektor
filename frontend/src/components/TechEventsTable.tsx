@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { apiFetch } from '../lib/api'
-import { errorMessage } from '../lib/format'
+import { errorMessage, formatDateTime } from '../lib/format'
 import { usePoll, свежо } from '../lib/poll'
 
 /* Журнал технологических событий участка — план 5.7 (MOS-54), приёмка Ф-89,
@@ -12,7 +12,11 @@ import { usePoll, свежо } from '../lib/poll'
    Пустые даты — окно по умолчанию: последние сутки выгрузки, его выбирает
    сервер от края данных. Отбор применяется кнопкой «Применить»: каждый запрос
    идёт ~0,1–1 с и пишет строку в журнал действий. Автообновление — от общего
-   опроса раз в минуту (poll.ts, НФ-89). */
+   опроса раз в минуту (poll.ts, НФ-89).
+
+   Два места (Ф-89): карточка участка передаёт sectionId и типы датчиков из
+   своих каналов, общий журнал /tech-events (TechEventsScreen ниже) — без
+   участка, по всему парку; там «Объект» и «Тип датчика» вводятся текстом. */
 
 interface TechEvent {
   journal_id: number
@@ -56,12 +60,20 @@ const ПУСТО: Отбор = {
 const inputStyle =
   'background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)'
 
+export function TechEventsScreen(_props: Record<string, unknown>) {
+  return (
+    <main class="p-5 flex flex-col gap-4">
+      <TechEventsTable />
+    </main>
+  )
+}
+
 export function TechEventsTable({
   sectionId,
   sensorKinds,
 }: {
-  sectionId: number
-  sensorKinds: string[]
+  sectionId?: number
+  sensorKinds?: string[]
 }) {
   const [черновик, setЧерновик] = useState<Отбор>(ПУСТО)
   const [отбор, setОтбор] = useState<Отбор>(ПУСТО)
@@ -84,12 +96,12 @@ export function TechEventsTable({
   useEffect(() => {
     const ac = new AbortController()
     const q = new URLSearchParams({
-      section_id: String(sectionId),
       sort: sort.key,
       order: sort.dir,
       limit: String(PAGE_SIZE),
       offset: String(offset),
     })
+    if (sectionId != null) q.set('section_id', String(sectionId))
     for (const [k, v] of Object.entries(отбор)) if (v.trim()) q.set(k, v.trim())
     apiFetch(`/api/tech-events?${q}`, { signal: ac.signal })
       .then(async (r) => {
@@ -106,7 +118,10 @@ export function TechEventsTable({
         свежо()
       })
       .catch((e) => {
-        if (e?.name !== 'AbortError') setError(errorMessage(e))
+        if (e?.name === 'AbortError') return
+        // Строки прошлого окна под ошибкой читались бы как ответ на новое.
+        setItems(null)
+        setError(errorMessage(e))
       })
     return () => ac.abort()
   }, [sectionId, отбор, sort, offset, тикТаблицы])
@@ -114,8 +129,12 @@ export function TechEventsTable({
   const поле = (k: keyof Отбор) => (e: Event) =>
     setЧерновик((d) => ({ ...d, [k]: (e.target as HTMLInputElement).value }))
 
+  // Сервер принимает from > to и честно отвечает «пусто» — не пускаем такой отбор.
+  const датыНаоборот = !!черновик.from && !!черновик.to && черновик.from > черновик.to
+
   function применить(e: Event) {
     e.preventDefault()
+    if (датыНаоборот) return
     setОтбор(черновик)
     setOffset(0)
   }
@@ -170,19 +189,30 @@ export function TechEventsTable({
         </label>
         <label class="flex flex-col gap-1">
           Тип датчика
-          <select
-            value={черновик.sensor_kind}
-            onChange={поле('sensor_kind')}
-            class="px-2 py-1 rounded text-sm"
-            style={inputStyle}
-          >
-            <option value="">Все</option>
-            {sensorKinds.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
+          {sensorKinds ? (
+            <select
+              value={черновик.sensor_kind}
+              onChange={поле('sensor_kind')}
+              class="px-2 py-1 rounded text-sm"
+              style={inputStyle}
+            >
+              <option value="">Все</option>
+              {sensorKinds.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={черновик.sensor_kind}
+              onInput={поле('sensor_kind')}
+              placeholder="точно, например «Датчик дыма»"
+              class="px-2 py-1 rounded text-sm"
+              style={inputStyle}
+            />
+          )}
         </label>
         <label class="flex flex-col gap-1">
           Событие датчика
@@ -208,7 +238,12 @@ export function TechEventsTable({
             <option value="Норма">Норма</option>
           </select>
         </label>
-        <button type="submit" class="px-3 py-1 rounded text-sm" style={inputStyle}>
+        <button
+          type="submit"
+          disabled={датыНаоборот}
+          class="px-3 py-1 rounded text-sm disabled:opacity-50"
+          style={inputStyle}
+        >
           Применить
         </button>
         <label class="flex items-center gap-1.5">
@@ -220,6 +255,11 @@ export function TechEventsTable({
           Автообновление
         </label>
       </form>
+      {датыНаоборот && (
+        <p class="text-xs" style="color:var(--state-warning)">
+          Дата начала позже даты конца.
+        </p>
+      )}
       {!отбор.from && !отбор.to && (
         <p class="text-xs" style="color:var(--text-muted)">
           Без дат — последние сутки выгрузки; окно не длиннее 31 суток.
@@ -260,7 +300,7 @@ export function TechEventsTable({
         <tbody>
           {items?.map((e) => (
             <tr key={e.journal_id} style="border-bottom:1px solid var(--border-subtle)">
-              <td class="px-2 py-2 num">{new Date(e.read_time).toLocaleString('ru-RU')}</td>
+              <td class="px-2 py-2 num">{formatDateTime(e.read_time)}</td>
               <td class="px-2 py-2">{e.object ?? '—'}</td>
               <td class="px-2 py-2">{e.sensor_kind ?? '—'}</td>
               <td class="px-2 py-2">{e.value_text ?? '—'}</td>
@@ -275,7 +315,9 @@ export function TechEventsTable({
         </tbody>
       </table>
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
-      {items?.length === 0 && <p style="color:var(--text-muted)">Событий за период нет.</p>}
+      {!error && items?.length === 0 && (
+        <p style="color:var(--text-muted)">Событий за период нет.</p>
+      )}
       {items && total > PAGE_SIZE && (
         <div class="flex items-center gap-3 text-sm" style="color:var(--text-secondary)">
           <button
