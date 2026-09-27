@@ -17,6 +17,7 @@ from app.api.geo import router as geo_router
 from app.api.helpdesk_emu import emu_router as helpdesk_emu_router
 from app.api.ingest import router as ingest_router
 from app.api.notifications import router as notifications_router
+from app.api.permits import router as permits_router
 from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
@@ -40,6 +41,7 @@ app.include_router(sources_router)
 app.include_router(geo_router)
 app.include_router(ingest_router)
 app.include_router(notifications_router)
+app.include_router(permits_router)
 app.include_router(tech_events_router)
 app.include_router(weather_router)
 app.include_router(emu_router)

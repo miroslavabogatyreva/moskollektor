@@ -4,7 +4,7 @@
 расчёт пишет соседняя сессия, до первого прогона строк в pred.forecast
 и pred.forecast_current нет вовсе, и это не повод отвечать ошибкой.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,6 +16,9 @@ from app.api.schemas import (
     ForecastDecision,
     ForecastDetail,
     ForecastList,
+    ForecastOutcome,
+    OutcomeIn,
+    OutcomeSummary,
     RiskItem,
 )
 from app.auth.deps import require, видимые_участки, проверить_участок
@@ -79,7 +82,7 @@ async def list_risks(
 @router.get("/data-status", response_model=DataStatus)
 async def data_status(
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("risks.read")),
+    user=Depends(require("risks.read")),
 ):
     """Состояние данных, на которых стоит текущий прогноз (MOS-148, М-04, М-15).
 
@@ -124,6 +127,13 @@ async def data_status(
     и сверить их можно вычитанием, а не сравнением двух методик.
 
     Поле мёртвое до MOS-129: на экране его пока никто не показывает.
+
+    `sections_scored` и `sections_total` — «посчитано N из M» на дашборде (US-01
+    сц. 4): N — участков, у которых текущий прогноз свежий (`is_stale` = false),
+    M — всех участков в области видимости пользователя. Устаревший прогноз
+    и участок без прогноза посчитанными не считаются: по ним диспетчер видит
+    прошлое число или ничего. Оба считаются по той же подрезке роли, что
+    и `GET /api/risks`, иначе технику написали бы «из 3 173».
     """
     # Край в запросе встречается РОВНО ОДИН РАЗ — отсюда вложенный SELECT.
     # Посчитай я отставание вторым обращением к КРАЙ_ДАННЫХ, в одном методе
@@ -145,13 +155,38 @@ async def data_status(
           ) t
         """
     )
-    return dict(row)
+    участки = await видимые_участки(user, conn)
+    счёт = await conn.fetchrow(
+        """
+        SELECT (SELECT count(*) FROM pred.forecast_current
+                 WHERE NOT is_stale
+                   AND ($1::int[] IS NULL OR section_id = ANY($1))) AS sections_scored,
+               (SELECT count(*) FROM ref.object_xref
+                 WHERE $1::int[] IS NULL OR section_id = ANY($1)) AS sections_total
+        """,
+        участки,
+    )
+    return {**dict(row), **dict(счёт)}
+
+
+# Отбор журнала прогнозов: период, область видимости, участок. Один текст на журнал
+# (GET /api/forecasts — счёт и страница) и сводку исходов (GET /api/forecast-outcomes):
+# сумма пяти чисел сводки обязана равняться total журнала (US-20 сц. 1).
+# section_id — отбор по участку на сервере (US-11 сц. 1): раньше участок отбирал
+# браузер в пределах страницы, и total считал весь журнал.
+ОТБОР_ЖУРНАЛА = """
+        WHERE ($1::date IS NULL OR r.started_at >= $1)
+          AND ($2::timestamptz IS NULL OR r.started_at < $2)
+          AND ($3::int[] IS NULL OR f.section_id = ANY($3))
+          AND ($4::int IS NULL OR f.section_id = $4)
+"""
 
 
 @router.get("/forecasts", response_model=ForecastList)
 async def list_forecasts(
     from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
     to: date | None = Query(None, description="дата конца периода, включительно — весь день целиком"),
+    section_id: int | None = Query(None, description="участок, точное совпадение (US-11)"),
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -197,11 +232,7 @@ async def list_forecasts(
     между двумя местами так же, как разошлась когда-то граница `to`.
     """
     to_exclusive = to + timedelta(days=1) if to else None
-    where = """
-        WHERE ($1::date IS NULL OR r.started_at >= $1)
-          AND ($2::timestamptz IS NULL OR r.started_at < $2)
-          AND ($3::int[] IS NULL OR f.section_id = ANY($3))
-    """
+    where = ОТБОР_ЖУРНАЛА
     участки = await видимые_участки(user, conn)
     total = await conn.fetchval(
         f"""
@@ -210,7 +241,7 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         """,
-        from_, to_exclusive, участки,
+        from_, to_exclusive, участки, section_id,
     )
     rows = await conn.fetch(
         f"""
@@ -221,10 +252,25 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         ORDER BY r.started_at DESC, f.risk_rank, f.forecast_id
-        LIMIT $4 OFFSET $5
+        LIMIT $5 OFFSET $6
         """,
-        from_, to_exclusive, участки, limit, offset,
+        from_, to_exclusive, участки, section_id, limit, offset,
     )
+    # Последнее решение по каждой строке страницы (US-08, US-09 сц. 4): журнал
+    # показывает, что прогноз разобран, кем и когда, и отметку о проверке.
+    # Один запрос на страницу, а не на строку: DISTINCT ON по индексу
+    # feedback_forecast_idx (forecast_id, decided_at DESC).
+    решения = {
+        r["forecast_id"]: dict(r)
+        for r in await conn.fetch(
+            РЕШЕНИЕ_СПИСКОМ, [r["forecast_id"] for r in rows])
+    }
+    # Исход (US-10 сц. 4, 5) — тем же способом, одним запросом на страницу.
+    исходы = {
+        r["forecast_id"]: dict(r)
+        for r in await conn.fetch(ИСХОД_СПИСКОМ, [r["forecast_id"] for r in rows])
+    }
+    сейчас = datetime.now(timezone.utc)
     return {
         "total": total,
         "items": [
@@ -238,6 +284,9 @@ async def list_forecasts(
                 "as_of": r["as_of"],
                 "computed_at": r["computed_at"],
                 "write_reason": r["write_reason"],
+                "decision": решения.get(r["forecast_id"]),
+                "outcome": исходы.get(r["forecast_id"]),
+                "horizon_expired": горизонт_истёк(r["computed_at"], r["horizon_h"], сейчас),
             }
             for r in rows
         ],
@@ -277,7 +326,51 @@ async def get_forecast(
     if row is None:
         raise HTTPException(404, "прогноз не найден")
     решение = await conn.fetchrow(ПОСЛЕДНЕЕ_РЕШЕНИЕ, forecast_id)
-    return {**dict(row), "decision": dict(решение) if решение else None}
+    исход = await conn.fetchrow(ПОСЛЕДНИЙ_ИСХОД, forecast_id)
+    return {
+        **dict(row),
+        "decision": dict(решение) if решение else None,
+        "outcome": dict(исход) if исход else None,
+        "horizon_expired": горизонт_истёк(row["computed_at"], row["horizon_h"]),
+    }
+
+
+def горизонт_истёк(выдан: datetime, horizon_h: int, сейчас: datetime | None = None) -> bool:
+    """Окно прогноза [выдан, выдан + horizon_h] позади (US-10 сц. 4). Истёкший горизонт
+    исхода не ставит: без отметки человека журнал так и пишет — «горизонт истёк».
+
+    Считаем от computed_at (pred.run.started_at) — когда прогноз выдан, — а не от as_of.
+    as_of — срез данных, и на стенде это край архива 30.06.2026: от него 720 ч истекли
+    у всех прогнозов, и сводка 27.09.2026 показала 67 531 «горизонт истёк» и 0 «ещё
+    открыт» за сегодняшний день."""
+    return выдан + timedelta(hours=horizon_h) < (сейчас or datetime.now(timezone.utc))
+
+
+# Исход прогноза (US-10, миграция 056). Действует последний по decided_at: исход
+# могут поправить — сначала «не проверяли», потом бригада доехала.
+ИСХОД = """
+    SELECT o.outcome_id, o.outcome_code, fo.name AS outcome_name,
+           o.reason_code, r.name AS reason_name, o.decided_by, o.decided_at
+      FROM pred.forecast_outcome o
+      JOIN ref.forecast_outcome fo ON fo.code = o.outcome_code
+      LEFT JOIN ref.feedback_reason r ON r.code = o.reason_code
+"""
+ИСХОД_СПИСКОМ = """
+    SELECT DISTINCT ON (o.forecast_id) o.forecast_id,
+           o.outcome_id, o.outcome_code, fo.name AS outcome_name,
+           o.reason_code, r.name AS reason_name, o.decided_by, o.decided_at
+      FROM pred.forecast_outcome o
+      JOIN ref.forecast_outcome fo ON fo.code = o.outcome_code
+      LEFT JOIN ref.feedback_reason r ON r.code = o.reason_code
+     WHERE o.forecast_id = ANY($1::bigint[])
+     ORDER BY o.forecast_id, o.decided_at DESC, o.outcome_id DESC
+"""
+ПОСЛЕДНИЙ_ИСХОД = ИСХОД + """
+     WHERE o.forecast_id = $1
+     ORDER BY o.decided_at DESC, o.outcome_id DESC
+     LIMIT 1
+"""
+ИСХОД_ПО_ID = ИСХОД + " WHERE o.outcome_id = $1"
 
 
 # Решение по прогнозу (MOS-55, US-09 сц. 4). Строки pred.feedback без
@@ -289,6 +382,18 @@ async def get_forecast(
       FROM pred.feedback fb
       JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
       LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+"""
+# Последнее решение сразу по многим прогнозам — страница журнала.
+РЕШЕНИЕ_СПИСКОМ = """
+    SELECT DISTINCT ON (fb.forecast_id) fb.forecast_id,
+           fb.feedback_id, fb.decision_code, d.name AS decision_name,
+           fb.reason_code, r.name AS reason_name, fb.comment,
+           fb.verified_externally, fb.decided_by, fb.decided_at
+      FROM pred.feedback fb
+      JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
+      LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+     WHERE fb.forecast_id = ANY($1::bigint[])
+     ORDER BY fb.forecast_id, fb.decided_at DESC, fb.feedback_id DESC
 """
 ПОСЛЕДНЕЕ_РЕШЕНИЕ = РЕШЕНИЕ + """
      WHERE fb.forecast_id = $1
@@ -317,7 +422,12 @@ async def decision_options(
         "SELECT code, name FROM ref.feedback_reason"
         " ORDER BY code = 'unknown', name COLLATE \"C\""
     )
-    return {"decisions": [dict(r) for r in decisions], "reasons": [dict(r) for r in reasons]}
+    outcomes = await conn.fetch("SELECT code, name FROM ref.forecast_outcome ORDER BY sort_order")
+    return {
+        "decisions": [dict(r) for r in decisions],
+        "reasons": [dict(r) for r in reasons],
+        "outcomes": [dict(r) for r in outcomes],
+    }
 
 
 @router.post("/forecasts/{forecast_id}/feedback", response_model=ForecastDecision, status_code=201)
@@ -383,3 +493,103 @@ async def post_feedback(
         "verified_externally": body.verified_externally,
     }
     return dict(await conn.fetchrow(РЕШЕНИЕ_ПО_ID, feedback_id))
+
+
+@router.post("/forecasts/{forecast_id}/outcome", response_model=ForecastOutcome, status_code=201)
+async def post_outcome(
+    forecast_id: int,
+    body: OutcomeIn,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.decide")),
+):
+    """Исход прогноза (US-10, Ф-34, Ф-35): подтвердилось, ложная (с причиной из пяти)
+    или не проверяли. Пишут те же роли, что решение (forecasts.decide), decided_by —
+    из сессии. Система сама исход не ставит (Ф-75): этот метод — единственный
+    писатель pred.forecast_outcome, его держит code/check_no_auto_verdict.py.
+
+    Правила причины проверяем до INSERT и отвечаем 422 — CHECK в 056 тот же, но
+    нарушение CHECK дало бы 500. Каждый вызов — новая строка: история исходов
+    остаётся, карточка и журнал показывают последний.
+    """
+    section_id = await conn.fetchval(
+        "SELECT section_id FROM pred.forecast WHERE forecast_id = $1", forecast_id
+    )
+    await проверить_участок(user, conn, section_id)
+    if section_id is None:
+        raise HTTPException(404, "прогноз не найден")
+    if not await conn.fetchval(
+        "SELECT true FROM ref.forecast_outcome WHERE code = $1", body.outcome_code
+    ):
+        raise HTTPException(422, f"исхода {body.outcome_code!r} нет в справочнике")
+    ложная = body.outcome_code == "false_alarm"
+    if ложная and body.reason_code is None:
+        raise HTTPException(422, "для исхода «ложная» нужна причина из справочника")
+    if not ложная and body.reason_code is not None:
+        raise HTTPException(422, "причина указывается только для исхода «ложная»")
+    if body.reason_code is not None and not await conn.fetchval(
+        "SELECT true FROM ref.feedback_reason WHERE code = $1", body.reason_code
+    ):
+        raise HTTPException(422, f"причины {body.reason_code!r} нет в справочнике")
+
+    outcome_id = await conn.fetchval(
+        """
+        INSERT INTO pred.forecast_outcome (forecast_id, outcome_code, reason_code, decided_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING outcome_id
+        """,
+        forecast_id, body.outcome_code, body.reason_code, user["login"],
+    )
+    request.state.audit_details = {
+        "forecast_id": forecast_id,
+        "outcome_code": body.outcome_code,
+        "reason_code": body.reason_code,
+    }
+    return dict(await conn.fetchrow(ИСХОД_ПО_ID, outcome_id))
+
+
+@router.get("/forecast-outcomes", response_model=OutcomeSummary)
+async def forecast_outcomes(
+    from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
+    to: date | None = Query(None, description="дата конца периода, включительно"),
+    section_id: int | None = Query(None, description="участок, точное совпадение"),
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.read")),
+):
+    """Сводка исходов за период (US-20, Ф-95): подтвердилось, ложная, не проверяли,
+    горизонт истёк, ещё открыт. Отбор — ОТБОР_ЖУРНАЛА с теми же параметрами, что
+    у журнала, и под той же областью видимости: руководитель района видит свой
+    район, диспетчер ОДС — весь парк. Каждый прогноз попадает ровно в одно из пяти:
+    исход — последний по decided_at; без исхода делит горизонт (computed_at +
+    horizon_h против now(), как horizon_expired в строке журнала). Сумма пяти = total.
+    """
+    to_exclusive = to + timedelta(days=1) if to else None
+    участки = await видимые_участки(user, conn)
+    row = await conn.fetchrow(
+        f"""
+        WITH f AS (
+            SELECT f.forecast_id, r.started_at AS computed_at, f.horizon_h
+              FROM pred.forecast f
+              JOIN pred.run r ON r.run_id = f.run_id
+            {ОТБОР_ЖУРНАЛА}
+        ), o AS (
+            SELECT DISTINCT ON (o.forecast_id) o.forecast_id, o.outcome_code
+              FROM pred.forecast_outcome o
+              JOIN f ON f.forecast_id = o.forecast_id
+             ORDER BY o.forecast_id, o.decided_at DESC, o.outcome_id DESC
+        )
+        SELECT count(*) FILTER (WHERE o.outcome_code = 'confirmed')   AS confirmed,
+               count(*) FILTER (WHERE o.outcome_code = 'false_alarm') AS false_alarm,
+               count(*) FILTER (WHERE o.outcome_code = 'not_checked') AS not_checked,
+               count(*) FILTER (WHERE o.outcome_code IS NULL
+                                  AND f.computed_at + make_interval(hours => f.horizon_h) < now())
+                   AS horizon_expired,
+               count(*) FILTER (WHERE o.outcome_code IS NULL
+                                  AND f.computed_at + make_interval(hours => f.horizon_h) >= now())
+                   AS open
+          FROM f LEFT JOIN o ON o.forecast_id = f.forecast_id
+        """,
+        from_, to_exclusive, участки, section_id,
+    )
+    итог = dict(row)
+    return {**итог, "total": sum(итог.values())}

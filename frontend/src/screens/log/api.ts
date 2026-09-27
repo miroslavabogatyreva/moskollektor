@@ -4,6 +4,7 @@ import type { ForecastListResponse } from './types'
 export interface ForecastQuery {
   from?: string
   to?: string
+  section?: number
   offset?: number
 }
 
@@ -16,7 +17,7 @@ function ожидаетсяСписок(body: unknown): body is ForecastListResp
   )
 }
 
-// GET /api/forecasts?from=&to=&offset= — М-06, М-16, Ф-55. Постраничность
+// GET /api/forecasts?from=&to=&section_id=&offset= — М-06, М-16, Ф-55, US-11. Постраничность
 // с умолчанием 200 записей на странице (backend/app/api/routes.py) — на
 // 425 183 строках без неё браузер вставал.
 export async function fetchForecasts(
@@ -26,6 +27,7 @@ export async function fetchForecasts(
   const params = new URLSearchParams()
   if (query.from) params.set('from', query.from)
   if (query.to) params.set('to', query.to)
+  if (query.section) params.set('section_id', String(query.section))
   if (query.offset) params.set('offset', String(query.offset))
   const qs = params.toString()
   const r = await apiFetch(`/api/forecasts${qs ? `?${qs}` : ''}`, { signal })
@@ -35,4 +37,28 @@ export async function fetchForecasts(
     throw new Error('ответ GET /api/forecasts не по форме {total, items}')
   }
   return body
+}
+
+export interface OutcomeSummary {
+  confirmed: number
+  false_alarm: number
+  not_checked: number
+  horizon_expired: number
+  open: number
+  total: number
+}
+
+// GET /api/forecast-outcomes — сводка исходов тем же отбором, что журнал (US-20):
+// сумма пяти чисел равна total журнала.
+export async function fetchOutcomeSummary(
+  query: ForecastQuery,
+  signal?: AbortSignal,
+): Promise<OutcomeSummary> {
+  const params = new URLSearchParams()
+  if (query.from) params.set('from', query.from)
+  if (query.to) params.set('to', query.to)
+  if (query.section) params.set('section_id', String(query.section))
+  const r = await apiFetch(`/api/forecast-outcomes?${params}`, { signal })
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  return r.json() as Promise<OutcomeSummary>
 }
