@@ -8,7 +8,7 @@ import { MapFilters } from './MapFilters'
 import { ObjectTree, type TreeCollector } from './ObjectTree'
 import { riskLabel, type RiskClass } from './risk'
 import type { RiskClassRow, Section } from './types'
-import type { ViewRange } from './viewport'
+import { fullView, zoomView, type ViewRange } from './viewport'
 
 /* Ось пикетов — первая половина задачи 5.3 (MOS-50): сам чертёж и клик по метке
    ведёт на /objects/:sectionId (ObjectCard, 5.5, MOS-52). Цвет значка по уровню
@@ -32,7 +32,9 @@ import type { ViewRange } from './viewport'
 // в переписке к MOS-170, менять только вместе с ним.
 const LEGEND_STATES: RiskClass[] = ['high', 'normal', null]
 
-export function MapScreen(_props: Record<string, unknown>) {
+// section — из адреса /map?section=<id> (preact-router кладёт параметры запроса
+// в props): переход «на схеме» из полосы уведомлений, Ф-90, MOS-245.
+export function MapScreen({ section }: { section?: string } & Record<string, unknown>) {
   const [sections, setSections] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
@@ -91,6 +93,22 @@ export function MapScreen(_props: Record<string, unknown>) {
       // Дерево не грузится — говорим об этом на его месте, схема со списком коллекторов работает дальше.
       .catch((e) => setTreeError(errorMessage(e)))
   }, [])
+
+  // Участок из адреса: выбираем его коллектор, приближаем его линию к пикету
+  // (окно в десятую часть линии) и обводим метку. Эффект по участку, а не по
+  // монтированию: ссылка из полосы на уже открытой схеме меняет только параметр.
+  const выбранный = useMemo(
+    () => (sections && section ? sections.find((s) => s.section_id === Number(section)) : undefined),
+    [sections, section],
+  )
+  useEffect(() => {
+    if (!выбранный || !sections) return
+    const prefix = выбранный.smvu_key.split(':')[0]
+    const max = Math.max(1, ...sections.filter((s) => s.smvu_key.startsWith(`${prefix}:`)).map((s) => s.picket))
+    setCollector(выбранный.collector)
+    setNode(null)
+    setViewRanges({ [prefix]: zoomView(fullView(max), 0.1, выбранный.picket, max, 1) })
+  }, [выбранный])
 
   const selectCollector = (id: number) => {
     setCollector(id)
@@ -154,7 +172,10 @@ export function MapScreen(_props: Record<string, unknown>) {
   }, [nodeSections, sections, collector])
 
   // Смена коллектора меняет набор линий — старые окна просмотра теряют смысл.
-  useEffect(() => setViewRanges({}), [collector])
+  // Кроме смены по участку из адреса: там окно только что выставлено под пикет.
+  useEffect(() => {
+    if (выбранный?.collector !== collector) setViewRanges({})
+  }, [collector])
 
   // Линия — один префикс тега (MOS-181): smvu_key = "префикс:пикет", и у каждого
   // префикса пикет 0 свой. all — на масштаб линии (фильтры его не двигают),
@@ -227,6 +248,13 @@ export function MapScreen(_props: Record<string, unknown>) {
               totalCount={onAxis.length}
             />
 
+            {выбранный && (
+              <p class="text-sm" style="color:var(--text-primary)">
+                {/* Имя — по префиксу smvu_key, как у сервера («Коллектор 884, пикет 730»), а не по collector. */}
+                Выбран участок: Коллектор {выбранный.smvu_key.split(':')[0]}, пикет {выбранный.smvu_key.split(':')[1]}
+              </p>
+            )}
+
             <p class="text-sm" style="color:var(--text-secondary)">
               Коллектор «{collectorName}»: {lines.length} {lines.length === 1 ? 'линия' : 'линии'}
             </p>
@@ -239,6 +267,7 @@ export function MapScreen(_props: Record<string, unknown>) {
                   all={all}
                   visible={filteredByPrefix.get(prefix) ?? []}
                   riskBySection={riskBySection}
+                  selected={выбранный?.section_id}
                   viewRange={viewRanges[prefix] ?? null}
                   onViewRangeChange={(v) => setViewRanges((prev) => ({ ...prev, [prefix]: v }))}
                 />

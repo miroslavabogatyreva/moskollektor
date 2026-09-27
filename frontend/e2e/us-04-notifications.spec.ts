@@ -248,3 +248,13 @@ test('US-04 сц. 6: «Принял» гасит полосу, а событие
   state.stream = [запись(9002)]
   await expect(полоса(page)).toContainText('пикет 9002', { timeout: 15_000 })
 })
+
+test('US-04 сц. 7: из уведомления — на схему', async ({ page }) => {
+  const n = await свежее(page)
+  await page.goto('/dashboard')
+  await полоса(page).getByRole('link', { name: 'на схеме' }).click()
+  await expect(page).toHaveURL(new RegExp(`/map\\?section=${n.section_id}$`))
+  const метка = page.locator(`[data-section-id="${n.section_id}"][data-selected]`)
+  await expect(метка).toBeVisible()
+  await expect(page.getByText(`Выбран участок: ${n.object_name}`)).toBeVisible()
+})
