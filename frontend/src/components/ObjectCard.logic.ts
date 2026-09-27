@@ -105,3 +105,36 @@ export function groupChannelsBySystem<C extends { system_kind: string | null }>(
   }
   return groups
 }
+
+// Эпизод потери связи на графике (US-07 сц. 3) — подряд идущие записи
+// «Неисправен» канала, дольше часа, как в определении отказа (docs/for-ml-team.md:
+// эпизод `Неисправен` длиннее часа). Начало — сама запись журнала СМВУ, с которой
+// эпизод открылся, поэтому его время на графике совпадает с журналом до секунды.
+// Конец — первая запись с другим значением; не пришла — эпизод открыт до конца окна.
+export interface ЭпизодПотери {
+  start: string
+  startMs: number
+  endMs: number
+}
+
+const ЧАС_МС = 3600 * 1000
+
+export function эпизодыПотериСвязи(
+  readings: { read_time: string; value_text: string | null }[],
+  winEndMs: number,
+): ЭпизодПотери[] {
+  const out: ЭпизодПотери[] = []
+  let открыт: { start: string; startMs: number } | null = null
+  const закрыть = (endMs: number) => {
+    if (открыт && endMs - открыт.startMs > ЧАС_МС) out.push({ ...открыт, endMs })
+    открыт = null
+  }
+  for (const r of readings) {
+    const t = Date.parse(r.read_time)
+    if (r.value_text === 'Неисправен') {
+      if (!открыт) открыт = { start: r.read_time, startMs: t }
+    } else if (открыт) закрыть(t)
+  }
+  закрыть(winEndMs)
+  return out
+}
