@@ -77,9 +77,11 @@ test('US-04 сц. 5: событие не пропадает, пока его н�
   // acked=true, не в «нет в первых 200 acked=false» — та проверка была бы
   // истиной и без ack, самое старое событие туда всё равно не попадает.
   const ackedResp = await page.request.get('/api/notifications?acked=true&limit=1000')
-  const ackedItems = ((await ackedResp.json()) as {
-    items: (Notification & { acked_by: string | null })[]
-  }).items
+  const ackedItems = (
+    (await ackedResp.json()) as {
+      items: (Notification & { acked_by: string | null })[]
+    }
+  ).items
   const ackedRow = ackedItems.find((n) => n.id === oldest.id)
   expect(ackedRow?.acked_by).toBe(process.env.E2E_LOGIN ?? 'dispatcher1')
 })
@@ -111,18 +113,25 @@ test('US-04 сц. 5: «Показать ещё» не теряет строку 
     if (ackMatch && route.request().method() === 'POST') {
       const id = +ackMatch[1]
       store = store.filter((n) => n.id !== id)
-      return route.fulfill({ json: { id, acked_by: 'dispatcher1', acked_at: new Date().toISOString() } })
+      return route.fulfill({
+        json: { id, acked_by: 'dispatcher1', acked_at: new Date().toISOString() },
+      })
     }
     const limit = +(u.searchParams.get('limit') ?? 200)
     const offset = +(u.searchParams.get('offset') ?? 0)
-    return route.fulfill({ json: { total: store.length, items: store.slice(offset, offset + limit) } })
+    return route.fulfill({
+      json: { total: store.length, items: store.slice(offset, offset + limit) },
+    })
   })
 
   await page.goto('/orders')
   await page.getByRole('tab', { name: 'Неквитированные' }).click()
   await page.getByText(`показано 200 из ${N}`).waitFor()
 
-  await page.locator('[data-notification-id="1000"]').getByRole('button', { name: 'Квитировать' }).click()
+  await page
+    .locator('[data-notification-id="1000"]')
+    .getByRole('button', { name: 'Квитировать' })
+    .click()
   await page.getByText(`показано 199 из ${N - 1}`).waitFor()
 
   await page.getByRole('button', { name: 'Показать ещё' }).click()
@@ -133,4 +142,109 @@ test('US-04 сц. 5: «Показать ещё» не теряет строку 
     .evaluateAll((els) => els.map((e) => +(e as HTMLElement).dataset.notificationId!))
   const missing = store.map((n) => n.id).filter((id) => !shownIds.includes(id))
   expect(missing).toEqual([])
+})
+
+// ── Полоса уведомлений AlertBar (MOS-53, план 5.6) ─────────────────────────
+// Полоса берёт GET /api/notifications?acked=false и показывает запись с
+// наибольшим id: у событий проигрывания СМВУ reported_at майский, и первым
+// в ответе (reported_at DESC) стоит не самое новое событие.
+interface BarItem {
+  id: number
+  object_name: string | null
+  section_id: number | null
+  probability: number
+  horizon_h: number
+}
+
+async function свежее(page: import('@playwright/test').Page): Promise<BarItem> {
+  const r = await page.request.get('/api/notifications?acked=false&limit=1000')
+  const { items } = (await r.json()) as { items: BarItem[] }
+  return items.reduce((a, b) => (a.id > b.id ? a : b))
+}
+
+const полоса = (page: import('@playwright/test').Page) =>
+  page.getByRole('status', { name: 'Уведомление о прогнозе' })
+
+test('US-04 сц. 2: в уведомлении всё для первого решения', async ({ page }) => {
+  const n = await свежее(page)
+  await page.goto('/log')
+  const bar = полоса(page)
+  await expect(bar).toContainText(`${Math.round(n.probability * 100)} %`)
+  await expect(bar).toContainText(`${n.horizon_h} ч`)
+  await expect(bar).toContainText(n.object_name!)
+})
+
+test('US-04 сц. 3: из уведомления один переход к участку', async ({ page }) => {
+  const n = await свежее(page)
+  expect(n.section_id, 'GET /api/notifications отдаёт section_id').toBeTruthy()
+  await page.goto('/map')
+  await полоса(page).getByRole('link', { name: n.object_name! }).click()
+  await expect(page).toHaveURL(new RegExp(`/objects/${n.section_id}$`))
+})
+
+// Подменённые API и поток: на стенде за 70 с не появилось ни одного нового
+// уведомления (27.09.2026, max id 7542 до и после), ждать живое событие тест
+// не может. Стартовая картина — GET /api/notifications?acked=false, новое —
+// событие SSE из GET /api/alerts/stream (id события = id уведомления).
+function подменить(page: import('@playwright/test').Page) {
+  const state = { list: [] as object[], stream: [] as object[], ack: 0 }
+  page.route(/\/api\/notifications(\?|\/)/, (route) => {
+    if (route.request().method() === 'POST') {
+      state.ack++
+      return route.fulfill({ json: { id: 0, acked_by: 'x', acked_at: 'x' } })
+    }
+    return route.fulfill({ json: { total: state.list.length, items: state.list } })
+  })
+  // Каждое подключение отдаёт накопленные события и закрывается — EventSource
+  // переподключается сам через ~3 с с Last-Event-ID, как после обрыва nginx.
+  page.route('**/api/alerts/stream', (route) => {
+    const body = state.stream
+      .map((e) => `id: ${(e as { id: number }).id}\ndata: ${JSON.stringify(e)}\n\n`)
+      .join('')
+    state.stream = []
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: body || ': ping\n\n',
+    })
+  })
+  return state
+}
+
+const запись = (id: number) => ({
+  id,
+  reported_at: '2026-09-27T10:00:00+00:00',
+  object_name: `Коллектор 9, пикет ${id}`,
+  smvu_key: `9:${id}`,
+  section_id: 401,
+  probability: 0.91,
+  horizon_h: 24,
+  as_of: null,
+})
+
+test('US-04 сц. 1: уведомление приходит само', async ({ page }) => {
+  const state = подменить(page)
+  await page.goto('/dashboard')
+  await expect(page.getByRole('heading', { name: 'Дашборд рисков' })).toBeVisible()
+  await expect(полоса(page)).toHaveCount(0)
+
+  state.stream = [запись(9001)]
+  // Не перезагружаем страницу: событие доходит по переподключению потока.
+  await expect(полоса(page)).toContainText('Коллектор 9, пикет 9001', { timeout: 15_000 })
+})
+
+test('US-04 сц. 6: «Принял» гасит полосу, а событие остаётся неквитированным', async ({ page }) => {
+  const state = подменить(page)
+  state.list = [{ ...запись(9001), acked_at: null, acked_by: null }]
+  await page.goto('/dashboard')
+  await полоса(page).getByRole('button', { name: 'Принял' }).click()
+  await expect(полоса(page)).toHaveCount(0)
+  expect(state.ack, 'POST …/ack не уходил').toBe(0)
+
+  // После перезагрузки то же событие полосу не зажигает, новое из потока — зажигает.
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Дашборд рисков' })).toBeVisible()
+  await expect(полоса(page)).toHaveCount(0)
+  state.stream = [запись(9002)]
+  await expect(полоса(page)).toContainText('пикет 9002', { timeout: 15_000 })
 })

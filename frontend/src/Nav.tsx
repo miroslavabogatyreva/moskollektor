@@ -1,5 +1,6 @@
 import { ROUTES } from './routes'
 import { logout, roleLabels, type AuthUser } from './lib/auth'
+import { usePoll } from './lib/poll'
 
 const ADMIN_ROUTES = [
   { path: '/admin/directory', label: 'Служба каталогов' },
@@ -10,6 +11,7 @@ const ADMIN_ROUTES = [
 export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
   // Пункт меню виден только администратору — сервер всё равно отвечает 403
   // остальным (НФ-43: скрытие пункта не заменяет отказ по прямому адресу).
+  const { at } = usePoll()
   const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ...ADMIN_ROUTES] : ROUTES
 
   return (
@@ -43,6 +45,9 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           )
         })}
       </nav>
+      <span class="num text-xs" style="color:#B9CCE6">
+        обновлено в {at.toLocaleTimeString('ru-RU')}
+      </span>
       {me && (
         <div class="flex items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
           <span>

@@ -3,6 +3,7 @@ import { route } from 'preact-router'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { errorMessage } from '../../lib/format'
+import { usePoll } from '../../lib/poll'
 import { отставание } from './lag'
 import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
 import type { SectionRef } from './rows'
@@ -29,13 +30,25 @@ export function DashboardScreen(_props: Record<string, unknown>) {
      номер участка, и таблица работает дальше. */
   const [sections, setSections] = useState<SectionRef[] | null>(null)
 
+  // Риски и край выгрузки — раз в минуту от общего опроса (НФ-89, MOS-123),
+  // справочник участков статичен и грузится один раз.
+  const { tick } = usePoll()
   useEffect(() => {
     fetchRisks()
-      .then(setRows)
+      .then((r) => {
+        setRows(r)
+        setError(null)
+      })
       .catch((e) => setError(errorMessage(e)))
     fetchDataStatus()
-      .then(setStatus)
+      .then((s) => {
+        setStatus(s)
+        setStatusError(null)
+      })
       .catch((e) => setStatusError(errorMessage(e)))
+  }, [tick])
+
+  useEffect(() => {
     fetchSections()
       .then(setSections)
       .catch(() => setSections([]))
@@ -121,7 +134,10 @@ export function DashboardScreen(_props: Record<string, unknown>) {
                   <td class="px-2 py-2">
                     {словоРиска(r.risk_class)}
                     {r.is_stale && (
-                      <span style="color:var(--state-warning)"> · расчёт не прошёл, показан прошлый</span>
+                      <span style="color:var(--state-warning)">
+                        {' '}
+                        · расчёт не прошёл, показан прошлый
+                      </span>
                     )}
                   </td>
                   <td class="px-2 py-2 num">{r.probability.toFixed(4)}</td>
