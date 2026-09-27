@@ -128,11 +128,16 @@ test('US-12 сц. 4: событие СМВУ появляется само', asy
 })
 
 // Имя «Коллектор 797, пикет 1» — подстрока ещё 249 имён из 3 173: фильтр object
-// (ILIKE) за июнь 2026 отдаёт по нему 84 события пикетов 100 и 137, а своих у
-// пикета 1 ноль. Карточка отбирает по section_id и чужих не показывает.
+// (ILIKE) отдаёт по нему события пикетов 100 и 137, а своих у пикета 1 ноль.
+// Карточка отбирает по section_id и чужих не показывает.
+// Окно — одни сутки 22.06.2026: там 6 чужих событий (5 у пикета 137, 1 у 100),
+// запрос 0,34 с. Весь июнь давал 84 события за 2,6 с и под нагрузкой четырёх
+// воркеров не укладывался в 30 с (нашла 4f, 27.09.2026) — мигающая проверка.
+const СУТКИ = '2026-06-22'
+
 test('US-12 сц. 1: в карточке нет событий соседнего пикета с похожим именем', async ({ page }) => {
   const подстрока = await page.request.get(
-    '/api/tech-events?from=2026-06-01&to=2026-06-30&limit=1000&object=' +
+    `/api/tech-events?from=${СУТКИ}&to=${СУТКИ}&limit=1000&object=` +
       encodeURIComponent('Коллектор 797, пикет 1'),
   )
   const чужие = ((await подстрока.json()) as { items: TechEvent[] }).items.filter(
@@ -144,10 +149,10 @@ test('US-12 сц. 1: в карточке нет событий соседнег�
   ).toBeGreaterThan(0)
 
   await page.goto('/objects/1423') // smvu_key 797:1
-  await журнал(page).getByLabel('С даты').fill('2026-06-01')
-  await журнал(page).getByLabel('По дату').fill('2026-06-30')
+  await журнал(page).getByLabel('С даты').fill(СУТКИ)
+  await журнал(page).getByLabel('По дату').fill(СУТКИ)
   const ответ = page.waitForResponse(
-    (r) => r.url().includes('/api/tech-events') && r.url().includes('from=2026-06-01'),
+    (r) => r.url().includes('/api/tech-events') && r.url().includes(`from=${СУТКИ}`),
   )
   await журнал(page).getByRole('button', { name: 'Применить' }).click()
   expect((await ответ).url()).toContain('section_id=1423')
@@ -186,6 +191,7 @@ test('US-12 сц. 3: дата начала позже конца — отбор 
 // Общий журнал по всему парку — строка Ф-89 «открыть журнал»: здесь «Объект»
 // не один, и фильтр с сортировкой по нему имеют смысл.
 test('US-12 сц. 2: общий журнал из меню — сортировка и фильтр по объекту', async ({ page }) => {
+  test.setTimeout(60_000) // сутки по всему парку под нагрузкой стенда — 30 с не хватало
   await page.goto('/dashboard')
   await page
     .getByRole('navigation', { name: 'Разделы' })
@@ -193,7 +199,9 @@ test('US-12 сц. 2: общий журнал из меню — сортиров�
     .click()
   await expect(page).toHaveURL(/\/tech-events$/)
   const t = таблица(page)
-  await expect(t.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 })
+  // Общий журнал — сутки по всему парку, самый тяжёлый запрос экрана: под check-all
+  // и четырьмя воркерами 15 с не хватало 1 раз из 3 (27.09.2026).
+  await expect(t.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
   const объекты = new Set(await t.locator('tbody tr td:nth-child(2)').allTextContents())
   expect(объекты.size, 'по всему парку, а не один участок').toBeGreaterThan(1)
   // Время без секунд, как на остальных экранах (formatDateTime, М-12).
