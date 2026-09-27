@@ -317,6 +317,9 @@ run "НФ-43"        "роли и доступ"           env PYTHONPATH=backend
 # Поток тревог зовёт get_current_user напрямую, мимо Depends: смена сигнатуры в MOS-39
 # уронила его в 500 у всех, и ни одна самопроверка deps этого не видела.
 run "НФ-43"        "поток тревог: вызов входа" env PYTHONPATH=backend "$PY" -m app.api.notifications
+# /objects/tree обязан стоять выше /objects/{section_id}: иначе 422 на стенде, а без
+# стенда перестановку не видит ничего (ревью MOS-101 переставило их — check-all молчал).
+run "М-05"         "дерево объектов: порядок маршрутов" env PYTHONPATH=backend "$PY" -m app.api.objects
 run "—"            "запись прогноза"         env PYTHONPATH=backend "$PY" -m app.worker.publish
 run "—"            "клиент модели"           env PYTHONPATH=backend "$PY" -m app.mlclient.client
 run "—"            "выбор факторов"          env PYTHONPATH=backend "$PY" -m app.worker.run --selfcheck
