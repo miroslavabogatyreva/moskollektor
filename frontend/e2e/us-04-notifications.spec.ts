@@ -258,3 +258,30 @@ test('US-04 сц. 7: из уведомления — на схему', async ({ 
   await expect(метка).toBeVisible()
   await expect(page.getByText(`Выбран участок: ${n.object_name}`)).toBeVisible()
 })
+
+// Фильтр схемы мог спрятать участок — переход по адресу его сбрасывает (MOS-245).
+test('US-04 сц. 7: переход на схему сбрасывает фильтр, который прятал участок', async ({
+  page,
+}) => {
+  const n = await свежее(page)
+  const risks = (await (await page.request.get('/api/risks')).json()) as {
+    section_id: number
+    risk_class: string | null
+  }[]
+  const класс = risks.find((r) => r.section_id === n.section_id)?.risk_class
+  await page.goto('/map')
+  await page
+    .getByLabel('Уровень риска')
+    .selectOption({ label: класс === 'high' ? 'Низкий' : 'Высокий' })
+  await полоса(page).getByRole('link', { name: 'на схеме' }).click()
+  await expect(page.locator(`[data-section-id="${n.section_id}"][data-selected]`)).toBeVisible()
+  await expect(page.getByLabel('Уровень риска')).toHaveValue('all')
+})
+
+test('US-04 сц. 7: из карточки участка — на схему', async ({ page }) => {
+  const n = await свежее(page)
+  await page.goto(`/objects/${n.section_id}`)
+  await page.getByRole('main').getByRole('link', { name: 'на схеме' }).click()
+  await expect(page).toHaveURL(new RegExp(`/map\\?section=${n.section_id}$`))
+  await expect(page.locator(`[data-section-id="${n.section_id}"][data-selected]`)).toBeVisible()
+})
