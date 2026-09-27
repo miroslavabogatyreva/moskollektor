@@ -205,7 +205,8 @@ backend/app/
                     geo.py — геометрия участков в GeoJSON и WKT, Ф-81;
                     weather.py — эмулятор Open-Meteo на архиве
                     weather_moscow.csv.gz и GET /api/weather, Ф-85;
-                    ingest.py — POST /api/ingest/readings, Ф-82)
+                    ingest.py — POST /api/ingest/readings, Ф-82;
+                    sources.py — GET /api/sources, экран источников, US-26)
   auth/             вход через службу каталогов, роли
   worker/           расчёт: восемь стадий и планировщик
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026
