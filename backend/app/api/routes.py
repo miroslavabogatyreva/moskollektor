@@ -280,19 +280,25 @@ async def get_forecast(
     return {**dict(row), "decision": dict(решение) if решение else None}
 
 
-# Последнее решение по прогнозу (MOS-55, US-09 сц. 4). Строки pred.feedback без
+# Решение по прогнозу (MOS-55, US-09 сц. 4). Строки pred.feedback без
 # decision_code (до миграции 052) решением не считаем — JOIN их отбрасывает.
-ПОСЛЕДНЕЕ_РЕШЕНИЕ = """
+РЕШЕНИЕ = """
     SELECT fb.feedback_id, fb.decision_code, d.name AS decision_name,
            fb.reason_code, r.name AS reason_name, fb.comment,
-           fb.decided_by, fb.decided_at
+           fb.verified_externally, fb.decided_by, fb.decided_at
       FROM pred.feedback fb
       JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
       LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+"""
+ПОСЛЕДНЕЕ_РЕШЕНИЕ = РЕШЕНИЕ + """
      WHERE fb.forecast_id = $1
      ORDER BY fb.decided_at DESC, fb.feedback_id DESC
      LIMIT 1
 """
+# Ответ POST — именно записанная строка, а не «последняя по прогнозу»: два
+# диспетчера, сохранившие решение по одному прогнозу одновременно, иначе могли
+# получить в ответ чужое решение (находка c0 на ревью).
+РЕШЕНИЕ_ПО_ID = РЕШЕНИЕ + " WHERE fb.feedback_id = $1"
 
 
 @router.get("/dispatcher-decisions", response_model=DecisionOptions)
@@ -353,20 +359,27 @@ async def post_feedback(
     verdict = 0 if body.decision_code == "false_alarm" else 1
     if verdict == 0 and body.reason_code is None:
         raise HTTPException(422, "для ложного срабатывания нужна причина из справочника")
+    # Причина — только у ложного: у остальных трёх её в диалоге нет, и строка
+    # «Выезд бригады, причина: погода» в журнале читалась бы как ложное.
+    if verdict == 1 and body.reason_code is not None:
+        raise HTTPException(422, "причина указывается только для ложного срабатывания")
 
     comment = (body.comment or "").strip() or None
     feedback_id = await conn.fetchval(
         """
-        INSERT INTO pred.feedback (forecast_id, verdict, reason_code, comment, decided_by, decision_code)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO pred.feedback (forecast_id, verdict, reason_code, comment, decided_by,
+                                   decision_code, verified_externally)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING feedback_id
         """,
         forecast_id, verdict, body.reason_code, comment, user["login"], body.decision_code,
+        body.verified_externally,
     )
     # Middleware в app.api.main дописывает это в тот же ряд audit.user_action (Ф-53).
     request.state.audit_details = {
         "forecast_id": forecast_id,
         "decision_code": body.decision_code,
         "reason_code": body.reason_code,
+        "verified_externally": body.verified_externally,
     }
-    return dict(await conn.fetchrow(ПОСЛЕДНЕЕ_РЕШЕНИЕ, forecast_id))
+    return dict(await conn.fetchrow(РЕШЕНИЕ_ПО_ID, feedback_id))

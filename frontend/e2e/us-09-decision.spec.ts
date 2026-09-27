@@ -66,28 +66,47 @@ test('US-09 сц. 1, 2, 3, 4: решение из справочника, без
   await expect(reason).toHaveCount(0)
   const comment = `E2E US-09 ${new Date().toISOString()}`
   await dialog.getByLabel('Комментарий').fill(comment)
+  await dialog.getByLabel('Проверено по внешним источникам').check()
   await expect(save).toBeEnabled()
 
   const [resp] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes(`/forecasts/${id}/feedback`) && r.request().method() === 'POST'),
+    page.waitForResponse(
+      (r) => r.url().includes(`/forecasts/${id}/feedback`) && r.request().method() === 'POST',
+    ),
     save.click(),
   ])
   expect(resp.status()).toBe(201)
-  const saved = (await resp.json()) as { decision_code: string; decided_by: string; comment: string }
+  const saved = (await resp.json()) as {
+    decision_code: string
+    decided_by: string
+    comment: string
+    verified_externally: boolean
+  }
   expect(saved.decision_code).toBe('monitor')
   expect(saved.decided_by).toBe(DISPATCHER)
   expect(saved.comment).toBe(comment)
+  expect(saved.verified_externally).toBe(true)
 
   // Сц. 1: у прогноза появилось решение — в карточке, с автором.
   await expect(dialog).toBeHidden()
   const last = page.getByTestId('last-decision')
   await expect(last).toContainText('Мониторинг ситуации')
   await expect(last).toContainText(DISPATCHER)
+  await expect(last).toContainText('проверено по внешним источникам')
+  // Фокус вернулся на кнопку, а не потерялся на body вместе со снятым диалогом.
+  await expect(page.getByRole('button', { name: 'Решение диспетчера' })).toBeFocused()
 
   // Сц. 4: другой диспетчер (ОДС) видит то же решение, кто и когда.
-  const other = await page.request.get(`/api/forecasts/${id}`, { headers: { 'X-User-Login': 'ods1' } })
+  const other = await page.request.get(`/api/forecasts/${id}`, {
+    headers: { 'X-User-Login': 'ods1' },
+  })
   const detail = (await other.json()) as {
-    decision: { decision_code: string; decided_by: string; decided_at: string; comment: string } | null
+    decision: {
+      decision_code: string
+      decided_by: string
+      decided_at: string
+      comment: string
+    } | null
   }
   expect(detail.decision?.decision_code).toBe('monitor')
   expect(detail.decision?.decided_by).toBe(DISPATCHER)
@@ -110,9 +129,29 @@ test('US-09 сц. 2 на сервере: POST без решения — 422, л�
   const falseNoReason = await page.request.post(url, { data: { decision_code: 'false_alarm' } })
   expect(falseNoReason.status()).toBe(422)
 
+  const reasonNotFalse = await page.request.post(url, {
+    data: { decision_code: 'monitor', reason_code: 'weather' },
+  })
+  expect(reasonNotFalse.status()).toBe(422)
+
+  const longComment = await page.request.post(url, {
+    data: { decision_code: 'monitor', comment: 'я'.repeat(2001) },
+  })
+  expect(longComment.status()).toBe(422)
+
   const tech = await page.request.post(url, {
     data: { decision_code: 'monitor' },
     headers: { 'X-User-Login': 'tech1' },
   })
   expect(tech.status()).toBe(403)
+})
+
+test('US-09: технику кнопку решения не показываем', async ({ browser }) => {
+  const ctx = await browser.newContext({ extraHTTPHeaders: { 'X-User-Login': 'tech1' } })
+  const page = await ctx.newPage()
+  const id = await oldestForecastId(page)
+  await page.goto(`/forecasts/${id}`)
+  await expect(page.getByTestId('last-decision')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Решение диспетчера' })).toHaveCount(0)
+  await ctx.close()
 })
