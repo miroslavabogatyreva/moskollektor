@@ -107,6 +107,8 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
     const max = Math.max(1, ...sections.filter((s) => s.smvu_key.startsWith(`${prefix}:`)).map((s) => s.picket))
     setCollector(выбранный.collector)
     setNode(null)
+    // Фильтр мог спрятать ту самую метку, ради которой перешли, — сбрасываем.
+    setFilters(DEFAULT_FILTERS)
     setViewRanges({ [prefix]: zoomView(fullView(max), 0.1, выбранный.picket, max, 1) })
   }, [выбранный])
 
