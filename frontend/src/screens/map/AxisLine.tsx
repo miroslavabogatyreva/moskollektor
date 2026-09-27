@@ -12,31 +12,21 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    префикса своя ось и свой масштаб — тот же viewport.ts, что раньше держал
    один масштаб на коллектор, теперь держит его на линию. */
 
-// Масштаб: одна единица чертежа — 1,24 px экрана, всегда. Ширина чертежа не
+// Масштаб: одна единица чертежа — 1,3 px экрана, всегда. Ширина чертежа не
 // постоянная, а ширина оси на экране, делённая на этот масштаб (ResizeObserver).
 // До MOS-101 viewBox был 1000 единиц на любую ширину, и значок сжимался вместе
 // с осью: дерево объектов слева отняло у оси ~280 px, значок «6 ед.» стал 81 px
 // площади вместо 121, и US-05 сц. 5 (различимость без цвета, порог 10 %) упал
-// с 17 % до 6 %. 1,24 — масштаб, на котором размеры значков выверены: окно 1280,
-// ось 1 240 px на 1000 единиц, как было до дерева.
-const PX_PER_UNIT = 1.24
+// с 17 % до 6 %. До дерева на окне 1280 масштаб был 1,24 (ось 1 240 px на 1000
+// единиц); 1,3 — с запасом над порогом сц. 5 (решение c0 на ревью).
+const PX_PER_UNIT = 1.3
 const AXIS_HEIGHT = 100
 const PADDING = 40
 const MIN_VIEW_FRACTION = 0.01
 
 // Значок состояния — одна функция на все размеры: густой режим (6), чип рядом
 // с номером (7) и легенда (index.tsx, 10). Форма — riskShape, цвет — riskColors.
-export function RiskMark({
-  cls,
-  cx,
-  cy,
-  size,
-}: {
-  cls: RiskClass
-  cx: number
-  cy: number
-  size: number
-}) {
+export function RiskMark({ cls, cx, cy, size }: { cls: RiskClass; cx: number; cy: number; size: number }) {
   const c = riskColors(cls)
   const h = size / 2
   const shape = riskShape(cls)
@@ -49,8 +39,7 @@ export function RiskMark({
         stroke-width={1}
       />
     )
-  if (shape === 'circle')
-    return <circle cx={cx} cy={cy} r={h} fill={c.fill} stroke={c.border} stroke-width={1} />
+  if (shape === 'circle') return <circle cx={cx} cy={cy} r={h} fill={c.fill} stroke={c.border} stroke-width={1} />
   // Вертикальная, а не горизонтальная: вдоль оси черта ложилась на саму линию
   // (MOS-50, находка 4d) и отличалась от куска оси только цветом.
   return <rect x={cx - size / 6} y={cy - h} width={size / 3} height={size} fill={c.text} />
@@ -65,14 +54,7 @@ interface AxisLineProps {
   onViewRangeChange: (v: ViewRange | null) => void
 }
 
-export function AxisLine({
-  prefix,
-  all,
-  visible,
-  riskBySection,
-  viewRange,
-  onViewRangeChange,
-}: AxisLineProps) {
+export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onViewRangeChange }: AxisLineProps) {
   // Ширина оси на экране, px. null — ещё не измерили: тогда рисуем пустую рамку,
   // а не метки с x() от нулевой ширины (NaN и мигание первого кадра).
   const svgRef = useRef<SVGSVGElement>(null)
@@ -119,8 +101,8 @@ export function AxisLine({
     <div class="flex flex-col gap-1">
       <div class="flex items-center gap-2 text-sm flex-wrap" style="color:var(--text-secondary)">
         <span>
-          Линия {prefix}, ПК{Math.round(viewStart)}–ПК{Math.round(viewEnd)} из ПК0–ПК{maxPicket} ·{' '}
-          {all.length} участков
+          Линия {prefix}, ПК{Math.round(viewStart)}–ПК{Math.round(viewEnd)} из ПК0–ПК{maxPicket}
+          {' '}· {all.length} участков
         </span>
         <button
           type="button"
@@ -179,86 +161,70 @@ export function AxisLine({
         style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
         onWheel={onWheel}
       >
-        {screenWidth != null && screenWidth > 0 && (
-          <>
-            <line
-              x1={PADDING}
-              y1={baselineY}
-              x2={AXIS_WIDTH - PADDING}
-              y2={baselineY}
-              stroke="var(--border-strong)"
-              stroke-width="2"
-            />
-            <text x={PADDING} y={baselineY + 28} font-size="11" fill="var(--text-muted)">
-              ПК{Math.round(viewStart)}
-            </text>
-            <text
-              x={AXIS_WIDTH - PADDING}
-              y={baselineY + 28}
-              font-size="11"
-              fill="var(--text-muted)"
-              text-anchor="end"
-            >
-              ПК{Math.round(viewEnd)}
-            </text>
-            {visibleAxis.map((s) => {
-              const cls = riskBySection.get(s.section_id)
-              const title = `${s.smvu_key} · участок ${s.section_id} · ${riskLabel(cls)}`
-              const cx = x(s.picket)
+        {screenWidth != null && screenWidth > 0 && (<>
+        <line
+          x1={PADDING}
+          y1={baselineY}
+          x2={AXIS_WIDTH - PADDING}
+          y2={baselineY}
+          stroke="var(--border-strong)"
+          stroke-width="2"
+        />
+        <text x={PADDING} y={baselineY + 28} font-size="11" fill="var(--text-muted)">
+          ПК{Math.round(viewStart)}
+        </text>
+        <text
+          x={AXIS_WIDTH - PADDING}
+          y={baselineY + 28}
+          font-size="11"
+          fill="var(--text-muted)"
+          text-anchor="end"
+        >
+          ПК{Math.round(viewEnd)}
+        </text>
+        {visibleAxis.map((s) => {
+          const cls = riskBySection.get(s.section_id)
+          const title = `${s.smvu_key} · участок ${s.section_id} · ${riskLabel(cls)}`
+          const cx = x(s.picket)
 
-              // Густо — показываем только цветной чип без номера (правило плотности,
-              // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
-              if (dense) {
-                return (
-                  <g
-                    key={s.section_id}
-                    style="cursor:pointer"
-                    onClick={() => route(`/objects/${s.section_id}`)}
-                  >
-                    <title>{title}</title>
-                    {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
+          // Густо — показываем только цветной чип без номера (правило плотности,
+          // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
+          if (dense) {
+            return (
+              <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
+                <title>{title}</title>
+                {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
                     через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
                     видимого значка у 302 меток из 303 (линия 847). Кликается сама форма. */}
-                    <RiskMark cls={cls} cx={cx} cy={baselineY} size={6} />
-                  </g>
-                )
-              }
+                <RiskMark cls={cls} cx={cx} cy={baselineY} size={6} />
+              </g>
+            )
+          }
 
-              // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
-              // как на экране заказчика: номер читается при любом цвете чипа.
-              return (
-                <g
-                  key={s.section_id}
-                  style="cursor:pointer"
-                  onClick={() => route(`/objects/${s.section_id}`)}
-                >
-                  <title>{title}</title>
-                  <rect
-                    x={cx - 10}
-                    y={baselineY - 10}
-                    width={20}
-                    height={20}
-                    rx={2}
-                    fill="var(--bg-table)"
-                    stroke="var(--border-strong)"
-                    stroke-width={1.5}
-                  />
-                  <text
-                    x={cx}
-                    y={baselineY + 4}
-                    font-size="9"
-                    text-anchor="middle"
-                    fill="var(--text-primary)"
-                  >
-                    {Math.round(s.picket)}
-                  </text>
-                  {/* Чип над правым углом рамки, не на кромке: на кромке черта сливалась с ней. */}
-                  <RiskMark cls={cls} cx={cx + 10} cy={baselineY - 16} size={7} />
-                </g>
-              )
-            })}
-          </>
-        )}
+          // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
+          // как на экране заказчика: номер читается при любом цвете чипа.
+          return (
+            <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
+              <title>{title}</title>
+              <rect
+                x={cx - 10}
+                y={baselineY - 10}
+                width={20}
+                height={20}
+                rx={2}
+                fill="var(--bg-table)"
+                stroke="var(--border-strong)"
+                stroke-width={1.5}
+              />
+              <text x={cx} y={baselineY + 4} font-size="9" text-anchor="middle" fill="var(--text-primary)">
+                {Math.round(s.picket)}
+              </text>
+              {/* Чип над правым углом рамки, не на кромке: на кромке черта сливалась с ней. */}
+              <RiskMark cls={cls} cx={cx + 10} cy={baselineY - 16} size={7} />
+            </g>
+          )
+        })}
+        </>)}
       </svg>
     </div>
   )
