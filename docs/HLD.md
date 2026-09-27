@@ -1425,6 +1425,10 @@ UNIQUE — повтор не дублирует), `event_time`, `section_id` →
                             pred.feedback.decision_code; право
                             forecasts.decide для dispatcher и ods_dispatcher
                             (строка плана 5.8, MOS-55)
+057_notification_object.sql maint.notification.object_id — объект (узел 2-го
+                            уровня smvu.object_tree), чья вероятность прошла
+                            порог заявки при включённом разносе; NULL у
+                            остальных заявок (строка плана 6.10, MOS-154)
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,

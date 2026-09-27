@@ -12,20 +12,25 @@ constraints and forecast -> notification -> work-order writes are real.
 import asyncio
 import json
 import os
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
-
-from app.migrate import CREATE_JOURNAL
 from app.domain import order_rules
+from app.migrate import CREATE_JOURNAL
 from app.worker import publish, score_v3
 
 ROOT = Path(__file__).resolve().parents[2]
 OPENED = "2026-06-10T08:36:56"
 EXPIRES = "2026-07-10T08:36:56"
 SECTIONS = set(range(1, 7))
+# Срез, который план_заявок сравнивает со сроком живых заявок (Ф-48, решение Славы
+# 26.09.2026). Эти тесты проверяют выбор участков (MOS-184), а не Ф-48, поэтому
+# срез — через сутки после среза прогонов: сроки всех заявок фикстуры (срез + 16 ч)
+# к нему наступили, живых нет. Ф-48 проверяет test_orders_openings_db.py.
+AS_OF = order_rules.момент_файла("2026-06-30T23:59:59") + timedelta(days=1)
 
 
 def warning(pfx="889", opened=OPENED):
@@ -129,7 +134,7 @@ def test_migrations_trim_historical_excess_to_top_and_never_top_up(database, mon
         try:
             assert await conn.fetchval("SELECT value FROM ref.app_setting WHERE key='order_top_sections_per_object'") == 3
             before = dict(await counts(conn, "history"))
-            plan = await order_rules.план_заявок(conn, [warning("history")], SECTIONS)
+            plan = await order_rules.план_заявок(conn, [warning("history")], SECTIONS, AS_OF)
             assert plan["участки"] == {}
             run = await forecast(conn)
             assert (await order_rules.завести(conn, run, план=plan["участки"]))["заявок"] == 0
@@ -137,7 +142,7 @@ def test_migrations_trim_historical_excess_to_top_and_never_top_up(database, mon
             # 053 deletes the surplus: the three earliest orders (sections 1-3) stay.
             assert before["notifications"] == before["orders"] == 3
             assert before["sections"] == [1, 2, 3]
-            one = await order_rules.план_заявок(conn, [warning("history-one")], SECTIONS)
+            one = await order_rules.план_заявок(conn, [warning("history-one")], SECTIONS, AS_OF)
             assert one["участки"] == {}
             assert (await counts(conn, "history-one"))["orders"] == 1
         finally:
@@ -151,18 +156,18 @@ def test_weight_changes_repeat_and_distinct_opening(database, monkeypatch):
         import asyncpg
         conn = await asyncpg.connect(database)
         try:
-            plan = await order_rules.план_заявок(conn, [warning()], SECTIONS)
+            plan = await order_rules.план_заявок(conn, [warning()], SECTIONS, AS_OF)
             assert set(plan["участки"]) == {1, 2, 3}
             run = await forecast(conn, mandatory=frozenset(plan["участки"]))
             assert (await order_rules.завести(conn, run, план=plan["участки"]))["заявок"] == 3
             ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
-            repeat = await order_rules.план_заявок(conn, [warning()], SECTIONS)
+            repeat = await order_rules.план_заявок(conn, [warning()], SECTIONS, AS_OF)
             assert repeat["участки"] == {}
             assert (await order_rules.завести(conn, await forecast(conn), план=repeat["участки"]))["заявок"] == 0
             row = await counts(conn, "889")
             assert row["notifications"] == row["orders"] == 3
             assert row["sections"] == [1, 2, 3]
-            reopened = await order_rules.план_заявок(conn, [warning(opened="2026-06-10T20:00:00")], SECTIONS)
+            reopened = await order_rules.план_заявок(conn, [warning(opened="2026-06-10T20:00:00")], SECTIONS, AS_OF)
             assert set(reopened["участки"]) == {4, 5, 6}
             assert (await order_rules.завести(conn, await forecast(conn), план=reopened["участки"]))["заявок"] == 3
             assert (await counts(conn, "889"))["orders"] == 6
@@ -178,18 +183,18 @@ def test_persisted_choice_survives_failure_and_missing_section_without_reranking
         import asyncpg
         conn = await asyncpg.connect(database)
         try:
-            first = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS)
+            first = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS, AS_OF)
             assert set(first["участки"]) == {1, 2, 3}
             # A failed forecast stage leaves the durable selection, no order yet.
             ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
-            partial = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS - {1})
+            partial = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS - {1}, AS_OF)
             assert set(partial["участки"]) == {2, 3}
-            resumed = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS)
+            resumed = await order_rules.план_заявок(conn, [warning("retry")], SECTIONS, AS_OF)
             assert resumed["участки"] == first["участки"]
             # Explicit worker rollback also rolls back the selection.
             tr = conn.transaction()
             await tr.start()
-            await order_rules.план_заявок(conn, [warning("rollback")], SECTIONS)
+            await order_rules.план_заявок(conn, [warning("rollback")], SECTIONS, AS_OF)
             await order_rules.завести(conn, await forecast(conn), план=first["участки"])
             await tr.rollback()
             assert (await counts(conn, "retry"))["orders"] == 0
@@ -208,9 +213,9 @@ def test_two_connections_share_first_choice_and_create_only_three_orders(databas
             run_a, run_b = await forecast(a), await forecast(b)
             tr = a.transaction()
             await tr.start()
-            first = await order_rules.план_заявок(a, [warning("concurrent")], SECTIONS)
+            first = await order_rules.план_заявок(a, [warning("concurrent")], SECTIONS, AS_OF)
             ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
-            second_task = asyncio.create_task(order_rules.план_заявок(b, [warning("concurrent")], SECTIONS))
+            second_task = asyncio.create_task(order_rules.план_заявок(b, [warning("concurrent")], SECTIONS, AS_OF))
             await asyncio.sleep(.1)
             assert not second_task.done(), "loser must wait for first selection transaction"
             await tr.commit()
@@ -249,14 +254,14 @@ def test_changed_setting_does_not_change_snapshot_and_empty_first_try_is_retryab
         import asyncpg
         conn = await asyncpg.connect(database)
         try:
-            empty = await order_rules.план_заявок(conn, [warning("empty")], set())
+            empty = await order_rules.план_заявок(conn, [warning("empty")], set(), AS_OF)
             assert empty["участки"] == {}
             assert await conn.fetchval("SELECT count(*) FROM pred.warning_order_selection WHERE pfx='empty'") == 0
-            first = await order_rules.план_заявок(conn, [warning("empty")], SECTIONS)
+            first = await order_rules.план_заявок(conn, [warning("empty")], SECTIONS, AS_OF)
             assert set(first["участки"]) == {1, 2, 3}
             await conn.execute("UPDATE ref.app_setting SET value=1 WHERE key='order_top_sections_per_object'")
             ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
-            repeated = await order_rules.план_заявок(conn, [warning("empty")], SECTIONS)
+            repeated = await order_rules.план_заявок(conn, [warning("empty")], SECTIONS, AS_OF)
             assert repeated["участки"] == first["участки"]
         finally:
             await conn.execute("UPDATE ref.app_setting SET value=3 WHERE key='order_top_sections_per_object'")
@@ -270,7 +275,7 @@ def test_failed_work_order_rolls_back_notification_but_retries_frozen_selection(
         import asyncpg
         conn = await asyncpg.connect(database)
         try:
-            first = await order_rules.план_заявок(conn, [warning("failure")], SECTIONS)
+            first = await order_rules.план_заявок(conn, [warning("failure")], SECTIONS, AS_OF)
             run = await forecast(conn)
             await conn.execute("""
                 CREATE FUNCTION maint.mos184_test_fail() RETURNS trigger LANGUAGE plpgsql AS
@@ -286,7 +291,7 @@ def test_failed_work_order_rolls_back_notification_but_retries_frozen_selection(
             row = await counts(conn, "failure")
             assert row["notifications"] == row["orders"] == 0
             ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
-            retry = await order_rules.план_заявок(conn, [warning("failure")], SECTIONS)
+            retry = await order_rules.план_заявок(conn, [warning("failure")], SECTIONS, AS_OF)
             assert retry["участки"] == first["участки"]
             assert (await order_rules.завести(conn, run, план=retry["участки"]))["заявок"] == 3
             row = await counts(conn, "failure")
@@ -311,7 +316,7 @@ def test_real_sql_weights_change_without_additional_orders(database):
                 INSERT INTO feat.section_daily(section_id,day)
                   SELECT s,DATE '2026-01-01' FROM generate_series(1,6) s;
             """)
-            first = await order_rules.план_заявок(conn, [warning("sql-weights")], SECTIONS)
+            first = await order_rules.план_заявок(conn, [warning("sql-weights")], SECTIONS, AS_OF)
             assert set(first["участки"]) == {1, 2, 3}  # identical weights, stable sid tie-break
             assert (await order_rules.завести(conn, await forecast(conn), план=first["участки"]))["заявок"] == 3
             await conn.execute("""
@@ -321,7 +326,7 @@ def test_real_sql_weights_change_without_additional_orders(database):
                   CROSS JOIN (SELECT fault_value,model_version FROM smvu.model_failure_value LIMIT 1) v
             """)
             assert list(await conn.fetch("SELECT section_id FROM pred.section_weight ORDER BY weight DESC,section_id LIMIT 3")) == [(4,), (5,), (6,)]
-            repeated = await order_rules.план_заявок(conn, [warning("sql-weights")], SECTIONS)
+            repeated = await order_rules.план_заявок(conn, [warning("sql-weights")], SECTIONS, AS_OF)
             assert repeated["участки"] == {}
             assert (await order_rules.завести(conn, await forecast(conn), план=repeated["участки"]))["заявок"] == 0
             row = await counts(conn, "sql-weights")

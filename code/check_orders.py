@@ -123,18 +123,47 @@ def read_score(path):
     }
 
 
-def warnings_without_order(open_, keys):
+def warnings_without_order(open_, keys, покрытые=frozenset()):
     """Открытые предупреждения, у которых нет заявки со своим ключом.
 
     open_ — [(pfx, opened_at, строка открытия)], keys — source_key автозаявок.
     Ключ заявки по предупреждению — warn:<pfx>:<открытие>:<участок>; участков
     у предупреждения бывает несколько, поэтому сверяем начало ключа.
+
+    покрытые — пары (pfx, строка открытия), которым worker своих заявок не завёл
+    по правилу Ф-48: на КАЖДОМ участке тройки предупреждения стоит живая заявка.
+    Считает их check_m10 (ПОКРЫТО_ЖИВЫМИ) тем же условием, что worker.
     """
     return [
         (pfx, opened)
         for pfx, opened, строка in open_
-        if not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
+        if (pfx, строка) not in покрытые
+        and not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
     ]
+
+
+# Ф-48 (решение Славы 26.09.2026): worker не заводит заявку на участок, где стоит
+# живая заявка — не закрыта, срок позже среза прогона (order_rules.ЖИВЫЕ). Своих
+# заявок у предупреждения нет законно, только если так было на КАЖДОМ участке его
+# тройки. Тройка — снимок pred.warning_order_selection (MOS-184), тот же, что читает
+# worker; срез — последнего удачного прогона, тот же момент, с которым worker
+# сравнивал срок. Нет снимка или пустой — покрытым не считаем.
+ПОКРЫТО_ЖИВЫМИ = """
+WITH тройка AS (
+    SELECT key::int AS section_id
+      FROM pred.warning_order_selection s, jsonb_object_keys(s.plan) AS key
+     WHERE s.pfx = $1 AND s.opened_at = $2
+), срез AS (
+    SELECT max(as_of) AS as_of FROM pred.run WHERE status = 'done'
+)
+SELECT count(*) > 0 AND bool_and(EXISTS (
+           SELECT 1 FROM maint.notification n
+             JOIN ref.object_xref x ON x.func_location_id = n.func_location_id
+            WHERE x.section_id = т.section_id
+              AND n.status IN ('OPEN', 'IN_PROCESS')
+              AND n.due_at > (SELECT as_of FROM срез)))
+  FROM тройка т
+"""
 
 
 def orders_per_warning(open_, orders, top):
@@ -287,7 +316,13 @@ async def check_m10(conn, score):
         )
     ]
     keys = [k for k, _ in orders]
-    потери = warnings_without_order(score["open"], keys)
+    покрытые = {
+        (pfx, строка)
+        for pfx, opened, строка in score["open"]
+        if not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
+        and await conn.fetchval(ПОКРЫТО_ЖИВЫМИ, pfx, opened)
+    }
+    потери = warnings_without_order(score["open"], keys, покрытые)
     top = await conn.fetchval(
         "SELECT value FROM ref.app_setting WHERE key = 'order_top_sections_per_object'"
     )
@@ -323,7 +358,8 @@ async def check_m10(conn, score):
     суть = (
         f"модель {score['model']}: по предупреждению без заявки {len(потери)} из "
         f"{len(score['open'])} (ключ warn:<pfx>:<открытие>, заявок с таким ключом "
-        f"{len(keys)}); справочно по коллектору {len(без_коллектора)} из {коллекторов}"
+        f"{len(keys)}, без своих из-за живой на всей тройке {len(покрытые)}); "
+        f"справочно по коллектору {len(без_коллектора)} из {коллекторов}"
     )
     суть += (
         f"; заявок на предупреждение вне 1…{int(top)}: {len(вне)}, заявок warn: "
@@ -584,6 +620,8 @@ def demo(verbose=True):
         "warn:150:2026-06-17T23:59:59:9",
     ]
     assert warnings_without_order(открытые, ключи) == [("15", t)]
+    # Ф-48: у 15 своих заявок нет, потому что вся его тройка под живыми заявками.
+    assert warnings_without_order(открытые, ключи, {("15", "2026-06-17T23:59:59")}) == []
     # Сколько заявок и нарядов: у 889 четыре заявки при потолке 3, у одной нет наряда.
     заявки = [(k, 1) for k in ключи] + [
         ("warn:889:2026-06-10T08:36:56:12", 1),
