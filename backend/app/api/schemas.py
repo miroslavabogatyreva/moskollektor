@@ -85,6 +85,8 @@ class ForecastListItem(BaseModel):
     as_of: IsoDatetime
     computed_at: IsoDatetime
     write_reason: str
+    # Последнее решение диспетчера (US-08, US-09 сц. 4); null — прогноз не разобран.
+    decision: "ForecastDecision | None" = None
 
 
 class ForecastList(BaseModel):

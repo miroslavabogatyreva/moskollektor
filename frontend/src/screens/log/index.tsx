@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
-import { errorMessage, имяУчастка } from '../../lib/format'
+import { errorMessage, formatDateTime, имяУчастка } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { usePoll, свежо } from '../../lib/poll'
 
@@ -204,12 +204,19 @@ export function LogScreen(_props: Record<string, unknown>) {
                 </button>
               </th>
             ))}
+            <th
+              class="text-left px-2 py-2 text-xs uppercase tracking-wide"
+              style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+            >
+              Решение
+            </th>
           </tr>
         </thead>
         <tbody>
           {filtered.map((r) => (
             <tr
               key={r.forecast_id}
+              data-forecast-id={r.forecast_id}
               {...rowLink(() => route(`/forecasts/${r.forecast_id}`))}
               style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
@@ -218,6 +225,23 @@ export function LogScreen(_props: Record<string, unknown>) {
               <td class="px-2 py-2">{DIRECTION_LABEL[r.direction]}</td>
               <td class="px-2 py-2 num">{r.probability.toFixed(2)}</td>
               <td class="px-2 py-2 num">{r.horizon_h} ч</td>
+              {/* Решение диспетчера (US-08, US-09 сц. 4): разобран ли прогноз, кем,
+                  когда и проверен ли по внешним источникам. «нет» — словом, а не
+                  пустой ячейкой: пустая читается как «не загрузилось». */}
+              <td class="px-2 py-2">
+                {r.decision ? (
+                  <>
+                    {r.decision.decision_name}
+                    <span style="color:var(--text-muted)">
+                      {' '}
+                      · {r.decision.decided_by}, {formatDateTime(r.decision.decided_at)}
+                      {r.decision.verified_externally && ' · проверено по внешним источникам'}
+                    </span>
+                  </>
+                ) : (
+                  <span style="color:var(--text-muted)">нет</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
