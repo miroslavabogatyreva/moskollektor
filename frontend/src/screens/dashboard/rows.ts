@@ -55,8 +55,12 @@ export function словоРиска(cls: RiskClass): string {
 // «Класса нет» красим нейтралью рамки, а не серым из шкалы: `--risk-nodata`
 // у заказчика занят под «нет связи с каналом» (`dashboard/color-palette.md`
 // разд. 5.1), и путать два состояния нельзя. То же решение принято на карте.
+//
+// Полоска — штрих, поэтому оба класса берут токен ГРАНИЦЫ. Токен заливки
+// --risk-critical в тёмной теме — #3a1310 на фоне #131a22, 1,07:1 при норме 3:1
+// (MOS-177, НФ-51); граница #d9534a даёт 4,41:1. Меряет code/check_contrast.py.
 export function цветРиска(cls: RiskClass): string {
-  if (cls === 'high') return 'var(--risk-critical)'
+  if (cls === 'high') return 'var(--risk-critical-border)'
   if (cls === 'normal') return 'var(--risk-low-border)'
   return 'var(--border-subtle)'
 }
