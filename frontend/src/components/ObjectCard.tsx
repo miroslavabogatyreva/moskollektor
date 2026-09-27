@@ -65,6 +65,15 @@ interface CurrentRisk {
   computed_at: string // время расчёта текущего риска (US-06 сц. 4)
 }
 
+// Действующий наряд-допуск (US-13): участок «в работах».
+interface OpenPermit {
+  id: number
+  number: string
+  work_type_name: string
+  valid_from: string
+  valid_to: string
+}
+
 interface ObjectDetail {
   section_id: number
   smvu_key: string
@@ -72,6 +81,7 @@ interface ObjectDetail {
   last_reading_at: string | null
   channels: Channel[]
   current_risk: CurrentRisk | null
+  open_permits?: OpenPermit[]
   recent_forecasts: RecentForecast[]
   // Узлы дерева диспетчера участка (MOS-101, 5.9). Опционально: бандл может
   // доехать до стенда раньше API, и старый ответ этого поля не несёт.
@@ -93,7 +103,8 @@ interface Reading {
 
 export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
-  const [notFound, setNotFound] = useState(false)
+  // 404 — участка нет; 403 — участок вне района или комплекса пользователя (US-16 сц. 3).
+  const [notFound, setNotFound] = useState<404 | 403 | false>(false)
   const [error, setError] = useState<string | null>(null)
 
   // Пустая строка = "дефолт ещё не посчитан от last_reading_at". Даты можно
@@ -129,7 +140,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
         // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
         if (r.status === 404 || r.status === 403) {
-          if (!отменено) setNotFound(true)
+          if (!отменено) setNotFound(r.status)
           return null
         }
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
@@ -219,8 +230,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   if (notFound) {
     return (
       <main class="p-5">
-        <p style="color:var(--text-muted)">
-          Участок {sectionId} не найден или вне вашей области видимости.
+        <p data-testid="out-of-scope" style="color:var(--text-muted)">
+          {notFound === 403
+            ? `Участок ${sectionId} вне вашего района или комплекса — его карточку откроет диспетчер ОДС или диспетчер того района.`
+            : `Участок ${sectionId} не найден.`}
         </p>
       </main>
     )
@@ -267,6 +280,20 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </p>
         ))}
       </div>
+
+      {/* Участок в работах (US-13 сц. 1): открыт наряд-допуск — потеря связи во время
+          работ не отказ, и бригаду к своим же рабочим не шлют. */}
+      {(data.open_permits ?? []).map((p) => (
+        <p
+          key={p.id}
+          data-testid="in-works"
+          class="text-sm px-3 py-2 rounded"
+          style="background:var(--bg-surface); border-left:3px solid var(--state-warning)"
+        >
+          <b>Объект в работах:</b> наряд-допуск {p.number}, {p.work_type_name}, срок с{' '}
+          {formatDateTime(p.valid_from)} до {formatDateTime(p.valid_to)}
+        </p>
+      ))}
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
