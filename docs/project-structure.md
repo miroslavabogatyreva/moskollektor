@@ -116,6 +116,8 @@ moskollektor/
 │   │                          051_order_external_status — статус заявки из
 │   │                          эмулятора хелпдеска, три колонки maint.notification
 │   │                          (MOS-63)
+│   │                          052_dispatcher_decision — справочник решений
+│   │                          диспетчера и pred.feedback.decision_code (MOS-55)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости.
