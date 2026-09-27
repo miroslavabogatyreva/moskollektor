@@ -13,6 +13,7 @@ import {
   groupRepeatedForecasts,
   shortDate,
   type RecentForecast,
+  эпизодыПотериСвязи,
 } from './ObjectCard.logic'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
@@ -163,7 +164,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     // Зависимость только от section_id: пересчитать дефолт при смене участка,
     // но не при каждом обновлении data (его тут больше не с чем сравнивать).
     if (!data) return
-    const [from, to] = defaultWindow(data.last_reading_at)
+    // Окно расчёта (US-07 сц. 1): неделя до среза, на котором считал прогноз, —
+    // за неё модель сравнивает, как писали каналы. Прогноза нет — неделя до
+    // последней записи участка, как раньше.
+    const [from, to] = defaultWindow(data.current_risk?.as_of ?? data.last_reading_at)
     setReadFrom(from)
     setReadTo(to)
   }, [data?.section_id])
@@ -246,7 +250,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
-          <code class="num">{data.smvu_key}</code> · <a href={`/map?section=${data.section_id}`}>на схеме</a>
+          <code class="num">{data.smvu_key}</code> ·{' '}
+          <a href={`/map?section=${data.section_id}`}>на схеме</a>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
@@ -463,9 +468,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           Показания датчиков
         </h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
-          {data.last_reading_at
-            ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
-            : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
+          {risk
+            ? `Окно расчёта: 7 суток до среза ${new Date(risk.as_of).toLocaleDateString('ru-RU')}, на котором считал прогноз.`
+            : data.last_reading_at
+              ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
+              : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
         </p>
         <div
           class="flex flex-wrap items-end gap-4 text-sm mb-3"
@@ -509,7 +516,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                   ? 0
                   : chReadings.filter((r) => r.value_num != null).length / chReadings.length
               return (
-                <div key={c.channel_id}>
+                <div key={c.channel_id} data-channel-chart={c.channel_id}>
                   <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
                     {c.name} · {c.sensor_kind}
                   </div>
@@ -520,10 +527,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                         : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
                     </p>
                   ) : numericShare > 0.5 ? (
-                    <NumericLine readings={chReadings} />
+                    <NumericLine readings={chReadings} unit={ЕДИНИЦА[c.sensor_kind]} />
                   ) : (
                     <StateRibbon readings={chReadings} from={readFrom} to={readTo} />
                   )}
+                  {chReadings.length >= 2 && <EpisodeList readings={chReadings} to={readTo} />}
                 </div>
               )
             })}
@@ -603,7 +611,7 @@ function TimeAxis({ start, end }: { start: number; end: number }) {
   const TICKS = 4
   const ticks = axisTicks(start, end, TICKS)
   return (
-    <svg viewBox={`0 0 ${W} 14`} class="w-full">
+    <svg viewBox={`0 0 ${W} 14`} class="w-full" data-axis="time">
       {ticks.map((t, i) => (
         <text
           key={i}
@@ -625,7 +633,78 @@ function TimeAxis({ start, end }: { start: number; end: number }) {
 // лежать "Отключено устройство" — отрезок через него показал бы работающий
 // прибор там, где его выключили (доля числовых у канала берётся порогом 0,5
 // в ObjectCard: одна случайная цифра среди состояний линию не включает).
-function NumericLine({ readings }: { readings: Reading[] }) {
+// Единица на оси значений (US-07 сц. 2). Числа пишут два типа датчиков
+// (smvu.sensor_kind.is_numeric): у температуры это °C (канал 2943 «Темп. ПК366»
+// пишет 18–26), у газового датчика единицы в выгрузке нет — так и пишем, а не
+// придумываем «% НКПР».
+const ЕДИНИЦА: Record<string, string> = {
+  'Датчик температуры': '°C',
+  'Газовый датчик': 'показание прибора, единица в выгрузке не указана',
+}
+
+// Эпизоды потери связи поверх графика (US-07 сц. 3): полупрозрачная полоса
+// от начала до конца и черта в начале. data-episode-start — время записи
+// журнала, с которой эпизод открылся.
+function EpisodeMarks({
+  episodes,
+  x,
+  top,
+  height,
+}: {
+  episodes: ReturnType<typeof эпизодыПотериСвязи>
+  x: (t: number) => number
+  top: number
+  height: number
+}) {
+  return (
+    <>
+      {episodes.map((e) => (
+        <g key={e.start} data-episode-start={e.start}>
+          <title>{`Потеря связи с ${formatDateTime(e.start)}`}</title>
+          <rect
+            x={x(e.startMs)}
+            y={top}
+            width={Math.max(x(e.endMs) - x(e.startMs), 2)}
+            height={height}
+            fill="var(--state-error)"
+            fill-opacity={0.25}
+          />
+          <line
+            x1={x(e.startMs)}
+            x2={x(e.startMs)}
+            y1={top}
+            y2={top + height}
+            stroke="var(--state-error)"
+            stroke-width={2}
+          />
+        </g>
+      ))}
+    </>
+  )
+}
+
+// Подпись под графиком: когда началась и кончилась потеря связи — словами,
+// чтобы не мерить полосу глазом.
+function EpisodeList({ readings, to }: { readings: Reading[]; to: string }) {
+  const winEnd = new Date(`${to}T00:00:00+03:00`).getTime() + 24 * 3600 * 1000
+  if (!Number.isFinite(winEnd)) return null
+  const эпизоды = эпизодыПотериСвязи(readings, winEnd)
+  if (эпизоды.length === 0) return null
+  return (
+    <ul class="text-xs mt-1" style="color:var(--state-error); list-style:none; padding:0; margin:0">
+      {эпизоды.map((e) => (
+        <li key={e.start} data-episode-label={e.start}>
+          Потеря связи («Неисправен») с {formatDateTime(e.start)}
+          {e.endMs < winEnd
+            ? ` по ${formatDateTime(new Date(e.endMs).toISOString())}`
+            : ' до конца окна'}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function NumericLine({ readings, unit }: { readings: Reading[]; unit?: string }) {
   const W = 1000
   const H = 70
   const PAD = 10
@@ -665,13 +744,24 @@ function NumericLine({ readings }: { readings: Reading[] }) {
           stroke-linecap="round"
         />
         <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
+        <EpisodeMarks
+          episodes={эпизодыПотериСвязи(readings, tMax)}
+          x={(t) => x(Math.min(t, tMax))}
+          top={0}
+          height={H}
+        />
         <text x={PAD} y={PAD + 2} font-size="10" fill="var(--text-muted)">
           {fmtValue(vMax)}
+          {unit === '°C' ? ' °C' : ''}
         </text>
         <text x={PAD} y={H - 3} font-size="10" fill="var(--text-muted)">
           {fmtValue(vMin)}
+          {unit === '°C' ? ' °C' : ''}
         </text>
       </svg>
+      <div data-axis="value" class="text-xs" style="color:var(--text-muted)">
+        Ось значений: {unit ?? 'значение прибора'}
+      </div>
       <TimeAxis start={tMin} end={tMax} />
     </>
   )
@@ -725,8 +815,25 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
             </rect>
           )
         })}
+        <EpisodeMarks episodes={эпизодыПотериСвязи(readings, winEnd)} x={x} top={0} height={H} />
       </svg>
       <TimeAxis start={winStart} end={winEnd} />
+      {/* Ось значений у ленты — названия состояний (US-07 сц. 2): цветом служебным,
+          а словом — то, что прибор писал в журнал. */}
+      <div data-axis="value" class="text-xs flex flex-wrap gap-3" style="color:var(--text-muted)">
+        Состояния:
+        {[...new Map(readings.map((r) => [r.value_text ?? '—', r.is_alarm])).entries()].map(
+          ([имя, тревога]) => (
+            <span key={имя} data-state={имя} class="flex items-center gap-1">
+              <span
+                aria-hidden="true"
+                style={`display:inline-block; width:10px; height:10px; background:${тревога ? 'var(--state-warning)' : 'var(--border-strong)'}`}
+              />
+              {имя}
+            </span>
+          ),
+        )}
+      </div>
     </>
   )
 }
