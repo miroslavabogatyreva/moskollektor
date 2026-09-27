@@ -292,24 +292,44 @@ async def _закрыть_оборванные_при_старте():
         print(f"старт: оборванных прогонов закрыто {итог['закрыто']}")
 
 
-async def _serve():
-    await _закрыть_оборванные_при_старте()
+def _собрать_планировщик():
+    """Заводит AsyncIOScheduler и регистрирует все три задания. Без БД и без сети —
+    можно вызвать из самопроверки и прочитать job.next_run_time напрямую, а не
+    гадать по тексту исходника, что передано в add_job.
+    """
     scheduler = AsyncIOScheduler(timezone=os.environ.get("TZ", "Europe/Moscow"))
     расчёт_с = следующий_слот(INTERVAL_MIN)
     свёртка_с = следующий_слот(REFRESH_INTERVAL_MIN)
     scheduler.add_job(
-        тик_расчёт, IntervalTrigger(minutes=INTERVAL_MIN, start_date=расчёт_с)
+        тик_расчёт, IntervalTrigger(minutes=INTERVAL_MIN, start_date=расчёт_с), id="расчёт"
     )
     scheduler.add_job(
-        тик_свёртка, IntervalTrigger(minutes=REFRESH_INTERVAL_MIN, start_date=свёртка_с)
+        тик_свёртка,
+        IntervalTrigger(minutes=REFRESH_INTERVAL_MIN, start_date=свёртка_с),
+        id="свёртка",
     )
-    scheduler.add_job(тик_погода, IntervalTrigger(minutes=60, start_date=следующий_слот(60)))
+    # Ф-85: первый тик сразу при старте (не ждать до следующего круглого часа —
+    # после пересоздания worker «Метеоданные» иначе висят «—» до часа), дальше
+    # раз в час от этого момента. `next_run_time` подменяет первый расчёт триггера;
+    # IntervalTrigger.get_next_fire_time дальше считает от него, а не от start_date.
+    scheduler.add_job(
+        тик_погода,
+        IntervalTrigger(minutes=60),
+        id="погода",
+        next_run_time=datetime.now().astimezone(),
+    )
+    return scheduler, расчёт_с, свёртка_с
+
+
+async def _serve():
+    await _закрыть_оборванные_при_старте()
+    scheduler, расчёт_с, свёртка_с = _собрать_планировщик()
     scheduler.start()
     print(
         f"планировщик запущен: расчёт каждые {INTERVAL_MIN} мин "
         f"(первый в {расчёт_с:%H:%M}), свёртка каждые {REFRESH_INTERVAL_MIN} мин "
-        f"(первая в {свёртка_с:%H:%M}), погода раз в час; слоты выровнены по полуночи, "
-        f"а не по моменту запуска службы"
+        f"(первая в {свёртка_с:%H:%M}) — слоты выровнены по полуночи, а не по моменту "
+        f"запуска службы; погода раз в час, первый тик сразу при старте"
     )
     await asyncio.Event().wait()
 
@@ -344,6 +364,27 @@ def _selfcheck_слоты():
     assert "full_log=False" in inspect.getsource(тик_расчёт), (
         "тик_расчёт зовёт прогон без full_log=False: с MOS-142 планировщик называет "
         "срез явно, и умолчание сделает каждый прогон полным журналом"
+    )
+
+    # Ф-85: первый тик погоды не должен ждать до следующего круглого часа. Собираем
+    # настоящий планировщик (без БД — _собрать_планировщик() её не трогает) и читаем
+    # next_run_time зарегистрированной задачи, а не текст исходника: строку
+    # `next_run_time=` можно вписать формально, а задача при этом всё равно
+    # встанет на час, если она попала не в тот add_job или потерялась при правке.
+    до_сборки = datetime.now().astimezone()
+    планировщик, _, _ = _собрать_планировщик()
+    погода_job = планировщик.get_job("погода")
+    # До scheduler.start() next_run_time вычисляется только для задания, которому
+    # его передали явно (next_run_time=...); без этого атрибут вовсе не заведён —
+    # apscheduler.schedulers.base.BaseScheduler._real_add_job ещё не вызывался.
+    assert hasattr(погода_job, "next_run_time"), (
+        "у задачи погоды нет next_run_time до старта планировщика: add_job вызван "
+        "без next_run_time=, первый тик снова встанет на следующий круглый час (Ф-85)"
+    )
+    задержка = (погода_job.next_run_time - до_сборки).total_seconds()
+    assert 0 <= задержка < 5, (
+        f"первый тик погоды через {задержка:.0f} с после сборки планировщика, "
+        "ждали почти немедленного запуска (Ф-85)"
     )
     print("selfcheck слотов ok: 09:37 + час -> 10:00, граница, пять минут, "
           "четыре минуты, полночь")
