@@ -131,7 +131,20 @@ async def main():
             await conn.fetch("SELECT filename, sha256 FROM public.schema_migration")
         )
         pending = _pending(files, applied)
+        # RAISE NOTICE миграции — в журнал выкладки, под её строкой: 053 (MOS-184)
+        # удаляла заявки и сообщала сколько, а число не дошло до журнала. Слушаем
+        # только миграции: CREATE … IF NOT EXISTS в журнале и сидах шлёт «пропускаю»
+        # на каждой выкладке; по той же причине пропускаем «already exists, skipping»
+        # из самих миграций — у них SQLSTATE класса 42, у RAISE NOTICE — 00000.
+        сообщения = []
+
+        def услышать(_, m):
+            if not m.sqlstate.startswith("42"):
+                сообщения.append(f"{m.severity}: {m.message}")
+
+        conn.add_log_listener(услышать)
         for name, sql, sha256 in pending:
+            сообщения.clear()
             async with conn.transaction():
                 await conn.execute(sql)
                 await conn.execute(
@@ -140,6 +153,9 @@ async def main():
                     sha256,
                 )
             print(f"{name}: накатан")
+            for строка in сообщения:
+                print(f"   {строка}")
+        conn.remove_log_listener(услышать)
         print(f"готово: {len(pending)} новых, {len(files) - len(pending)} уже были")
 
         # Сиды — после всех миграций и заново каждый прогон (см. шапку файла).
