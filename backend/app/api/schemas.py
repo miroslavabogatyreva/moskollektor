@@ -88,7 +88,7 @@ class ForecastListItem(BaseModel):
     # Последнее решение диспетчера (US-08, US-09 сц. 4); null — прогноз не разобран.
     decision: "ForecastDecision | None" = None
     # Исход (US-10): null — никто не отметил; тогда horizon_expired говорит, истёк ли
-    # горизонт (as_of + horizon_h позади). Сама система исход не ставит.
+    # горизонт (computed_at + horizon_h позади). Сама система исход не ставит.
     outcome: "ForecastOutcome | None" = None
     horizon_expired: bool = False
 
