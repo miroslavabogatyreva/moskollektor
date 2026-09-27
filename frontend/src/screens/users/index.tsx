@@ -65,7 +65,7 @@ export function UsersScreen(_props: Record<string, unknown>) {
           <table class="w-full text-sm" style="border-collapse:collapse">
             <thead>
               <tr>
-                {['Логин', 'Имя', 'Источник', 'Роли', 'Состояние', ''].map((h) => (
+                {['Логин', 'Имя', 'Источник', 'Пароль в сервисе', 'Роли', 'Состояние', ''].map((h) => (
                   <th
                     key={h}
                     class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -82,6 +82,9 @@ export function UsersScreen(_props: Record<string, unknown>) {
                   <td class="px-2 py-2 num">{u.login}</td>
                   <td class="px-2 py-2">{u.full_name}</td>
                   <td class="px-2 py-2">{u.auth_source === 'ldap' ? 'каталог' : 'локальная'}</td>
+                  <td class="px-2 py-2" data-testid="password-cell">
+                    {u.has_password ? 'хеш argon2' : 'нет, проверяет каталог'}
+                  </td>
                   <td class="px-2 py-2">{roleLabels(u.roles)}</td>
                   <td class="px-2 py-2">
                     <span style={`color:var(--state-${u.is_active ? 'success' : 'error'})`}>
