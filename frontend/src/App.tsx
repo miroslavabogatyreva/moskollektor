@@ -54,7 +54,7 @@ export function App() {
   return (
     <>
       {currentPath !== '/login' && <Nav currentPath={currentPath} me={me} />}
-      {currentPath !== '/login' && <AlertBar />}
+      {currentPath !== '/login' && me && <AlertBar key={me.login} login={me.login} />}
       <Router onChange={(e) => setCurrentPath(e.url)}>
         <LoginScreen path="/login" />
         <DashboardScreen path="/dashboard" />

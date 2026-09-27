@@ -4,7 +4,7 @@ import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
 import { errorMessage } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
-import { usePoll } from '../../lib/poll'
+import { usePoll, свежо } from '../../lib/poll'
 
 /* Журнал прогнозов — задача 5.4 (MOS-51), постраничность — 4.13 (MOS-117).
    Данные читаются из GET /api/forecasts. Колонки — время, объект, направление,
@@ -61,6 +61,7 @@ export function LogScreen(_props: Record<string, unknown>) {
       .then((r) => {
         setItems(r.items)
         setTotal(r.total)
+        свежо()
       })
       .catch((e) => {
         if (e?.name !== 'AbortError') setError(errorMessage(e))
