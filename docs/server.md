@@ -8,6 +8,37 @@
 
 Сервер `135.106.216.101`, hostname `moskollektor`, Ubuntu 24.04.4 LTS.
 
+## Домен и сертификат
+
+С 27.09.2026 стенд открывается по имени **https://moskollektor.mbogatyreva.ru**.
+
+**DNS.** В Cloudflare, в зоне `mbogatyreva.ru`, я завела запись
+`A moskollektor → 135.106.216.101`. Проксирование Cloudflare (оранжевое облако)
+я не включала, запись работает только как DNS. Причин три. Cloudflare обрывает
+запрос через 100 секунд ошибкой 524, а экран журнала у нас уже отвечал 112 секунд.
+Российские провайдеры замедляют Cloudflare. И TLS должен отдавать наш nginx,
+иначе протоколы `docs/protocol-tls-*.md` перестанут описывать то, что видит клиент.
+
+**Сертификат.** Его выпускает Let's Encrypt через `certbot certonly --standalone`
+прямо на сервере, срок 90 дней, первый действует до 26.12.2026. Nginx стенда читает
+`deploy/nginx/certs/server.crt` и `server.key`. Имена файлов я сохранила, поэтому
+`nginx.conf` и compose не менялись.
+
+**Продление** делает `certbot.timer` дважды в сутки. Порт 80 занят нашим nginx, и
+certbot освобождает его сам: команда `docker compose -f /srv/moskollektor/deploy/docker-compose.yml stop nginx`
+из `pre_hook` останавливает nginx секунд на десять. Потом хук
+`/etc/letsencrypt/renewal-hooks/deploy/moskollektor.sh` копирует `fullchain.pem`
+и `privkey.pem` в `deploy/nginx/certs/`, а команда `start nginx` из `post_hook` поднимает nginx.
+Хуки лежат в `/etc/letsencrypt/renewal/moskollektor.mbogatyreva.ru.conf`.
+Проверка продления: `certbot renew --dry-run` должен напечатать `(success)`.
+Этот хук срабатывает только при продлении. После первого выпуска я запустила его руками:
+`RENEWED_LINEAGE=/etc/letsencrypt/live/moskollektor.mbogatyreva.ru /etc/letsencrypt/renewal-hooks/deploy/moskollektor.sh`.
+
+**Откат.** Самоподписанный сертификат лежит рядом, в `server.crt.selfsigned.bak`
+и `server.key.selfsigned.bak`. `deploy.sh` каталог `certs/` не трогает, в git он
+не идёт. Затереть сертификат может только ручной запуск `sh deploy/make-cert.sh`,
+и то до ближайшего продления.
+
 ## Выгрузка заказчика лежит там, а не в репозитории
 
 ```
@@ -337,7 +368,8 @@ run --rm worker python -m app.worker.run --as-of ...`.
 `BASE_URL=https://135.106.216.101 CURL_OPTS=-k bash contracts/examples/api/examples.sh`,
 19 проверок из 19. Заглушка модели собирается на месте
 (`docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .` из
-`/srv/moskollektor`), сертификат выпускается там же `sh deploy/make-cert.sh`.
+`/srv/moskollektor`). Сертификат на стенде с 27.09.2026 выдаёт Let's Encrypt, раздел
+«Домен и сертификат»; `sh deploy/make-cert.sh` нужен для машины без домена.
 Протоколы TLS сняты на этом сервере, а не на маке: `docs/protocol-tls-ipv4.md`
 и `docs/protocol-tls-ipv6.md`.
 
