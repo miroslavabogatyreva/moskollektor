@@ -28,9 +28,14 @@ const имя = (smvu_key: string) => {
   return `Коллектор ${к}, пикет ${п}`
 }
 
-const дата = (ру: string) => {
-  const [д, м, г] = ру.split('.').map(Number)
-  return new Date(г, м - 1, д)
+// «27.09.2026, 19:44:30» → момент. Запись и расчёт бывают в одни сутки
+// (эмулятор СМВУ пишет вживую), поэтому сравниваем с точностью до секунды.
+const момент = (ру: string) => {
+  const [д, м, г, ч, мин, с] = ру
+    .match(/(\d\d)\.(\d\d)\.(\d{4}),\s*(\d\d?):(\d\d):(\d\d)/)!
+    .slice(1)
+    .map(Number)
+  return new Date(г, м - 1, д, ч, мин, с).getTime()
 }
 
 test('US-06 сц. 1: четыре атрибута прогноза', async ({ page }) => {
@@ -91,15 +96,29 @@ test('US-06 сц. 3: причина риска написана словами',
 })
 
 test('US-06 сц. 4: видно, что данные участка устарели', async ({ page }) => {
-  const о = await участок(page)
-  expect(о.last_reading_at, 'у участка есть последняя запись').toBeTruthy()
-  await page.goto(`/objects/${о.section_id}`)
+  // Дано: последняя запись участка раньше момента расчёта. Эмулятор СМВУ пишет
+  // вживую, и у части участков запись свежее расчёта — берём первый по рангу,
+  // у которого это не так.
+  const риски = (await (await page.request.get('/api/risks')).json()) as {
+    section_id: number
+    risk_rank: number
+  }[]
+  let о: (Объект & { current_risk: { computed_at: string } | null }) | undefined
+  for (const r of риски.sort((a, b) => a.risk_rank - b.risk_rank).slice(0, 30)) {
+    const x = (await (await page.request.get(`/api/objects/${r.section_id}`)).json()) as typeof о
+    if (
+      x?.last_reading_at &&
+      x.current_risk &&
+      Date.parse(x.last_reading_at) < Date.parse(x.current_risk.computed_at)
+    ) {
+      о = x
+      break
+    }
+  }
+  expect(о, 'среди первых 30 участков есть участок с записью раньше расчёта').toBeTruthy()
+  await page.goto(`/objects/${о!.section_id}`)
   const риск = page.locator('section', { hasText: 'Уровень риска' })
-  const запись = (await риск.getByText(/^Последняя запись участка — /).innerText()).match(
-    /(\d\d\.\d\d\.\d{4})/,
-  )![1]
-  const расчёт = (await риск.getByText(/^Расчёт от /).innerText()).match(/(\d\d\.\d\d\.\d{4})/)![1]
-  expect(дата(запись).getTime(), `запись ${запись} раньше расчёта ${расчёт}`).toBeLessThan(
-    дата(расчёт).getTime(),
-  )
+  const запись = await риск.getByText(/^Последняя запись участка — /).innerText()
+  const расчёт = await риск.getByText(/^Расчёт от /).innerText()
+  expect(момент(запись), `${запись} раньше, чем ${расчёт}`).toBeLessThan(момент(расчёт))
 })
