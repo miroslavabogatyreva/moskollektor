@@ -71,7 +71,13 @@ export function riskShape(cls: RiskClass): RiskShape {
 // ПК242–ПК258, 15 участков — номера вернулись. При проверке браузером жать кнопку
 // зума по одному клику с паузой на перерисовку: Preact батчит состояние, и пачка
 // кликов без паузы между ними даёт один эффективный шаг вместо пяти.
+//
+// Меряем расстояние между соседями, а не число меток (MOS-215): у линии 798
+// объекта Зита 21 метка на 920 единиц — по числу помещаются, но ПК55/56/57 стоят
+// через 13 единиц, и рамки 20×20 лежали друг на друге. Одна тесная пара — вся линия
+// в чипы: номера вернёт зум, как у 914.
 const MARKER_STEP = 24
-export function isDense(visibleCount: number, innerWidth: number): boolean {
-  return visibleCount * MARKER_STEP > innerWidth
+export function isDense(xs: number[]): boolean {
+  const sorted = [...xs].sort((a, b) => a - b)
+  return sorted.some((x, i) => i > 0 && x - sorted[i - 1] < MARKER_STEP)
 }

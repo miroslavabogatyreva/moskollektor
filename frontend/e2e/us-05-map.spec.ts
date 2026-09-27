@@ -168,6 +168,65 @@ async function значокИФон(page: Page, слово: string, чип: bool
   throw new Error(`на оси нет одинокого значка «${слово}», ${чип ? 'чип' : 'густой режим'}`)
 }
 
+// Пары соседних рамок с номером пикета, чьи прямоугольники на экране пересекаются.
+// По каждой линии отдельно: у линий свои оси, и рамки разных линий не соседи.
+async function пересечения(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const найдено: string[] = []
+    for (const svg of document.querySelectorAll('svg[role="img"]')) {
+      const линия = (svg.getAttribute('aria-label') ?? '').split(',')[0]
+      const рамки = [...svg.querySelectorAll('rect[width="20"]')]
+        .map((р) => р.getBoundingClientRect())
+        .sort((а, б) => а.left - б.left)
+      for (let i = 1; i < рамки.length; i++)
+        if (рамки[i].left < рамки[i - 1].right)
+          найдено.push(`${линия} x=${Math.round(рамки[i].left)}`)
+    }
+    return найдено
+  })
+}
+
+// MOS-215: правило плотности считало число меток, а не расстояние, и линия 798
+// объекта Зита (21 метка, ПК55/56/57 через 13 ед.) рисовалась рамками внахлёст.
+test('US-05 сц. 2: масштаб', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.goto('/map')
+  await expect(page.locator('svg[role="img"]').first()).toBeVisible()
+  const коллекторы = await page
+    .locator('select')
+    .first()
+    .locator('option')
+    .evaluateAll((оп) => оп.map((о) => (о as HTMLOptionElement).value))
+  const найдено: string[] = []
+  for (const к of коллекторы) {
+    await page.locator('select').first().selectOption(к)
+    найдено.push(...(await пересечения(page)).map((п) => `${к}: ${п}`))
+  }
+  expect(найдено, 'рамки внахлёст на полной оси').toEqual([])
+
+  // Приближаем линию 798 объекта Зита до предела: кнопка гаснет, рамки не слипаются.
+  const зита = await page
+    .locator('select')
+    .first()
+    .locator('option', { hasText: /^объект Зита/ })
+    .getAttribute('value')
+  await page.locator('select').first().selectOption(зита!)
+  // Родитель svg — блок одной линии: в нём её кнопки зума и больше ничьи.
+  const строка = page.locator('svg[aria-label^="Линия 798"]').locator('..')
+  const плюс = строка.getByRole('button', { name: '+ приблизить' })
+  for (let шаг = 0; шаг < 12 && (await плюс.isEnabled()); шаг++) {
+    await плюс.click()
+    await page.waitForTimeout(200)
+  }
+  await expect(плюс).toBeDisabled()
+  // Без рамок в окне «ноль пересечений» ничего не доказывает.
+  expect(
+    await строка.locator('rect[width="20"]').count(),
+    'на пределе зума нет ни одной рамки',
+  ).toBeGreaterThan(0)
+  expect(await пересечения(page), 'рамки внахлёст на пределе зума').toEqual([])
+})
+
 test('US-05 сц. 5: риск различим без цвета', async ({ page }) => {
   test.setTimeout(120_000)
   // «Класса нет» стенд не отдаёт: /api/risks возвращает класс всем 3 173 участкам.

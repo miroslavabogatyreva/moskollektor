@@ -59,7 +59,7 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
   const innerWidth = AXIS_WIDTH - PADDING * 2
   const x = (picket: number) => PADDING + ((picket - viewStart) / viewWidth) * innerWidth
   const baselineY = AXIS_HEIGHT / 2
-  const dense = isDense(visibleAxis.length, innerWidth)
+  const dense = isDense(visibleAxis.map((s) => x(s.picket)))
 
   const zoomBy = (factor: number, center = (viewStart + viewEnd) / 2) =>
     onViewRangeChange(zoomView([viewStart, viewEnd], factor, center, maxPicket, minViewWidth))
