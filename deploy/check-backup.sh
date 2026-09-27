@@ -44,8 +44,11 @@ else
 fi
 
 log=$(docker exec "$DB_CONTAINER" sh -c 'tail -n 7 /backups/backup.log' 2>/dev/null)
+# Последнюю копию ищем по всему журналу, а не в семи строках для показа: пять
+# учений подряд выталкивали строку копии из хвоста, и проверка писала «нет ни
+# одной удачной копии» при свежей копии (27.09.2026). Журнал — строка на попытку.
 # Только строки копий: у строки учений между временем и ok стоит слово «учения».
-last=$(printf '%s\n' "$log" | grep '^[^ ]* ok ' | tail -1)
+last=$(docker exec "$DB_CONTAINER" sh -c "grep '^[^ ]* ok ' /backups/backup.log" 2>/dev/null | tail -1)
 if [ -z "$last" ]; then
   echo "СБОЙ  журнал копий: в /backups/backup.log нет ни одной удачной копии"
   fail=1
