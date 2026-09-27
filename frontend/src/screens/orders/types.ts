@@ -20,6 +20,23 @@ export interface OrderListResponse {
   items: OrderListItem[]
 }
 
+// Вкладка «Неквитированные» — US-04 сц. 5, GET /api/notifications?acked=false
+// (backend/app/api/notifications.py::NotificationItem). acked_at пуст, пока
+// диспетчер не квитировал событие через POST /api/notifications/{id}/ack.
+export interface UnackedNotification {
+  id: number
+  reported_at: string
+  object_name: string | null
+  smvu_key: string | null
+  probability: number
+  horizon_h: number
+}
+
+export interface NotificationsResponse {
+  total: number
+  items: UnackedNotification[]
+}
+
 // Коды и названия — db/migrations/010_orders.sql, сид ref.priority. Код '1'
 // заявкам расчёта не достаётся никогда (см. комментарий там же), но встречается
 // у ручных заявок, поэтому карта на все четыре.
