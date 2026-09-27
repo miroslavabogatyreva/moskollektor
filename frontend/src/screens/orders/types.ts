@@ -124,3 +124,14 @@ export interface OrderDetail {
   // null у автозаявки — её завёл расчёт, а не человек (moskollektor-44, 17.09.2026)
   created_by: string | null
 }
+
+// Строка GET /api/objects/{id}/channels (backend/app/api/objects.py) — ровно те
+// поля, что нужны карточке заявки (US-22 сц. 1).
+export interface TopChannel {
+  channel_id: number
+  name: string
+  sensor_kind: string
+  system_kind: string
+  faults_cnt: number
+  last_fault_at: string | null
+}

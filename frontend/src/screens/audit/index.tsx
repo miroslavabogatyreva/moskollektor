@@ -13,7 +13,22 @@ interface AuditRow {
   method: string
   path: string
   status_code: number
+  details: Record<string, unknown> | null
   login: string | null
+}
+
+// Что маршрут сам положил в details (US-23 сц. 5): у PUT /api/settings/{key} —
+// старое и новое значение, у блокировки — логин и old/new. Числа сервер отдаёт
+// строкой Decimal («0.630»), показываем их как число: «0.63 → 0.64».
+const значение = (v: unknown) =>
+  typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v) ? String(Number(v)) : JSON.stringify(v)
+
+function подробности(d: Record<string, unknown> | null): string {
+  if (!d) return ''
+  const { old, new: нов, ...прочее } = d
+  const части = Object.entries(прочее).map(([k, v]) => `${k}: ${значение(v)}`)
+  if ('old' in d || 'new' in d) части.push(`${значение(old)} → ${значение(нов)}`)
+  return части.join(', ')
 }
 
 const PAGE_SIZE = 200 // умолчание GET /api/audit
@@ -147,7 +162,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
           <table class="w-full text-sm" style="border-collapse:collapse">
             <thead>
               <tr>
-                {['Время', 'Логин', 'Метод', 'Путь', 'Код ответа'].map((h) => (
+                {['Время', 'Логин', 'Метод', 'Путь', 'Код ответа', 'Подробности'].map((h) => (
                   <th
                     key={h}
                     class="text-left px-2 py-2 text-xs uppercase tracking-wide"
@@ -168,6 +183,9 @@ export function AuditScreen(_props: Record<string, unknown>) {
                     {r.path}
                   </td>
                   <td class="px-2 py-2 num">{r.status_code}</td>
+                  <td class="px-2 py-2" style="word-break:break-all">
+                    {подробности(r.details)}
+                  </td>
                 </tr>
               ))}
             </tbody>
