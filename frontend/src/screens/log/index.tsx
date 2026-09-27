@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import { fetchForecasts } from './api'
+import { fetchForecasts, fetchOutcomeSummary, type OutcomeSummary } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
 import { errorMessage, formatDateTime, имяУчастка } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
@@ -63,6 +63,7 @@ export function LogScreen(_props: Record<string, unknown>) {
   const [sectionText, setSectionText] = useState(старт.section ? String(старт.section) : '')
   const [sectionError, setSectionError] = useState<string | null>(null)
   const [direction, setDirection] = useState<Direction | ''>(старт.direction)
+  const [сводка, setСводка] = useState<OutcomeSummary | null>(null)
   const [ключи, setКлючи] = useState<Map<number, string>>(new Map())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'computed_at',
@@ -97,6 +98,23 @@ export function LogScreen(_props: Record<string, unknown>) {
       })
     return () => ac.abort()
   }, [dateFrom, dateTo, section, offset, tick])
+
+  // Сводка исходов за тот же отбор (US-20): руководитель видит, насколько верить
+  // прогнозу, а сумма пяти чисел сходится с «Найдено». Отдельным запросом — счёт
+  // по всему периоду дороже страницы, и журнал не ждёт его.
+  useEffect(() => {
+    const ac = new AbortController()
+    setСводка(null)
+    fetchOutcomeSummary(
+      { from: dateFrom || undefined, to: dateTo || undefined, section: section ?? undefined },
+      ac.signal,
+    )
+      .then(setСводка)
+      .catch((e) => {
+        if (e?.name !== 'AbortError') console.error('forecast-outcomes:', errorMessage(e))
+      })
+    return () => ac.abort()
+  }, [dateFrom, dateTo, section, tick])
 
   // Отбор — в адрес, заменой текущей записи истории: «назад» из карточки прогноза
   // приходит на /log с тем же отбором, а не на журнал «за сегодня».
@@ -238,6 +256,28 @@ export function LogScreen(_props: Record<string, unknown>) {
       {items !== null && (
         <p data-testid="log-total" class="text-sm" style="color:var(--text-secondary)">
           Найдено: {total}
+        </p>
+      )}
+      {сводка && (
+        <p
+          data-testid="outcome-summary"
+          class="text-sm flex flex-wrap gap-x-4"
+          style="color:var(--text-secondary)"
+        >
+          <span>Исходы за период:</span>
+          {(
+            [
+              ['подтвердилось', сводка.confirmed],
+              ['ложная', сводка.false_alarm],
+              ['не проверяли', сводка.not_checked],
+              ['горизонт истёк', сводка.horizon_expired],
+              ['ещё открыт', сводка.open],
+            ] as const
+          ).map(([слово, n], i) => (
+            <span key={слово} data-testid={`outcome-${i}`}>
+              {слово} <b class="num">{n}</b>
+            </span>
+          ))}
         </p>
       )}
 
