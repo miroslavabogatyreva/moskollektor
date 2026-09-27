@@ -20,6 +20,7 @@ from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
+from app.api.sources import router as sources_router
 from app.api.tech_events import router as tech_events_router
 from app.api.weather import emu_router
 from app.api.weather import router as weather_router
@@ -34,6 +35,7 @@ app.include_router(orders_router)
 app.include_router(audit_router)
 app.include_router(objects_router)
 app.include_router(settings_router)
+app.include_router(sources_router)
 app.include_router(geo_router)
 app.include_router(ingest_router)
 app.include_router(notifications_router)

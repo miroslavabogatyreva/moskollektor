@@ -13,6 +13,7 @@ import { ForecastCard } from './components/ForecastCard'
 import { LoginScreen } from './screens/login'
 import { DirectoryScreen } from './screens/directory'
 import { UsersScreen } from './screens/users'
+import { SourcesScreen } from './screens/sources'
 
 function NotFound(_props: Record<string, unknown>) {
   return (
@@ -63,6 +64,7 @@ export function App() {
         <ForecastCard path="/forecasts/:forecastId" />
         <DirectoryScreen path="/admin/directory" />
         <UsersScreen path="/admin/users" />
+        <SourcesScreen path="/admin/sources" />
         <NotFound default />
       </Router>
     </>

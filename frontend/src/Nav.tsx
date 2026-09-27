@@ -4,6 +4,7 @@ import { logout, roleLabels, type AuthUser } from './lib/auth'
 const ADMIN_ROUTES = [
   { path: '/admin/directory', label: 'Служба каталогов' },
   { path: '/admin/users', label: 'Пользователи' },
+  { path: '/admin/sources', label: 'Источники данных' },
 ]
 
 export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
