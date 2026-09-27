@@ -128,6 +128,8 @@ moskollektor/
 │       │                      выбор по переменной SCORE_V3_PATH
 │       └── ingest/           заливка выгрузки СМВУ и разбор тега на участок;
 │                              погода раз в час в ext.weather_hourly (weather.py);
+│                              приём потока СМВУ (readings.py) и эмулятор СМВУ
+│                              (smvu_emulator.py, служба emulator-smvu);
 │                              эпизоды отказа экрана (fault_episodes.py) и эпизоды
 │                              по словарю модели v3 (model_failure_episodes.py);
 │                              вес, карточка участка и метрики с 038 читают
@@ -144,7 +146,7 @@ moskollektor/
 │                        examples/orders/ — карточка заявки и строка списка,
 │                        по ним пишутся экран заявок и GET /api/orders
 ├── deploy/         15   стенд: docker-compose, nginx, сертификат, проверка TLS
-├── code/           60   прототипы и считалки: то, по чему пишется продукт
+├── code/           61   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
@@ -168,6 +170,8 @@ moskollektor/
 │   │                          нет вердиктов не от диспетчера (Ф-75)
 │   ├── check_unmet.py        список невыполненного сверен с незакрытыми
 │   │                          строками частей 0 и I приёмки (НФ-90)
+│   ├── check_stream.py       поток СМВУ сквозь: архив → эмулятор → приём
+│   │                          → smvu.reading; только пустая база (Ф-82)
 │   ├── check_weather.py      погода сквозь: эмулятор → worker → ext.weather_hourly
 │   │                          → статус; только пустая база, pgserver (Ф-85)
 │   ├── load_weather.py       архив погоды из Open-Meteo в dataset/weather.csv
@@ -200,7 +204,8 @@ backend/app/
                     020_app_setting.sql; правит только администратор, НФ-44;
                     geo.py — геометрия участков в GeoJSON и WKT, Ф-81;
                     weather.py — эмулятор Open-Meteo на архиве
-                    weather_moscow.csv.gz и GET /api/weather, Ф-85)
+                    weather_moscow.csv.gz и GET /api/weather, Ф-85;
+                    ingest.py — POST /api/ingest/readings, Ф-82)
   auth/             вход через службу каталогов, роли
   worker/           расчёт: восемь стадий и планировщик
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026

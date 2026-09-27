@@ -109,6 +109,9 @@ services:
       LDAP_URI: ${LDAP_URI:-}
       LDAP_BASE_DN: ${LDAP_BASE_DN:-}
       LDAP_USER_TEMPLATE: ${LDAP_USER_TEMPLATE:-}
+      # MOS-37: токен приёма потока POST /api/ingest/readings. Пусто — приём
+      # выключен (503), а не открыт всем.
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -184,6 +187,27 @@ services:
     # Без --as-of расчёт идёт на now(), выгрузка заказчика кончается 30.06.2026,
     # и все 3 173 участка получают единственную фразу «Датчики этого участка
     # молчат N суток» — прогноз, арифметически верный и пустой по смыслу.
+    restart: unless-stopped
+
+  # Эмулятор СМВУ (MOS-37, Ф-82): раз в минуту шлёт в POST /api/ingest/readings
+  # показания архива со сдвигом +364 дня (backend/app/ingest/smvu_emulator.py).
+  # Настоящей СМВУ заказчик не даст: «Предлагаем симулировать любые API» (ОВ-49).
+  # Отдельной службой: остановить поток — `docker compose stop emulator-smvu`,
+  # остальное продолжит работать (US-26, сценарий «отставший источник назван»).
+  emulator-smvu:
+    profiles: ["app"]
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["python", "-u", "-m", "app.ingest.smvu_emulator"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      INGEST_URL: http://api:8000/api/ingest/readings
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      TZ: ${TZ}
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   ml:

@@ -14,13 +14,15 @@ from fastapi import FastAPI, Request, Response
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.geo import router as geo_router
+from app.api.ingest import router as ingest_router
 from app.api.notifications import router as notifications_router
 from app.api.objects import router as objects_router
 from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
 from app.api.tech_events import router as tech_events_router
-from app.api.weather import emu_router, router as weather_router
+from app.api.weather import emu_router
+from app.api.weather import router as weather_router
 from app.api.xml import to_xml, wants_xml
 from app.auth.session import require_secret
 from app.db import get_pool
@@ -33,6 +35,7 @@ app.include_router(audit_router)
 app.include_router(objects_router)
 app.include_router(settings_router)
 app.include_router(geo_router)
+app.include_router(ingest_router)
 app.include_router(notifications_router)
 app.include_router(tech_events_router)
 app.include_router(weather_router)
@@ -63,7 +66,9 @@ async def write_audit_log(request: Request, call_next):
     второго INSERT под него нет.
     """
     response = await call_next(request)
-    if request.url.path == "/health":
+    # Поток СМВУ и эмуляторы внешних систем — не действия человека (HLD разд. 3.5,
+    # MOS-37): эмулятор СМВУ шлёт пачку раз в минуту, это 1 440 строк журнала в сутки.
+    if request.url.path == "/health" or request.url.path.startswith(("/api/ingest/", "/emu/")):
         return response
 
     pool = await get_pool()
