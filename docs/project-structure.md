@@ -129,6 +129,8 @@ moskollektor/
 │   │                          эмулятора нарядов-допусков (US-13)
 │   │                          056_forecast_outcome — исход прогноза отдельно
 │   │                          от решения, pred.forecast_outcome (US-10)
+│   │                          057_notification_object — объект у заявки
+│   │                          прежнего пути с разносом (MOS-154)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости.

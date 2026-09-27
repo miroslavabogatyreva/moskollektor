@@ -1,6 +1,8 @@
 import { ROUTES } from './routes'
 import { logout, roleLabels, type AuthUser } from './lib/auth'
+import { formatTime } from './lib/format'
 import { useLastUpdate } from './lib/poll'
+import { Logo } from './components/Logo'
 
 const ADMIN_ROUTES = [
   { path: '/admin/directory', label: 'Служба каталогов' },
@@ -21,10 +23,10 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
       class="flex items-center gap-5 px-5 py-2.5 min-h-16 text-white"
       style="background:var(--brand-header-bg)"
     >
-      <div class="flex items-baseline gap-2.5 mr-auto">
-        <b style="font-family:var(--font-display)" class="text-[17px] font-semibold tracking-tight">
-          Москоллектор
-        </b>
+      <div class="flex items-center gap-3 mr-auto">
+        <a href="/dashboard" class="text-white">
+          <Logo height={40} />
+        </a>
         <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>
       </div>
       <nav aria-label="Разделы" class="flex gap-0.5">
@@ -49,7 +51,7 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
       </nav>
       {at && (
         <span class="num text-xs" style="color:#B9CCE6">
-          обновлено в {at.toLocaleTimeString('ru-RU')}
+          обновлено в {formatTime(at)}
         </span>
       )}
       {me && (

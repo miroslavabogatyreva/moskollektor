@@ -6,12 +6,23 @@ import { expect, test, type Page } from '@playwright/test'
 
 const ИСХОДЫ = ['подтвердилось', 'ложная', 'не проверяли', 'горизонт истёк', 'ещё открыт']
 
-// Прошлый полный месяц: «месяц закончился».
-function прошлыйМесяц(): { с: string; по: string } {
+// «Месяц закончился»: прошлый полный месяц. Если за него прогнозов нет — журнал
+// стенда начинается 01.09.2026, и август пуст, — берём последние семь полных суток:
+// сценарий проверяет сумму за закрытый период, а не календарный месяц.
+async function закрытыйПериод(page: Page): Promise<{ с: string; по: string; что: string }> {
   const d = new Date()
-  const первое = new Date(d.getFullYear(), d.getMonth() - 1, 1)
-  const последнее = new Date(d.getFullYear(), d.getMonth(), 0)
-  return { с: первое.toLocaleDateString('sv-SE'), по: последнее.toLocaleDateString('sv-SE') }
+  const день = (x: Date) => x.toLocaleDateString('sv-SE')
+  const с = день(new Date(d.getFullYear(), d.getMonth() - 1, 1))
+  const по = день(new Date(d.getFullYear(), d.getMonth(), 0))
+  const { total } = (await (
+    await page.request.get(`/api/forecasts?from=${с}&to=${по}&limit=1`)
+  ).json()) as { total: number }
+  if (total > 0) return { с, по, что: 'прошлый месяц' }
+  return {
+    с: день(new Date(d.getTime() - 7 * 86_400_000)),
+    по: день(new Date(d.getTime() - 86_400_000)),
+    что: `последние 7 суток — за ${с}…${по} прогнозов нет`,
+  }
 }
 
 async function сводка(page: Page, с: string, по: string): Promise<number[]> {
@@ -31,7 +42,7 @@ test.describe('руководитель района А', () => {
   test.use({ extraHTTPHeaders: { 'X-User-Login': 'disp2' } })
 
   test('US-20 сц. 1: сводка исходов за период', async ({ page }) => {
-    const { с, по } = прошлыйМесяц()
+    const { с, по, что } = await закрытыйПериод(page)
     const числа = await сводка(page, с, по)
     const { total } = (await (
       await page.request.get(`/api/forecasts?from=${с}&to=${по}&limit=1`)
@@ -44,7 +55,7 @@ test.describe('руководитель района А', () => {
     await expect(page.getByTestId('log-total')).toHaveText(`Найдено: ${total}`)
     test.info().annotations.push({
       type: 'замер',
-      description: `${с}…${по}, disp2: ${ИСХОДЫ.map((и, i) => `${и} ${числа[i]}`).join(', ')}; всего ${total}`,
+      description: `${с}…${по} (${что}), disp2: ${ИСХОДЫ.map((и, i) => `${и} ${числа[i]}`).join(', ')}; всего ${total}`,
     })
   })
 })
@@ -53,7 +64,7 @@ test.describe('диспетчер ОДС', () => {
   test.use({ extraHTTPHeaders: { 'X-User-Login': 'ods1' } })
 
   test('US-20 сц. 2: диспетчер ОДС видит весь парк', async ({ page, playwright, baseURL }) => {
-    const { с, по } = прошлыйМесяц()
+    const { с, по } = await закрытыйПериод(page)
     const парк = await сводка(page, с, по)
     for (const логин of ['disp2', 'tech1']) {
       const ctx = await playwright.request.newContext({

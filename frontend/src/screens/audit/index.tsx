@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { apiFetch } from '../../lib/api'
-import { errorMessage } from '../../lib/format'
+import { errorMessage, formatDateTime, МОСКВА_СМЕЩЕНИЕ } from '../../lib/format'
 
 /* «Журнал действий» — план 5.14 (MOS-124), приёмка НФ-77, Ф-53, US-25.
    Читает GET /api/audit (backend/app/api/audit.py): строку туда кладёт
@@ -33,12 +33,15 @@ function подробности(d: Record<string, unknown> | null): string {
 
 const PAGE_SIZE = 200 // умолчание GET /api/audit
 
-// <input type="datetime-local"> отдаёт время в поясе браузера без пояса и
-// с точностью до минуты; new Date() читает его так же, toISOString() отдаёт
-// серверу момент в UTC. Верхняя граница включает всю минуту: «с 12:30 по 12:30»
-// должно найти действия 12:30:15–12:30:40 (НФ-77, ревью c0 27.09.2026).
-const начало = (v: string) => new Date(v).toISOString()
-const конецМинуты = (v: string) => new Date(new Date(v).getTime() + 59_999).toISOString()
+// <input type="datetime-local"> отдаёт время без пояса и с точностью до минуты.
+// Читаем его как московское — тем же поясом, что таблица ниже (MOS-121): без
+// смещения new Date() взял бы пояс браузера, и во Владивостоке «с 12:30» искало бы
+// с 05:30 по Москве. toISOString() отдаёт серверу момент в UTC. Верхняя граница
+// включает всю минуту: «с 12:30 по 12:30» должно найти действия 12:30:15–12:30:40
+// (НФ-77, ревью c0 27.09.2026).
+const поМоскве = (v: string) => new Date(`${v}${МОСКВА_СМЕЩЕНИЕ}`)
+const начало = (v: string) => поМоскве(v).toISOString()
+const конецМинуты = (v: string) => new Date(поМоскве(v).getTime() + 59_999).toISOString()
 
 interface Отбор {
   from: string
@@ -176,7 +179,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
             <tbody>
               {items?.map((r) => (
                 <tr key={r.action_id} style="border-bottom:1px solid var(--border-subtle)">
-                  <td class="px-2 py-2 num">{new Date(r.occurred_at).toLocaleString('ru-RU')}</td>
+                  <td class="px-2 py-2 num">{formatDateTime(r.occurred_at, true)}</td>
                   <td class="px-2 py-2">{r.login ?? '—'}</td>
                   <td class="px-2 py-2">{r.method}</td>
                   <td class="px-2 py-2" style="word-break:break-all">
