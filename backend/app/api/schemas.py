@@ -62,6 +62,17 @@ class DataStatus(BaseModel):
     lag_days: float | None
 
 
+class WeatherStatus(BaseModel):
+    observed_at: IsoDatetime | None
+    temp_c: float | None
+    humidity_pct: float | None
+    precip_mm: float | None
+    pressure_hpa: float | None
+    source: str | None
+    fetched_at: IsoDatetime | None
+    stale: bool
+
+
 class ForecastListItem(BaseModel):
     forecast_id: int
     section_id: int

@@ -258,7 +258,11 @@ git ls-tree -r origin/master --name-only -- code/ | grep -E '^code/(check_.*\.py
 и я дописала на стенде вручную: `SCHEDULER_INTERVAL_MIN` (**4 с 21.09.2026, было
 60** — интервал полного расчёта; час не укладывался в норматив задержки 300 секунд,
 разбор в `docs/HLD.md` разд. 8.2) и `SCHEDULER_REFRESH_INTERVAL_MIN` (5 — интервал одной свёртки, ради
-НФ-73). Ручной прогон на срез — так же, как раньше: `docker compose --profile app
+НФ-73). С 27.09.2026 (MOS-36) есть третья, необязательная: `WEATHER_URL` — откуда
+worker раз в час берёт погоду; пусто — эмулятор Open-Meteo на `api`, его хватает для
+приёмки Ф-85. Проверка: `curl -sk -H "X-User-Login: dispatcher1"
+https://135.106.216.101/api/weather` — `stale` должен быть `false` после ближайшего :00.
+Ручной прогон на срез — так же, как раньше: `docker compose --profile app
 run --rm worker python -m app.worker.run --as-of ...`.
 
 **В журнале прогонов `pred.run` два десятка успешных расчётов, которые считать

@@ -20,6 +20,7 @@ from app.api.orders import router as orders_router
 from app.api.routes import router
 from app.api.settings import router as settings_router
 from app.api.tech_events import router as tech_events_router
+from app.api.weather import emu_router, router as weather_router
 from app.api.xml import to_xml, wants_xml
 from app.auth.session import require_secret
 from app.db import get_pool
@@ -34,6 +35,8 @@ app.include_router(settings_router)
 app.include_router(geo_router)
 app.include_router(notifications_router)
 app.include_router(tech_events_router)
+app.include_router(weather_router)
+app.include_router(emu_router)
 
 
 @app.get("/health")

@@ -150,6 +150,10 @@ services:
       # 1 — проигрывание архива: срез прогона берётся из score.json, если он раньше
       # края данных. Пара к ML_SCORE_REPLAY_* в deploy/ml-score.sh, docs/server.md.
       SCORE_V3_REPLAY: ${SCORE_V3_REPLAY:-0}
+      # Ф-85, MOS-36: откуда раз в час брать погоду. Умолчание — наш эмулятор
+      # Open-Meteo на api (заказчик: «Предлагаем симулировать любые API», ОВ-49).
+      # Живой источник — https://archive-api.open-meteo.com/v1/archive, код тот же.
+      WEATHER_URL: ${WEATHER_URL:-http://api:8000/emu/open-meteo/v1/archive}
     volumes:
       - parquet:/srv/parquet
       - uploads:/srv/uploads

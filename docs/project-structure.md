@@ -127,6 +127,7 @@ moskollektor/
 │       │                      и приём выдачи модели v3 (score_v3.py, run_v3.py),
 │       │                      выбор по переменной SCORE_V3_PATH
 │       └── ingest/           заливка выгрузки СМВУ и разбор тега на участок;
+│                              погода раз в час в ext.weather_hourly (weather.py);
 │                              эпизоды отказа экрана (fault_episodes.py) и эпизоды
 │                              по словарю модели v3 (model_failure_episodes.py);
 │                              вес, карточка участка и метрики с 038 читают
@@ -143,7 +144,7 @@ moskollektor/
 │                        examples/orders/ — карточка заявки и строка списка,
 │                        по ним пишутся экран заявок и GET /api/orders
 ├── deploy/         15   стенд: docker-compose, nginx, сертификат, проверка TLS
-├── code/           59   прототипы и считалки: то, по чему пишется продукт
+├── code/           60   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
@@ -167,6 +168,8 @@ moskollektor/
 │   │                          нет вердиктов не от диспетчера (Ф-75)
 │   ├── check_unmet.py        список невыполненного сверен с незакрытыми
 │   │                          строками частей 0 и I приёмки (НФ-90)
+│   ├── check_weather.py      погода сквозь: эмулятор → worker → ext.weather_hourly
+│   │                          → статус; только пустая база, pgserver (Ф-85)
 │   ├── load_weather.py       архив погоды из Open-Meteo в dataset/weather.csv
 │   ├── predictive_metrics.py методика метрик приёмки
 │   └── *.json                справочники из Регламента: нормативы, виды работ
@@ -195,7 +198,9 @@ db/seed/            справочники данными: типы событи
 backend/app/
   api/              методы REST (settings.py — пороги и горизонт из ref.app_setting,
                     020_app_setting.sql; правит только администратор, НФ-44;
-                    geo.py — геометрия участков в GeoJSON и WKT, Ф-81)
+                    geo.py — геометрия участков в GeoJSON и WKT, Ф-81;
+                    weather.py — эмулятор Open-Meteo на архиве
+                    weather_moscow.csv.gz и GET /api/weather, Ф-85)
   auth/             вход через службу каталогов, роли
   worker/           расчёт: восемь стадий и планировщик
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026

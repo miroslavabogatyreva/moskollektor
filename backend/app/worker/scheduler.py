@@ -38,6 +38,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db import КРАЙ_ДАННЫХ
+from app.ingest.weather import забрать_погоду
 from app.worker import run
 
 # Четыре минуты, а не час (MOS-146): ТЗ разд. 9 требует задержку обработки
@@ -113,6 +114,34 @@ async def тик_расчёт():
         строка = await run.прогон(conn, as_of, full_log=False)
         if строка.get("status") == "занято":
             print("пропущено: блокировка занята")
+    finally:
+        await conn.close()
+
+
+async def тик_погода():
+    """Ф-85, MOS-36: раз в час забрать погоду за сутки до среза прогноза на экране.
+
+    Срез берём у текущего прогноза (pred.forecast_current), а не считаем заново:
+    при проигрывании архива (SCORE_V3_REPLAY) он стоит на июне, а не на крае
+    данных, и погода должна стоять рядом с тем же часом. Отказ источника не роняет
+    планировщик: печатаем причину, fetched_at не двигается, и `GET /api/weather`
+    через час скажет stale = true.
+    """
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=60)
+    try:
+        срез = await conn.fetchval(
+            "SELECT max(r.as_of) FROM pred.forecast_current fc "
+            "JOIN pred.run r ON r.run_id = fc.run_id"
+        )
+        if срез is None:
+            print("погода: прогноза ещё нет, забирать не на какой срез")
+            return
+        try:
+            n = await забрать_погоду(conn, срез)
+        except Exception as e:  # noqa: BLE001 — сеть, HTTP, пустой ответ — источник недоступен
+            print(f"погода: источник недоступен, метеоданные устаревают: {e!r}")
+            return
+        print(f"погода: забрано {n} ч до среза {срез:%d.%m.%Y %H:%M %z}")
     finally:
         await conn.close()
 
@@ -274,11 +303,12 @@ async def _serve():
     scheduler.add_job(
         тик_свёртка, IntervalTrigger(minutes=REFRESH_INTERVAL_MIN, start_date=свёртка_с)
     )
+    scheduler.add_job(тик_погода, IntervalTrigger(minutes=60, start_date=следующий_слот(60)))
     scheduler.start()
     print(
         f"планировщик запущен: расчёт каждые {INTERVAL_MIN} мин "
         f"(первый в {расчёт_с:%H:%M}), свёртка каждые {REFRESH_INTERVAL_MIN} мин "
-        f"(первая в {свёртка_с:%H:%M}); слоты выровнены по полуночи, "
+        f"(первая в {свёртка_с:%H:%M}), погода раз в час; слоты выровнены по полуночи, "
         f"а не по моменту запуска службы"
     )
     await asyncio.Event().wait()
