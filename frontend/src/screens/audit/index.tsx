@@ -18,9 +18,30 @@ interface AuditRow {
 
 const PAGE_SIZE = 200 // умолчание GET /api/audit
 
-// <input type="datetime-local"> отдаёт время в поясе браузера без пояса;
-// new Date() читает его так же, toISOString() отдаёт серверу момент в UTC.
-const момент = (v: string) => (v ? new Date(v).toISOString() : '')
+// <input type="datetime-local"> отдаёт время в поясе браузера без пояса и
+// с точностью до минуты; new Date() читает его так же, toISOString() отдаёт
+// серверу момент в UTC. Верхняя граница включает всю минуту: «с 12:30 по 12:30»
+// должно найти действия 12:30:15–12:30:40 (НФ-77, ревью c0 27.09.2026).
+const начало = (v: string) => new Date(v).toISOString()
+const конецМинуты = (v: string) => new Date(new Date(v).getTime() + 59_999).toISOString()
+
+interface Отбор {
+  from: string
+  to: string
+  login: string
+  // Каждый GET /api/audit сам пишет строку в журнал (main.py): без верхней
+  // границы новая строка встаёт первой и сдвигает страницы. Пока «По момент»
+  // пуст, подставляем момент, когда отбор применён, — так же сделано
+  // в code/check_stable_paging.py.
+  снимок: string
+}
+
+const новыйОтбор = (from: string, to: string, login: string): Отбор => ({
+  from,
+  to,
+  login: login.trim(),
+  снимок: new Date().toISOString(),
+})
 
 const inputStyle =
   'background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)'
@@ -31,17 +52,20 @@ export function AuditScreen(_props: Record<string, unknown>) {
   const [offset, setOffset] = useState(0)
   const [forbidden, setForbidden] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Поля — черновик; запрос уходит по «Найти» или Enter, а не на каждую
+  // букву: каждый запрос сам пишет строку в журнал.
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [login, setLogin] = useState('')
+  const [отбор, setОтбор] = useState<Отбор>(() => новыйОтбор('', '', ''))
 
   useEffect(() => {
     setError(null)
     const ac = new AbortController()
     const q = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) })
-    if (from) q.set('from', момент(from))
-    if (to) q.set('to', момент(to))
-    if (login.trim()) q.set('login', login.trim())
+    if (отбор.from) q.set('from', начало(отбор.from))
+    q.set('to', отбор.to ? конецМинуты(отбор.to) : отбор.снимок)
+    if (отбор.login) q.set('login', отбор.login)
     apiFetch(`/api/audit?${q}`, { signal: ac.signal })
       .then(async (r) => {
         if (r.status === 403) return setForbidden(true)
@@ -54,10 +78,14 @@ export function AuditScreen(_props: Record<string, unknown>) {
         if (e?.name !== 'AbortError') setError(errorMessage(e))
       })
     return () => ac.abort()
-  }, [from, to, login, offset])
+  }, [отбор, offset])
 
-  const фильтр = (setter: (v: string) => void) => (e: Event) => {
+  const поле = (setter: (v: string) => void) => (e: Event) =>
     setter((e.target as HTMLInputElement).value)
+
+  function найти(e: Event) {
+    e.preventDefault()
+    setОтбор(новыйОтбор(from, to, login))
     setOffset(0)
   }
 
@@ -74,13 +102,17 @@ export function AuditScreen(_props: Record<string, unknown>) {
 
       {!forbidden && (
         <>
-          <div class="flex flex-wrap items-end gap-4 text-sm" style="color:var(--text-secondary)">
+          <form
+            onSubmit={найти}
+            class="flex flex-wrap items-end gap-4 text-sm"
+            style="color:var(--text-secondary)"
+          >
             <label class="flex flex-col gap-1">
               С момента
               <input
                 type="datetime-local"
                 value={from}
-                onInput={фильтр(setFrom)}
+                onInput={поле(setFrom)}
                 class="px-2 py-1 rounded text-sm"
                 style={inputStyle}
               />
@@ -90,7 +122,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
               <input
                 type="datetime-local"
                 value={to}
-                onInput={фильтр(setTo)}
+                onInput={поле(setTo)}
                 class="px-2 py-1 rounded text-sm"
                 style={inputStyle}
               />
@@ -101,13 +133,16 @@ export function AuditScreen(_props: Record<string, unknown>) {
                 type="text"
                 placeholder="например, dispatcher1"
                 value={login}
-                onInput={фильтр(setLogin)}
+                onInput={поле(setLogin)}
                 class="px-2 py-1 rounded text-sm"
                 style={inputStyle}
               />
             </label>
+            <button type="submit" class="px-3 py-1 rounded text-sm" style={inputStyle}>
+              Найти
+            </button>
             {items && <span class="num">найдено {total}</span>}
-          </div>
+          </form>
 
           <table class="w-full text-sm" style="border-collapse:collapse">
             <thead>
