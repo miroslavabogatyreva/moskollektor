@@ -391,3 +391,39 @@ def test_прежний_путь_с_разносом_заводит_одну_з�
     # Разнос выключен — участки судятся по своим числам, как было: 0,6 < 0,97.
     счёт, заявки, _ = _в_базе(lambda conn: тело(conn, 0))
     assert счёт["заявок"] == 0 and заявки == []
+
+
+def test_класс_риска_с_разносом_по_вероятности_объекта():
+    """MOS-154, п. 5 приёмки: high присваивается по объекту, а не по доле участка.
+
+    Объект 0,9 разнесён по пяти участкам: у участка 900001 доля 0,54, у 900005 — 0,009.
+    Порог high 0,80: по доле high не получил бы никто, и с карты пропал бы весь класс.
+    """
+    from app.worker import publish
+
+    доли = dict(zip([s for s, _ in УЧАСТКИ], [0.6, 0.3, 0.05, 0.04, 0.01]))
+
+    async def тело(conn):
+        await conn.execute("UPDATE ref.app_setting SET value = 1 WHERE key = 'forecast_spread_enabled'")
+        исходные = publish.веса_участков
+
+        async def веса(_conn):
+            return {sid: (7, д) for sid, д in доли.items()}
+
+        publish.веса_участков = веса
+        try:
+            run_id = await conn.fetchval(
+                "INSERT INTO pred.run (status, as_of, model_version) VALUES ('running', $1, 'v3-test') "
+                "RETURNING run_id", AS_OF)
+            участки = [s for s, _ in УЧАСТКИ]
+            await publish.записать(conn, run_id, AS_OF, 24, "sensor_failure", участки,
+                                   [0.9] * len(участки), [[] for _ in участки], full_log=True)
+        finally:
+            publish.веса_участков = исходные
+        return await conn.fetch(
+            "SELECT section_id, probability, risk_class FROM pred.forecast_current "
+            "WHERE section_id BETWEEN 900001 AND 900005 ORDER BY section_id")
+
+    строки = _в_базе(тело)
+    assert abs(строки[0]["probability"] - 0.54) < 1e-6, "в журнал идёт доля участка, как было"
+    assert {с["risk_class"] for с in строки} == {"high"}, [dict(с) for с in строки]
