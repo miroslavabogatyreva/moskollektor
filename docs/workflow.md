@@ -190,14 +190,15 @@ git update-ref refs/heads/master $COMMIT $(git rev-parse HEAD)
    а `python code/check_metrics.py --selfcheck` внутри образа упал
    `FileNotFoundError: /app/contracts/failure.v3.json`. Что списки не разъедутся
    снова, проверяет `code/check_deploy_set.py` в `delivery/check-all.sh`.
-   Каталог `deploy/` целиком в архив не кладут: `deploy/nginx/html/index.html` в git —
-   заглушка «Стенд поднят» из блока Q1, а nginx монтирует ровно этот каталог, куда
-   `rsync` кладёт собранный фронт. 17.09.2026 оркестратор написал в команде `deploy`
-   целиком, и заглушка перезаписала приложение на стенде — пропали все экраны разом,
-   а код ответа остался 200, потому что `try_files` отдаёт заглушку на любой маршрут.
-   Поймала проверяющая сессия содержимым, не кодом. Фронт выкладывают отдельно и только
-   из origin: `git archive origin/master frontend` во временный каталог, `npm ci && npm
-   run build`, `rsync -a --delete dist/` в `deploy/nginx/html/`.
+   17.09.2026 оркестратор написал в команде `deploy` целиком, и заглушка «Стенд поднят»
+   из `deploy/nginx/html/index.html` перезаписала приложение на стенде — пропали все
+   экраны разом, а код ответа остался 200, потому что `try_files` отдаёт заглушку
+   на любой маршрут. Поймала проверяющая сессия содержимым, не кодом. С 27.09.2026
+   ловушки нет: собранный фронт лежит в `deploy/nginx/app`, которого нет в git,
+   а заглушка отдаётся, только пока `app` пуст (задача 1.11, MOS-246). Фронт
+   выкладывают отдельно и только из origin: `git archive origin/master frontend`
+   во временный каталог, `npm ci && npm run build`, `rsync -a --delete dist/`
+   в `deploy/nginx/app/`.
    Собирают все три образа одной командой — `docker compose build api worker migrate`:
    18.09.2026 58 нашла, что `migrate` на стенде отстал на два дня от `api`, потому что
    сборка накануне назвала только два сервиса; первая полная пересборка накатила бы
