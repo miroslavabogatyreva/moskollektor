@@ -408,3 +408,4 @@ class UserItem(BaseModel):
     auth_source: str
     is_active: bool
     roles: list[str]
+    has_password: bool  # хранит ли сервис хеш пароля; у auth_source=ldap всегда false (US-24)
