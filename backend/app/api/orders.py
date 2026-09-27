@@ -20,6 +20,8 @@ predicted_failure_at и lead_hours убраны: момент as_of + horizon_h 
 а не предсказанный отказ (ревью Codex 22.09.2026, М-13). Вместо них — warning_opened_at
 и risk_window_end, колонки заявки из той же миграции.
 """
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
@@ -38,7 +40,9 @@ FROM_SQL = """
   JOIN ref.priority p        ON p.id = n.priority_id
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
- WHERE $1::int[] IS NULL OR x.section_id = ANY($1)
+ WHERE ($1::int[] IS NULL OR x.section_id = ANY($1))
+   AND ($2::date IS NULL OR n.due_at >= timezone('Europe/Moscow', $2::date::timestamp))
+   AND ($3::date IS NULL OR n.due_at < timezone('Europe/Moscow', $3::date::timestamp))
 """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
@@ -52,7 +56,7 @@ SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
  ORDER BY n.due_at, n.id, wo.id
- LIMIT $2 OFFSET $3
+ LIMIT $4 OFFSET $5
 """
 
 DETAIL_SQL = """
@@ -109,12 +113,20 @@ def _часов(от, до) -> float:
 async def list_orders(
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
+    due_from: date | None = Query(None, description="срок с этой даты (МСК), включительно"),
+    due_to: date | None = Query(None, description="срок по эту дату (МСК), весь день целиком"),
     conn: asyncpg.Connection = Depends(get_conn),
     user=Depends(require("orders.read")),
 ):
+    """Период срока — US-18 сц. 2, план профилактики на неделю. due_from/due_to —
+    московские даты, обе границы включительны: верхняя граница в запросе — начало
+    СЛЕДУЮЩЕГО за due_to дня, как у GET /api/forecasts. Период стоит в общем
+    FROM_SQL, поэтому total и страница считают одни и те же заявки, и число строк
+    экрана совпадает с total ответа."""
     участки = await видимые_участки(user, conn)
-    total = await conn.fetchval(COUNT_SQL, участки)
-    rows = await conn.fetch(LIST_SQL, участки, limit, offset)
+    до = due_to + timedelta(days=1) if due_to else None
+    total = await conn.fetchval(COUNT_SQL, участки, due_from, до)
+    rows = await conn.fetch(LIST_SQL, участки, due_from, до, limit, offset)
     return {
         "schema_version": "orders.v1",
         "total": total,
