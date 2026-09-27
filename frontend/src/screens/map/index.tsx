@@ -56,17 +56,23 @@ export function MapScreen(_props: Record<string, unknown>) {
   // Риски на оси — раз в минуту от общего опроса (НФ-89, MOS-123).
   const { tick } = usePoll()
   useEffect(() => {
+    // Перезапуск раз в минуту — ответ прошлого тика выключаем, как на дашборде.
+    let отменено = false
     apiFetch('/api/risks')
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<RiskClassRow[]>
       })
       .then((r) => {
+        if (отменено) return
         setRisks(r)
         свежо()
       })
       // Риск не грузится — не блокируем схему, участки просто выйдут нейтральными.
       .catch((e) => console.error('не удалось загрузить /api/risks:', errorMessage(e)))
+    return () => {
+      отменено = true
+    }
   }, [tick])
 
   const riskBySection = useMemo(() => {
