@@ -257,6 +257,16 @@ fi
 # стоит под DATABASE_URL — без базы Ф-85 тогда не проверялась бы вовсе.
 run "Ф-85"          "погода: первый тик сразу при старте" env PYTHONPATH=backend "$PY" -c "from app.worker.scheduler import _selfcheck_слоты; _selfcheck_слоты()"
 
+# Статусы заявок (Ф-87, НФ-69, MOS-63) — эмулятор хелпдеска → тик планировщика →
+# maint.notification. Своя минимальная схема maint.* на той же ПУСТОЙ базе, что
+# и погода (схемы не пересекаются); рецепт пустой базы — там же, в docstring
+# code/check_weather.py.
+if [ -n "${EMPTY_DATABASE_URL:-}" ]; then
+  run "Ф-87"        "заявки: эмулятор хелпдеска → тик → статус" env DATABASE_URL="$EMPTY_DATABASE_URL" "$PY" code/check_order_status.py
+else
+  skip_msg "Ф-87" "статусы заявок и эмулятор хелпдеска — задайте EMPTY_DATABASE_URL (пустая база, см. code/check_weather.py)"
+fi
+
 echo
 echo "=== лицензии ==="
 # Питонья часть не требует node_modules и должна идти всегда: сторож по фронту

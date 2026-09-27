@@ -272,8 +272,15 @@ worker раз в час берёт погоду; пусто — эмулятор
 https://135.106.216.101/api/weather` — `stale` должен быть `false` после ближайшего :00.
 С 27.09.2026 (MOS-37) ещё одна: `INGEST_TOKEN` (`openssl rand -hex 32`) — без неё
 приём потока отвечает 503, а служба `emulator-smvu` пишет в журнал «отправка не
-прошла». Остановить поток СМВУ — `docker compose stop emulator-smvu`, запустить —
-`docker compose --profile app up -d emulator-smvu`. Поток кладёт в `smvu.reading`
+прошла». С 27.09.2026 (MOS-63) ещё две: `ORDER_STATUS_INTERVAL_MIN` (10 — раз во
+сколько минут worker опрашивает статусы заявок) и необязательная `ORDER_SYSTEM_URL`
+— откуда брать статусы; пусто — эмулятор хелпдеска на `api`, его хватает
+для приёмки Ф-87 и НФ-69.
+Проверка: `curl -sk -H "X-User-Login: admin1" https://135.106.216.101/api/orders/<id>`
+— `external_status` не пустой у заявки, которая уже прошла первый шаг цикла
+эмулятора (5…30 мин от `reported_at`). Остановить поток СМВУ — `docker compose stop
+emulator-smvu`, запустить — `docker compose --profile app up -d emulator-smvu`.
+Поток кладёт в `smvu.reading`
 копии архива с временем «сейчас»; край данных и расчёт от этого не меняются.
 Ручной прогон на срез — так же, как раньше: `docker compose --profile app
 run --rm worker python -m app.worker.run --as-of ...`.

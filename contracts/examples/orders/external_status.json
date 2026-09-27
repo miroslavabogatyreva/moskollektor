@@ -1,0 +1,30 @@
+{
+  "_comment": "Ответ эмулятора хелпдеска GET /emu/helpdesk/v1/tickets (backend/app/api/helpdesk_emu.py). Задача MOS-63 (план 6.8), приёмка Ф-87, НФ-69, Ф-96. Не выдуманные числа: это настоящий вывод шаги_цикла()/текущий_шаг() для четырёх notification_no на разных шагах эмулируемого цикла хелпдеска — принята, назначена бригада, в работе, выполнена — со стабильным исполнителем на каждой заявке. app.ingest.order_status пишет external_status/external_status_at/external_assignee из этого ответа в maint.notification только при изменении статуса.",
+  "schema_version": "helpdesk.v1",
+  "tickets": [
+    {
+      "notification_no": "AF0000645972",
+      "external_status": "принята",
+      "external_status_at": "2026-09-27T08:07:32.633294+03:00",
+      "external_assignee": "Бригада №12"
+    },
+    {
+      "notification_no": "AF0000645988",
+      "external_status": "назначена бригада",
+      "external_status_at": "2026-09-27T06:17:15.493306+03:00",
+      "external_assignee": "Бригада №24"
+    },
+    {
+      "notification_no": "AF0000646001",
+      "external_status": "в работе",
+      "external_status_at": "2026-09-26T12:04:59.887752+03:00",
+      "external_assignee": "Бригада №12"
+    },
+    {
+      "notification_no": "AF0000646033",
+      "external_status": "выполнена",
+      "external_status_at": "2026-09-20T18:41:38.941142+03:00",
+      "external_assignee": "Бригада №12"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, Response
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.geo import router as geo_router
+from app.api.helpdesk_emu import emu_router as helpdesk_emu_router
 from app.api.ingest import router as ingest_router
 from app.api.notifications import router as notifications_router
 from app.api.objects import router as objects_router
@@ -42,6 +43,7 @@ app.include_router(notifications_router)
 app.include_router(tech_events_router)
 app.include_router(weather_router)
 app.include_router(emu_router)
+app.include_router(helpdesk_emu_router)
 
 
 @app.get("/health")

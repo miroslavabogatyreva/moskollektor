@@ -95,6 +95,18 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
           <Field label="Окно риска до">{formatDateTime(data.risk_window_end)}</Field>
         )}
         <Field label="Обоснование">{data.reason}</Field>
+        {data.external_status && (
+          <Field label="Статус в системе учёта">
+            {data.external_status}
+            {data.external_assignee && <> · {data.external_assignee}</>}
+            {data.external_status_at && (
+              <span style="color:var(--text-muted)">
+                {' '}
+                · с {formatDateTime(data.external_status_at)} (получено из системы учёта)
+              </span>
+            )}
+          </Field>
+        )}
       </section>
 
       <section class="text-sm flex flex-col gap-1" style="color:var(--text-secondary)">

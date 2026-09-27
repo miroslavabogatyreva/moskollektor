@@ -96,7 +96,7 @@ moskollektor/
 │   │                          в git не идут, лежат у Славы в `~/Downloads`
 │   └── books/                разбор литературы, 80 находок с номерами страниц;
 │                              сами PDF с 15.09.2026 на сервере, в git не идут
-├── db/             48   миграции базы — первый продуктовый каталог
+├── db/             49   миграции базы — первый продуктовый каталог
 │   ├── migrations/           001_assets … 046_synthetic_geometry, по возрастанию.
 │   │                          010_orders — справочники ТОиР, синтетический реестр
 │   │                          объектов из ref.object_xref и уникальность автозаявки;
@@ -112,7 +112,10 @@ moskollektor/
 │   │                          и область видимости в ref.user_scope (MOS-107);
 │   │                          041–043 заняты черновыми ветками, в master их нет;
 │   │                          046_synthetic_geometry — вид «коллектор» с
-│   │                          MULTILINESTRING, линии рисует ingest (MOS-45)
+│   │                          MULTILINESTRING, линии рисует ingest (MOS-45);
+│   │                          051_order_external_status — статус заявки из
+│   │                          эмулятора хелпдеска, три колонки maint.notification
+│   │                          (MOS-63)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости.
@@ -136,19 +139,23 @@ moskollektor/
 │                              вторые, первые — только features.py заглушки;
 │                              место канала — channel_place.py и kind_names.py;
 │                              синтетическая геометрия коллекторов и участков —
-│                              synthetic_geometry.py (MOS-45)
+│                              synthetic_geometry.py (MOS-45);
+│                              статус заявки раз в 10 мин из эмулятора хелпдеска
+│                              (order_status.py, MOS-63)
 ├── backend/tests/       pytest чистых функций без базы, вместе с code/tests/:
 │                        python3 -m pytest backend/tests code/tests — 35 тестов.
 │                        requirements-dev.txt ставит pytest, в образ он не идёт
 ├── ml-stub/         3   заглушка модели: отвечает по контракту, пока модели нет
 ├── ml-model/       42   исходники модели v3 (MOS-145, PR #11): обучение, расчёт score.json,
 │                        образ ml-score; без весов и данных. Горизонт 720 ч — дефект, 24 ч — MOS-219
-├── contracts/      10   граница с ML: признаки, схема сообщений, примеры,
+├── contracts/      11   граница с ML: признаки, схема сообщений, примеры,
 │                        определение отказа модели v3 (failure.v3.json);
 │                        examples/orders/ — карточка заявки и строка списка,
-│                        по ним пишутся экран заявок и GET /api/orders
+│                        по ним пишутся экран заявок и GET /api/orders;
+│                        external_status.json — образец ответа эмулятора
+│                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
 ├── deploy/         15   стенд: docker-compose, nginx, сертификат, проверка TLS
-├── code/           62   прототипы и считалки: то, по чему пишется продукт
+├── code/           63   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
@@ -178,6 +185,9 @@ moskollektor/
 │   │                          → smvu.reading; только пустая база (Ф-82)
 │   ├── check_weather.py      погода сквозь: эмулятор → worker → ext.weather_hourly
 │   │                          → статус; только пустая база, pgserver (Ф-85)
+│   ├── check_order_status.py статусы заявок сквозь: эмулятор хелпдеска → тик
+│   │                          планировщика → maint.notification; своя минимальная
+│   │                          схема maint.*, та же пустая база, что и Ф-85 (Ф-87)
 │   ├── load_weather.py       архив погоды из Open-Meteo в dataset/weather.csv
 │   ├── predictive_metrics.py методика метрик приёмки
 │   └── *.json                справочники из Регламента: нормативы, виды работ
@@ -210,7 +220,9 @@ backend/app/
                     weather.py — эмулятор Open-Meteo на архиве
                     weather_moscow.csv.gz и GET /api/weather, Ф-85;
                     ingest.py — POST /api/ingest/readings, Ф-82;
-                    sources.py — GET /api/sources, экран источников, US-26)
+                    sources.py — GET /api/sources, экран источников, US-26;
+                    helpdesk_emu.py — эмулятор хелпдеска заказчика,
+                    GET /emu/helpdesk/v1/tickets, Ф-87)
   auth/             вход через службу каталогов, роли
   worker/           расчёт: восемь стадий и планировщик
   ingest/           приём выгрузок и потока показаний — ЕСТЬ с 15.09.2026

@@ -59,6 +59,7 @@ DETAIL_SQL = """
 SELECT n.id, n.notification_no, n.notification_kind, n.status, n.source_system,
        n.subject, n.reported_at, n.due_at, n.long_text AS reason,
        n.warning_opened_at, n.risk_window_end,
+       n.external_status, n.external_status_at, n.external_assignee,
        n.created_at, n.created_by,
        x.section_id, x.smvu_key,
        l.id AS func_location_id, l.code AS func_location_code, l.name AS object_name,
@@ -163,6 +164,9 @@ async def get_order(
         "deadline_hours": _часов(row["reported_at"], row["due_at"]),
         "warning_opened_at": row["warning_opened_at"],
         "risk_window_end": row["risk_window_end"],
+        "external_status": row["external_status"],
+        "external_status_at": row["external_status_at"],
+        "external_assignee": row["external_assignee"],
         "object": {
             "section_id": row["section_id"],
             "smvu_key": row["smvu_key"],
