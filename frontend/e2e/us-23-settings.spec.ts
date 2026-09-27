@@ -134,9 +134,12 @@ test.describe('под диспетчером ОДС', () => {
   test.use({ extraHTTPHeaders: ODS })
 
   test('US-23 сц. 3: пункта настроек у других ролей нет', async ({ page }) => {
+    // Пункты администратора Nav дорисовывает по ответу /api/auth/me: без ожидания
+    // проверка «пункта нет» прошла бы и до ответа, на любой роли.
+    const кто = page.waitForResponse((r) => r.url().endsWith('/api/auth/me'))
     await page.goto('/dashboard')
+    expect(((await (await кто).json()) as { roles: string[] }).roles).toEqual(['ods_dispatcher'])
     const меню = page.getByRole('navigation', { name: 'Разделы' })
-    // Якорь: меню уже нарисовано по ответу /api/auth/me, а не пустое.
     await expect(меню.getByRole('link', { name: 'Дашборд рисков' })).toBeVisible()
     await expect(меню.getByRole('link', { name: 'Настройки' })).toHaveCount(0)
     await page.goto('/admin/settings')
