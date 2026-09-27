@@ -42,7 +42,7 @@ export function AlertBar({ login }: { login: string }) {
       if (a.id > видел(login)) setAlert((prev) => (prev && prev.id >= a.id ? prev : a))
     }
     let es: EventSource | undefined
-    let закрыт = false
+    let отменено = false
     // ponytail: 1000 записей за раз — потолок метода; на стенде 347 (27.09.2026).
     // Упрёмся — нужен параметр сортировки по id у GET /api/notifications.
     apiFetch('/api/notifications?acked=false&limit=1000')
@@ -50,7 +50,7 @@ export function AlertBar({ login }: { login: string }) {
       .then((body) => {
         // Нет права notifications.read — поток не открываем: EventSource
         // переподключался бы к 403 каждые 3 с до закрытия вкладки.
-        if (!body || закрыт) return
+        if (!body || отменено) return
         body.items.forEach(показать)
         // ponytail: событие, записанное между ответом списка и открытием потока,
         // теряется — окно в миллисекунды (поток без Last-Event-ID стартует
@@ -61,7 +61,7 @@ export function AlertBar({ login }: { login: string }) {
       })
       .catch(() => {})
     return () => {
-      закрыт = true
+      отменено = true
       es?.close()
     }
   }, [login])
