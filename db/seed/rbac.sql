@@ -79,7 +79,13 @@ INSERT INTO ref.app_user (login, full_name, auth_source, password_hash) VALUES
     ('ods1',        'Тестовый диспетчер ОДС', 'local', '$argon2id$v=19$m=65536,t=3,p=4$OP7Y01uuWH56hJrmN4ssLA$DSrZdqPpPn+s6XL+B00xTP+bu502QCJUHQOYCxw//S8'),
     ('tech1',       'Тестовый техник',        'local', '$argon2id$v=19$m=65536,t=3,p=4$VH5tU5alwapN3s4VKo3NfQ$8fMA7COqLtjQ5IlzFLU7Y+MIvmCnny+ENVITMG7yBH4'),
     ('admin1',      'Тестовый администратор', 'local', '$argon2id$v=19$m=65536,t=3,p=4$hi21eVs/+Z4TC+MviMr/qQ$fiWyF7z+LFJYhUBo/YKjDMBOn8c7hbnKcDFs1/4/ud4'),
-    ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$qtIfrl0986Qq2OhfN4oJiw$/v/8MrUD81Y4oAS5ntGuG49UpxI5dL9NkWA4dfLF4+4')
+    ('tech2',       'Тестовый техник двух коллекторов', 'local', '$argon2id$v=19$m=65536,t=3,p=4$qtIfrl0986Qq2OhfN4oJiw$/v/8MrUD81Y4oAS5ntGuG49UpxI5dL9NkWA4dfLF4+4'),
+    -- US-16: подопытные «района А». Район в выгрузке один, поэтому «район А» —
+    -- два коллектора, 5 «объект Альфа» и 7 «объект Гамма»; disptech — ещё
+    -- и техник комплекса 4068 «объект Сигма» из «района Б» (сц. 4, объединение).
+    -- Пароли записаны только здесь: disp2123123 и disptech123123.
+    ('disp2',       'Тестовый диспетчер района А', 'local', '$argon2id$v=19$m=65536,t=3,p=4$HxqQqqxM0wRtfSbUZGG+Lw$Ga/XIR9roTT9R7A+mhyXx/WvbKGBWNEVG8Itb451iqE'),
+    ('disptech',    'Тестовый диспетчер района А и техник комплекса Сигма', 'local', '$argon2id$v=19$m=65536,t=3,p=4$fabQ8nTSyxazrB8itulk9g$FbTDW9XNHrnw7BXxrTIdeq2jclpyzXliJOQvSX50kgQ')
 
 ON CONFLICT (login) DO UPDATE SET
     full_name = excluded.full_name;
@@ -97,7 +103,7 @@ ON CONFLICT (login) DO UPDATE SET
 -- льют через контейнер api. Залить её стало бы нечем. Поэтому строки с object_id
 -- пропускаются, а не валят накат: сид накатывается на каждом старте migrate,
 -- и следующий прогон докладывает недостающее само, как только дерево появилось.
--- Сколько должно быть строк: ref.ldap_role_map — 5, ref.user_scope — 4.
+-- Сколько должно быть строк: ref.ldap_role_map — 5, ref.user_scope — 9.
 INSERT INTO ref.ldap_role_map (group_cn, role_code, object_id)
 SELECT v.group_cn, v.role_code, v.object_id
 FROM (VALUES
@@ -117,7 +123,10 @@ INSERT INTO ref.user_role (login, role_code) VALUES
     ('ods1',        'ods_dispatcher'),
     ('tech1',       'technician'),
     ('admin1',      'admin'),
-    ('tech2',       'technician')
+    ('tech2',       'technician'),
+    ('disp2',       'dispatcher'),
+    ('disptech',    'dispatcher'),
+    ('disptech',    'technician')
 
 ON CONFLICT DO NOTHING;
 
@@ -132,14 +141,19 @@ ON CONFLICT DO NOTHING;
 -- объектам: smvu.object_tree приходит выгрузкой, на чистой базе его нет, и
 -- упавший по внешнему ключу сид остановил бы migrate до загрузки выгрузки.
 -- Пропуск — не потеря: сид накатывается на каждом старте migrate. Сколько
--- должно быть строк: ref.user_scope — 4.
+-- должно быть строк: ref.user_scope — 9.
 INSERT INTO ref.user_scope (login, object_id)
 SELECT v.login, v.object_id
 FROM (VALUES
     ('dispatcher1', 5773),
     ('tech1',       6),
     ('tech2',       6),
-    ('tech2',       4068)
+    ('tech2',       4068),
+    ('disp2',       5),
+    ('disp2',       7),
+    ('disptech',    5),
+    ('disptech',    7),
+    ('disptech',    4068)
 ) AS v(login, object_id)
 WHERE EXISTS (SELECT 1 FROM smvu.object_tree t WHERE t.object_id = v.object_id)
 
