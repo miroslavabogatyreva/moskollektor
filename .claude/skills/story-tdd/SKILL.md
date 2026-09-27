@@ -48,13 +48,23 @@ npx playwright test                               # все истории про
 npx playwright test e2e/us-03-menu.spec.ts        # одна история
 E2E_LOGIN=admin1 npx playwright test e2e/us-23*   # под другой ролью
 BASE_URL=http://localhost:5173 npx playwright test  # против локального vite
+E2E_CHROMIUM=/opt/pw-browsers/chromium npx playwright test  # облачная сессия
 npx playwright show-trace test-results/<папка>/trace.zip   # разбор упавшего
 ```
 
-Конфигурация — `frontend/playwright.config.ts`: стенд `https://135.106.216.101`
-с `ignoreHTTPSErrors` (сертификат самоподписанный, прокси не нужен), заголовок
-`X-User-Login` из `E2E_LOGIN`, по умолчанию `dispatcher1`, трасса сохраняется
-у упавших тестов.
+Конфигурация — `frontend/playwright.config.ts`: стенд `https://moskollektor.mbogatyreva.ru`
+по имени: голый IP облачный прокси не пропускает (403). `ignoreHTTPSErrors` стоит
+ради облачной сессии — её прокси подменяет сертификат стенда своим, и без флага
+Chromium отвечает `ERR_CERT_AUTHORITY_INVALID`. Заголовок `X-User-Login` берётся
+из `E2E_LOGIN`, по умолчанию `dispatcher1`; трасса сохраняется у упавших тестов.
+
+В облачной сессии (claude.ai/code) стоит Chromium сборки 1194, а Playwright 1.63
+ищет 1243 и падает на `browserType.launch: Executable doesn't exist`. Там запускаем
+с `E2E_CHROMIUM=/opt/pw-browsers/chromium`; `playwright install` не делаем.
+
+**Выкладка из облачной сессии — PR на каждую историю** (решение Славы 27.09.2026):
+ветка → PR → Слава вливает в master → Actions выкладывает на стенд → тот же тест
+зелёный. Пока PR не влит, тест против стенда зелёным не станет.
 
 ## Чего не делаем
 
