@@ -5,6 +5,7 @@ import { errorMessage } from '../../lib/format'
 import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
+import { ObjectTree, type TreeCollector } from './ObjectTree'
 import { riskLabel, type RiskClass } from './risk'
 import type { RiskClassRow, Section } from './types'
 import type { ViewRange } from './viewport'
@@ -39,6 +40,10 @@ export function MapScreen(_props: Record<string, unknown>) {
   const [viewRanges, setViewRanges] = useState<Record<string, ViewRange | null>>({})
   const [risks, setRisks] = useState<RiskClassRow[]>([])
   const [filters, setFilters] = useState<MapFilterState>(DEFAULT_FILTERS)
+  // Дерево «коллектор → узел» (5.9, MOS-101) и выбранный в нём узел. Узел сужает
+  // метки оси так же, как фильтры, — поверх них, а не вместо.
+  const [tree, setTree] = useState<TreeCollector[]>([])
+  const [node, setNode] = useState<number | null>(null)
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -75,6 +80,22 @@ export function MapScreen(_props: Record<string, unknown>) {
     }
   }, [tick])
 
+  useEffect(() => {
+    apiFetch('/api/objects/tree')
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+        return r.json() as Promise<TreeCollector[]>
+      })
+      .then(setTree)
+      // Дерево не грузится — схема остаётся со списком коллекторов, как до 5.9.
+      .catch((e) => console.error('не удалось загрузить /api/objects/tree:', errorMessage(e)))
+  }, [])
+
+  const selectCollector = (id: number) => {
+    setCollector(id)
+    setNode(null)
+  }
+
   const riskBySection = useMemo(() => {
     const m = new Map<number, RiskClassRow['risk_class']>()
     for (const r of risks) m.set(r.section_id, r.risk_class)
@@ -104,10 +125,32 @@ export function MapScreen(_props: Record<string, unknown>) {
 
   // Фильтры сужают набор значков, но не масштаб оси — линейка и подписи ПК держатся
   // на полном onAxis, иначе включённый фильтр менял бы диапазон под ногами.
+  // Участки выбранного узла. Принадлежность — по каналам (GET /api/objects/tree),
+  // а ось раскладывает участок по большинству каналов, поэтому узел может держать
+  // участок с оси ДРУГОГО коллектора (так 1490 у «ДП объект Бета»): такие не рисуем
+  // на чужой оси, а называем под схемой — offAxis ниже.
+  const nodeSections = useMemo(() => {
+    const n = tree.flatMap((c) => c.nodes).find((x) => x.object_id === node)
+    return n ? new Set(n.section_ids) : null
+  }, [tree, node])
+
   const filteredAxis = useMemo(
-    () => onAxis.filter((s) => matchesFilters(s, riskBySection.get(s.section_id), filters)),
-    [onAxis, riskBySection, filters],
+    () =>
+      onAxis.filter(
+        (s) =>
+          (!nodeSections || nodeSections.has(s.section_id)) &&
+          matchesFilters(s, riskBySection.get(s.section_id), filters),
+      ),
+    [onAxis, riskBySection, filters, nodeSections],
   )
+
+  const offAxis = useMemo(() => {
+    if (!nodeSections || !sections) return []
+    const byId = new Map(sections.map((s) => [s.section_id, s]))
+    return [...nodeSections]
+      .map((id) => byId.get(id))
+      .filter((s): s is Section => !!s && s.collector !== collector)
+  }, [nodeSections, sections, collector])
 
   // Смена коллектора меняет набор линий — старые окна просмотра теряют смысл.
   useEffect(() => setViewRanges({}), [collector])
@@ -143,67 +186,97 @@ export function MapScreen(_props: Record<string, unknown>) {
       {!sections && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
       {sections && (
-        <>
-          <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
-            Коллектор
-            <select
-              class="text-sm px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-              value={collector ?? undefined}
-              onChange={(e) => setCollector(Number((e.target as HTMLSelectElement).value))}
-            >
-              {collectors.map(([c, g]) => (
-                <option key={c} value={c}>
-                  {g.name} · {g.count} участков
-                </option>
+        <div class="flex gap-5 items-start">
+          {tree.length > 0 && (
+            <ObjectTree
+              tree={tree}
+              collector={collector}
+              node={node}
+              onCollector={selectCollector}
+              onNode={setNode}
+            />
+          )}
+          <div class="flex flex-col gap-4 flex-1 min-w-0">
+            <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
+              Коллектор
+              <select
+                class="text-sm px-2 py-1 rounded"
+                style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+                value={collector ?? undefined}
+                onChange={(e) => selectCollector(Number((e.target as HTMLSelectElement).value))}
+              >
+                {collectors.map(([c, g]) => (
+                  <option key={c} value={c}>
+                    {g.name} · {g.count} участков
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <MapFilters
+              filters={filters}
+              onChange={setFilters}
+              matchCount={filteredAxis.length}
+              totalCount={onAxis.length}
+            />
+
+            <p class="text-sm" style="color:var(--text-secondary)">
+              Коллектор «{collectorName}»: {lines.length} {lines.length === 1 ? 'линия' : 'линии'}
+            </p>
+
+            <div class="flex flex-col gap-4">
+              {lines.map(([prefix, all]) => (
+                <AxisLine
+                  key={prefix}
+                  prefix={prefix}
+                  all={all}
+                  visible={filteredByPrefix.get(prefix) ?? []}
+                  riskBySection={riskBySection}
+                  viewRange={viewRanges[prefix] ?? null}
+                  onViewRangeChange={(v) => setViewRanges((prev) => ({ ...prev, [prefix]: v }))}
+                />
               ))}
-            </select>
-          </label>
+            </div>
 
-          <MapFilters
-            filters={filters}
-            onChange={setFilters}
-            matchCount={filteredAxis.length}
-            totalCount={onAxis.length}
-          />
+            {offAxis.length > 0 && (
+              <p data-testid="off-axis" class="text-sm" style="color:var(--text-secondary)">
+                На оси другого коллектора — у них там больше каналов:{' '}
+                {offAxis.map((s, i) => (
+                  <span key={s.section_id}>
+                    {i > 0 && ', '}участок {s.section_id} ({s.smvu_key}),{' '}
+                    <button
+                      type="button"
+                      class="underline"
+                      style="color:var(--link)"
+                      onClick={() => selectCollector(s.collector)}
+                    >
+                      {s.collector_name ?? s.collector}
+                    </button>
+                  </span>
+                ))}
+              </p>
+            )}
 
-          <p class="text-sm" style="color:var(--text-secondary)">
-            Коллектор «{collectorName}»: {lines.length} {lines.length === 1 ? 'линия' : 'линии'}
-          </p>
-
-          <div class="flex flex-col gap-4">
-            {lines.map(([prefix, all]) => (
-              <AxisLine
-                key={prefix}
-                prefix={prefix}
-                all={all}
-                visible={filteredByPrefix.get(prefix) ?? []}
-                riskBySection={riskBySection}
-                viewRange={viewRanges[prefix] ?? null}
-                onViewRangeChange={(v) => setViewRanges((prev) => ({ ...prev, [prefix]: v }))}
-              />
-            ))}
-          </div>
-
-          {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
+            {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
               в title значка — на настенном экране диспетчерской мышью не водят. */}
-          <div
-            class="flex flex-wrap items-center gap-4 text-sm"
-            style="color:var(--text-secondary)"
-          >
-            {LEGEND_STATES.map((cls) => (
-              <span key={String(cls)} class="flex items-center gap-1.5">
-                <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
-                  <RiskMark cls={cls} cx={6} cy={6} size={10} />
-                </svg>
-                {riskLabel(cls)}
-                {cls == null && (
-                  <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
-                )}
-              </span>
-            ))}
+            <div
+              class="flex flex-wrap items-center gap-4 text-sm"
+              style="color:var(--text-secondary)"
+            >
+              {LEGEND_STATES.map((cls) => (
+                <span key={String(cls)} class="flex items-center gap-1.5">
+                  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+                    <RiskMark cls={cls} cx={6} cy={6} size={10} />
+                  </svg>
+                  {riskLabel(cls)}
+                  {cls == null && (
+                    <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
+                  )}
+                </span>
+              ))}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </main>
   )
