@@ -104,18 +104,24 @@ export function TechEventsTable({
   useEffect(() => {
     if (!авто) return
     let последний: number | null | undefined
+    // Ответ, пришедший после ухода с экрана или выключения автообновления,
+    // в состояние не пишем (code/check_stale_fetch.py).
+    let отменено = false
     const спросить = () =>
       apiFetch('/api/tech-events/ods-last')
         .then((r) => (r.ok ? (r.json() as Promise<{ last_id: number | null }>) : null))
         .then((b) => {
-          if (!b) return
+          if (!b || отменено) return
           if (последний !== undefined && b.last_id !== последний) setТикОдс((n) => n + 1)
           последний = b.last_id
         })
         .catch(() => {})
     спросить()
     const t = setInterval(спросить, ОПРОС_ОДС_МС)
-    return () => clearInterval(t)
+    return () => {
+      отменено = true
+      clearInterval(t)
+    }
   }, [авто])
 
   useEffect(() => {
