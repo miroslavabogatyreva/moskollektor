@@ -4,7 +4,7 @@
 расчёт пишет соседняя сессия, до первого прогона строк в pred.forecast
 и pred.forecast_current нет вовсе, и это не повод отвечать ошибкой.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,6 +16,8 @@ from app.api.schemas import (
     ForecastDecision,
     ForecastDetail,
     ForecastList,
+    ForecastOutcome,
+    OutcomeIn,
     RiskItem,
 )
 from app.auth.deps import require, видимые_участки, проверить_участок
@@ -252,6 +254,12 @@ async def list_forecasts(
         for r in await conn.fetch(
             РЕШЕНИЕ_СПИСКОМ, [r["forecast_id"] for r in rows])
     }
+    # Исход (US-10 сц. 4, 5) — тем же способом, одним запросом на страницу.
+    исходы = {
+        r["forecast_id"]: dict(r)
+        for r in await conn.fetch(ИСХОД_СПИСКОМ, [r["forecast_id"] for r in rows])
+    }
+    сейчас = datetime.now(timezone.utc)
     return {
         "total": total,
         "items": [
@@ -266,6 +274,8 @@ async def list_forecasts(
                 "computed_at": r["computed_at"],
                 "write_reason": r["write_reason"],
                 "decision": решения.get(r["forecast_id"]),
+                "outcome": исходы.get(r["forecast_id"]),
+                "horizon_expired": горизонт_истёк(r["as_of"], r["horizon_h"], сейчас),
             }
             for r in rows
         ],
@@ -305,7 +315,46 @@ async def get_forecast(
     if row is None:
         raise HTTPException(404, "прогноз не найден")
     решение = await conn.fetchrow(ПОСЛЕДНЕЕ_РЕШЕНИЕ, forecast_id)
-    return {**dict(row), "decision": dict(решение) if решение else None}
+    исход = await conn.fetchrow(ПОСЛЕДНИЙ_ИСХОД, forecast_id)
+    return {
+        **dict(row),
+        "decision": dict(решение) if решение else None,
+        "outcome": dict(исход) if исход else None,
+        "horizon_expired": горизонт_истёк(row["as_of"], row["horizon_h"]),
+    }
+
+
+def горизонт_истёк(as_of: datetime, horizon_h: int, сейчас: datetime | None = None) -> bool:
+    """Окно прогноза [as_of, as_of + horizon_h] позади (US-10 сц. 4). Истёкший горизонт
+    исхода не ставит: без отметки человека журнал так и пишет — «горизонт истёк»."""
+    return as_of + timedelta(hours=horizon_h) < (сейчас or datetime.now(timezone.utc))
+
+
+# Исход прогноза (US-10, миграция 056). Действует последний по decided_at: исход
+# могут поправить — сначала «не проверяли», потом бригада доехала.
+ИСХОД = """
+    SELECT o.outcome_id, o.outcome_code, fo.name AS outcome_name,
+           o.reason_code, r.name AS reason_name, o.decided_by, o.decided_at
+      FROM pred.forecast_outcome o
+      JOIN ref.forecast_outcome fo ON fo.code = o.outcome_code
+      LEFT JOIN ref.feedback_reason r ON r.code = o.reason_code
+"""
+ИСХОД_СПИСКОМ = """
+    SELECT DISTINCT ON (o.forecast_id) o.forecast_id,
+           o.outcome_id, o.outcome_code, fo.name AS outcome_name,
+           o.reason_code, r.name AS reason_name, o.decided_by, o.decided_at
+      FROM pred.forecast_outcome o
+      JOIN ref.forecast_outcome fo ON fo.code = o.outcome_code
+      LEFT JOIN ref.feedback_reason r ON r.code = o.reason_code
+     WHERE o.forecast_id = ANY($1::bigint[])
+     ORDER BY o.forecast_id, o.decided_at DESC, o.outcome_id DESC
+"""
+ПОСЛЕДНИЙ_ИСХОД = ИСХОД + """
+     WHERE o.forecast_id = $1
+     ORDER BY o.decided_at DESC, o.outcome_id DESC
+     LIMIT 1
+"""
+ИСХОД_ПО_ID = ИСХОД + " WHERE o.outcome_id = $1"
 
 
 # Решение по прогнозу (MOS-55, US-09 сц. 4). Строки pred.feedback без
@@ -357,7 +406,12 @@ async def decision_options(
         "SELECT code, name FROM ref.feedback_reason"
         " ORDER BY code = 'unknown', name COLLATE \"C\""
     )
-    return {"decisions": [dict(r) for r in decisions], "reasons": [dict(r) for r in reasons]}
+    outcomes = await conn.fetch("SELECT code, name FROM ref.forecast_outcome ORDER BY sort_order")
+    return {
+        "decisions": [dict(r) for r in decisions],
+        "reasons": [dict(r) for r in reasons],
+        "outcomes": [dict(r) for r in outcomes],
+    }
 
 
 @router.post("/forecasts/{forecast_id}/feedback", response_model=ForecastDecision, status_code=201)
@@ -423,3 +477,56 @@ async def post_feedback(
         "verified_externally": body.verified_externally,
     }
     return dict(await conn.fetchrow(РЕШЕНИЕ_ПО_ID, feedback_id))
+
+
+@router.post("/forecasts/{forecast_id}/outcome", response_model=ForecastOutcome, status_code=201)
+async def post_outcome(
+    forecast_id: int,
+    body: OutcomeIn,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.decide")),
+):
+    """Исход прогноза (US-10, Ф-34, Ф-35): подтвердилось, ложная (с причиной из пяти)
+    или не проверяли. Пишут те же роли, что решение (forecasts.decide), decided_by —
+    из сессии. Система сама исход не ставит (Ф-75): этот метод — единственный
+    писатель pred.forecast_outcome, его держит code/check_no_auto_verdict.py.
+
+    Правила причины проверяем до INSERT и отвечаем 422 — CHECK в 056 тот же, но
+    нарушение CHECK дало бы 500. Каждый вызов — новая строка: история исходов
+    остаётся, карточка и журнал показывают последний.
+    """
+    section_id = await conn.fetchval(
+        "SELECT section_id FROM pred.forecast WHERE forecast_id = $1", forecast_id
+    )
+    await проверить_участок(user, conn, section_id)
+    if section_id is None:
+        raise HTTPException(404, "прогноз не найден")
+    if not await conn.fetchval(
+        "SELECT true FROM ref.forecast_outcome WHERE code = $1", body.outcome_code
+    ):
+        raise HTTPException(422, f"исхода {body.outcome_code!r} нет в справочнике")
+    ложная = body.outcome_code == "false_alarm"
+    if ложная and body.reason_code is None:
+        raise HTTPException(422, "для исхода «ложная» нужна причина из справочника")
+    if not ложная and body.reason_code is not None:
+        raise HTTPException(422, "причина указывается только для исхода «ложная»")
+    if body.reason_code is not None and not await conn.fetchval(
+        "SELECT true FROM ref.feedback_reason WHERE code = $1", body.reason_code
+    ):
+        raise HTTPException(422, f"причины {body.reason_code!r} нет в справочнике")
+
+    outcome_id = await conn.fetchval(
+        """
+        INSERT INTO pred.forecast_outcome (forecast_id, outcome_code, reason_code, decided_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING outcome_id
+        """,
+        forecast_id, body.outcome_code, body.reason_code, user["login"],
+    )
+    request.state.audit_details = {
+        "forecast_id": forecast_id,
+        "outcome_code": body.outcome_code,
+        "reason_code": body.reason_code,
+    }
+    return dict(await conn.fetchrow(ИСХОД_ПО_ID, outcome_id))
