@@ -4,6 +4,7 @@ import type { ForecastListResponse } from './types'
 export interface ForecastQuery {
   from?: string
   to?: string
+  section?: number
   offset?: number
 }
 
@@ -16,7 +17,7 @@ function ожидаетсяСписок(body: unknown): body is ForecastListResp
   )
 }
 
-// GET /api/forecasts?from=&to=&offset= — М-06, М-16, Ф-55. Постраничность
+// GET /api/forecasts?from=&to=&section_id=&offset= — М-06, М-16, Ф-55, US-11. Постраничность
 // с умолчанием 200 записей на странице (backend/app/api/routes.py) — на
 // 425 183 строках без неё браузер вставал.
 export async function fetchForecasts(
@@ -26,6 +27,7 @@ export async function fetchForecasts(
   const params = new URLSearchParams()
   if (query.from) params.set('from', query.from)
   if (query.to) params.set('to', query.to)
+  if (query.section) params.set('section_id', String(query.section))
   if (query.offset) params.set('offset', String(query.offset))
   const qs = params.toString()
   const r = await apiFetch(`/api/forecasts${qs ? `?${qs}` : ''}`, { signal })
