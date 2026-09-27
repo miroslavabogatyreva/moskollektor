@@ -5,6 +5,7 @@ import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
 import { TechEventsTable } from './TechEventsTable'
+import { ChannelHistory } from './ChannelHistory'
 import {
   axisTicks,
   defaultWindow,
@@ -101,7 +102,12 @@ interface Reading {
   value_num: number | null
 }
 
-export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
+// channel — из адреса /objects/:id?channel=<cid> (preact-router кладёт параметры
+// запроса в props): история отказов этого канала сверху карточки (US-22 сц. 3).
+export function ObjectCard({
+  sectionId,
+  channel,
+}: { sectionId?: string; channel?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
   // 404 — участка нет; 403 — участок вне района или комплекса пользователя (US-16 сц. 3).
   const [notFound, setNotFound] = useState<404 | 403 | false>(false)
@@ -281,6 +287,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         ))}
       </div>
 
+      {channel && sectionId && <ChannelHistory sectionId={sectionId} channelId={channel} />}
+
       {/* Участок в работах (US-13 сц. 1): открыт наряд-допуск — потеря связи во время
           работ не отказ, и бригаду к своим же рабочим не шлют. */}
       {(data.open_permits ?? []).map((p) => (
@@ -373,7 +381,13 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               {channelFaults.map((c) => (
                 <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
                   <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2">{c.name}</td>
+                  <td class="px-2 py-2">
+                    {c.faults_cnt > 0 ? (
+                      <a href={`/objects/${sectionId}?channel=${c.channel_id}`}>{c.name}</a>
+                    ) : (
+                      c.name
+                    )}
+                  </td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
                     {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}

@@ -1,5 +1,5 @@
 import { apiFetch } from '../../lib/api'
-import type { NotificationsResponse, OrderDetail, OrderListResponse } from './types'
+import type { NotificationsResponse, OrderDetail, OrderListResponse, TopChannel } from './types'
 
 // До задачи 6.5 (MOS-60) GET /api/orders и GET /api/orders/{id} — заглушка
 // MOS-43, отвечает голым []. Пустой массив у списка read (`d.items`) дал бы
@@ -57,4 +57,13 @@ export async function fetchOrder(orderId: string): Promise<OrderDetail | null> {
     throw new Error('ответ GET /api/orders/{id} не по контракту orders.v1')
   }
   return body
+}
+
+// Канал для выезда (US-22 сц. 1): первый в GET /api/objects/{id}/channels — список
+// отсортирован по числу отказов, первым идёт тот, что чаще других терял связь.
+export async function fetchTopChannel(sectionId: number): Promise<TopChannel | null> {
+  const r = await apiFetch(`/api/objects/${sectionId}/channels?limit=1`)
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  const body = (await r.json()) as { items: TopChannel[] }
+  return body.items[0] ?? null
 }
