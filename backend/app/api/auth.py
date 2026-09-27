@@ -204,6 +204,8 @@ def _user_item(row: asyncpg.Record) -> dict:
         "auth_source": row["auth_source"],
         "is_active": row["is_active"],
         "roles": list(row["roles"]),
+        # US-24 сц. 3: признак, а не хеш — у учётки каталога его нет, пароль проверяет LDAP.
+        "has_password": row["password_hash"] is not None,
     }
 
 
@@ -311,14 +313,14 @@ async def list_users(
 ):
     rows = await conn.fetch(
         """
-        SELECT u.login, u.full_name, u.auth_source, u.is_active,
+        SELECT u.login, u.full_name, u.auth_source, u.password_hash, u.is_active,
                ARRAY(SELECT r.role_code FROM ref.user_role r
                       WHERE r.login = u.login ORDER BY r.role_code) AS roles
           FROM ref.app_user u
          ORDER BY u.login
         """
     )
-    return [dict(r) for r in rows]
+    return [_user_item(r) for r in rows]
 
 
 @router.patch("/users/{login}", response_model=UserItem)
