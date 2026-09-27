@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
+import { TechEventsTable } from './TechEventsTable'
 import {
   axisTicks,
   defaultWindow,
@@ -451,6 +452,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           <p style="color:var(--text-muted)">Прогнозов по участку нет.</p>
         )}
       </section>
+
+      <TechEventsTable
+        sectionId={data.section_id}
+        sensorKinds={[...new Set(data.channels.map((c) => c.sensor_kind))].sort()}
+      />
 
       <section>
         <h2 class="text-sm font-semibold mb-1" style="color:var(--text-muted)">
