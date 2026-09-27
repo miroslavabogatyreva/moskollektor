@@ -35,7 +35,7 @@ const LEGEND_STATES: RiskClass[] = ['high', 'normal', null]
 // section — из адреса /map?section=<id> (preact-router кладёт параметры запроса
 // в props): переход «на схеме» из полосы уведомлений, Ф-90, MOS-245.
 export function MapScreen({ section }: { section?: string } & Record<string, unknown>) {
-  const [sections, setSections] = useState<Section[] | null>(null)
+  const [всеУчастки, setВсеУчастки] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
   // Своё окно просмотра на каждую линию (префикс), не одно на коллектор.
@@ -47,6 +47,24 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
   const [tree, setTree] = useState<TreeCollector[]>([])
   const [node, setNode] = useState<number | null>(null)
   const [treeError, setTreeError] = useState<string | null>(null)
+  const [treeLoaded, setTreeLoaded] = useState(false)
+
+  // Только свои участки (US-16 сц. 1, US-21): /data/sections.json — статический
+  // справочник всего парка, а дерево GET /api/objects/tree сервер режет по области
+  // видимости роли. Техник комплекса «Бета» раньше видел все 16 коллекторов
+  // и открывал схему на чужом «Альфа» со 112 участками. Дерево не пришло — берём
+  // весь справочник: риски сервер режет и так, а схема без коллекторов хуже.
+  const sections = useMemo(() => {
+    if (!всеУчастки) return null
+    if (treeError) return всеУчастки
+    if (!treeLoaded) return null
+    const свои = new Set(tree.map((c) => c.object_id))
+    return всеУчастки.filter((s) => свои.has(s.collector))
+  }, [всеУчастки, tree, treeLoaded, treeError])
+  useEffect(() => {
+    if (sections && !sections.some((s) => s.collector === collector))
+      setCollector(sections[0]?.collector ?? null)
+  }, [sections])
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -54,10 +72,7 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<Section[]>
       })
-      .then((data) => {
-        setSections(data)
-        setCollector(data[0]?.collector ?? null)
-      })
+      .then(setВсеУчастки)
       .catch((e) => setError(errorMessage(e)))
   }, [])
 
@@ -89,7 +104,10 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
         return r.json() as Promise<TreeCollector[]>
       })
-      .then(setTree)
+      .then((t) => {
+        setTree(t)
+        setTreeLoaded(true)
+      })
       // Дерево не грузится — говорим об этом на его месте, схема со списком коллекторов работает дальше.
       .catch((e) => setTreeError(errorMessage(e)))
   }, [])
@@ -98,13 +116,17 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
   // (окно в десятую часть линии) и обводим метку. Эффект по участку, а не по
   // монтированию: ссылка из полосы на уже открытой схеме меняет только параметр.
   const выбранный = useMemo(
-    () => (sections && section ? sections.find((s) => s.section_id === Number(section)) : undefined),
+    () =>
+      sections && section ? sections.find((s) => s.section_id === Number(section)) : undefined,
     [sections, section],
   )
   useEffect(() => {
     if (!выбранный || !sections) return
     const prefix = выбранный.smvu_key.split(':')[0]
-    const max = Math.max(1, ...sections.filter((s) => s.smvu_key.startsWith(`${prefix}:`)).map((s) => s.picket))
+    const max = Math.max(
+      1,
+      ...sections.filter((s) => s.smvu_key.startsWith(`${prefix}:`)).map((s) => s.picket),
+    )
     setCollector(выбранный.collector)
     setNode(null)
     // Фильтр мог спрятать ту самую метку, ради которой перешли, — сбрасываем.

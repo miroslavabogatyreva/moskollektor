@@ -112,6 +112,39 @@ test('US-09 сц. 1, 2, 3, 4: решение из справочника, без
   expect(detail.decision?.decided_by).toBe(DISPATCHER)
   expect(detail.decision?.comment).toBe(comment)
   expect(detail.decision?.decided_at).toBeTruthy()
+
+  // Сц. 1: в журнале действий (НФ-77) — запись о решении с учётной записью и временем.
+  const журнал = await page.request.get(`/api/audit?login=${DISPATCHER}&limit=50`, {
+    headers: { 'X-User-Login': 'admin1' },
+  })
+  const { items } = (await журнал.json()) as {
+    items: { path: string; method: string; login: string; occurred_at: string }[]
+  }
+  const запись = items.find(
+    (a) => a.method === 'POST' && a.path === `/api/forecasts/${id}/feedback`,
+  )
+  expect(запись, 'решение записано в журнал действий').toBeTruthy()
+  expect(запись!.login).toBe(DISPATCHER)
+  expect(
+    Math.abs(Date.parse(запись!.occurred_at) - Date.parse(detail.decision!.decided_at)),
+  ).toBeLessThan(60_000)
+
+  // Сц. 4 глазами: другой диспетчер ОДС открывает тот же прогноз и видит решение,
+  // кто и когда его принял.
+  const ods = await page
+    .context()
+    .browser()!
+    .newContext({
+      baseURL: test.info().project.use.baseURL,
+      extraHTTPHeaders: { 'X-User-Login': 'ods1' },
+    })
+  const odsPage = await ods.newPage()
+  await odsPage.goto(`/forecasts/${id}`)
+  const уOds = odsPage.getByTestId('last-decision')
+  await expect(уOds).toContainText('Мониторинг ситуации')
+  await expect(уOds).toContainText(DISPATCHER)
+  await expect(уOds).toContainText(/\d\d\.\d\d\.\d{4} \d\d:\d\d/)
+  await ods.close()
 })
 
 test('US-09 сц. 2 на сервере: POST без решения — 422, ложное без причины — 422, техник — 403', async ({
