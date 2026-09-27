@@ -2843,7 +2843,8 @@ CREATE TABLE ref.dispatcher_decision (
     name       text     NOT NULL,
     sort_order smallint NOT NULL UNIQUE
 );
--- crew_dispatch «Выезд бригады», send_check «Направить на проверку»,
+-- значения дословно из ТЗ разд. 12, менять только с заказчиком:
+-- crew_dispatch «Выезд бригады», send_check «Направление бригады на проверку»,
 -- monitor «Мониторинг ситуации», false_alarm «Ложное срабатывание»
 ALTER TABLE pred.feedback ADD COLUMN decision_code text;  -- + FK на ref.dispatcher_decision(code)
 ```

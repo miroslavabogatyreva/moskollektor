@@ -21,6 +21,7 @@
 -- записи, а обязательность решения держит метод API (422 без decision_code).
 
 -- sort_order — порядок в списке диалога: от самого сильного действия к отбою.
+-- Названия дословно из ТЗ разд. 12 (с заглавной буквы), менять только с заказчиком.
 CREATE TABLE ref.dispatcher_decision (
     code       text     PRIMARY KEY,
     name       text     NOT NULL,
@@ -28,10 +29,10 @@ CREATE TABLE ref.dispatcher_decision (
 );
 
 INSERT INTO ref.dispatcher_decision (code, name, sort_order) VALUES
-    ('crew_dispatch', 'Выезд бригады',         1),
-    ('send_check',    'Направить на проверку', 2),
-    ('monitor',       'Мониторинг ситуации',   3),
-    ('false_alarm',   'Ложное срабатывание',   4);
+    ('crew_dispatch', 'Выезд бригады',                   1),
+    ('send_check',    'Направление бригады на проверку', 2),
+    ('monitor',       'Мониторинг ситуации',             3),
+    ('false_alarm',   'Ложное срабатывание',             4);
 
 -- Ключ отдельным ADD CONSTRAINT, а не REFERENCES в ADD COLUMN: code/check_schema.py
 -- видит внешние ключи из ALTER только в этой форме.
