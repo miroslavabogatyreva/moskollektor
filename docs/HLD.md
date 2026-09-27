@@ -1363,6 +1363,10 @@ CREATE TABLE ref.object_xref (
                             на каждом проходе --channels: 16 коллекторов,
                             32 части (пары «коллектор, префикс»), 3 173
                             отрезка участков по 10 м (строка плана 4.8, MOS-45)
+050_order_top_three.sql     ref.app_setting.order_top_sections_per_object = 3:
+                            заявки по предупреждению модели — на три худших
+                            участка, а не на все участки коллектора (строка
+                            плана 6.14, MOS-184)
 051_order_external_status.sql
                             maint.notification.external_status,
                             external_status_at, external_assignee — статус

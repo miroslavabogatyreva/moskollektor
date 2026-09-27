@@ -114,6 +114,8 @@ moskollektor/
 │   │                          041–043 заняты черновыми ветками, в master их нет;
 │   │                          046_synthetic_geometry — вид «коллектор» с
 │   │                          MULTILINESTRING, линии рисует ingest (MOS-45);
+│   │                          050_order_top_three — три худших участка на одно
+│   │                          предупреждение модели (MOS-184);
 │   │                          051_order_external_status — статус заявки из
 │   │                          эмулятора хелпдеска, три колонки maint.notification
 │   │                          (MOS-63)

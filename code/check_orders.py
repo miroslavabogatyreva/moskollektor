@@ -123,17 +123,22 @@ def read_score(path):
     }
 
 
-def warnings_without_order(open_, keys):
+def warnings_without_order(open_, keys, покрытые=frozenset()):
     """Открытые предупреждения, у которых нет заявки со своим ключом.
 
     open_ — [(pfx, opened_at, строка открытия)], keys — source_key автозаявок.
     Ключ заявки по предупреждению — warn:<pfx>:<открытие>:<участок>; участков
     у предупреждения бывает несколько, поэтому сверяем начало ключа.
+
+    покрытые — пары (pfx, строка открытия), на участках которых к открытию уже
+    стояла живая заявка: по правилу Ф-48 (решение Славы 26.09.2026) новую туда
+    не заводят, и потерей это не считается.
     """
     return [
         (pfx, opened)
         for pfx, opened, строка in open_
-        if not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
+        if (pfx, строка) not in покрытые
+        and not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
     ]
 
 
@@ -287,7 +292,29 @@ async def check_m10(conn, score):
         )
     ]
     keys = [k for k, _ in orders]
-    потери = warnings_without_order(score["open"], keys)
+    # Ф-48: предупреждение без своей заявки, но на участке его префикса стоит
+    # незакрытая заявка со сроком позже открытия — worker новую туда не заводит.
+    # Момент заведения той заявки не сравниваем: раннее и позднее открытия одного
+    # префикса worker разбирает одним прогоном, и заявка ложится позже обоих.
+    покрытые = {
+        (pfx, строка)
+        for pfx, opened, строка in score["open"]
+        if await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM maint.notification n "
+            "JOIN ref.object_xref x ON x.func_location_id = n.func_location_id "
+            "WHERE split_part(x.smvu_key, ':', 1) = $1 "
+            "AND n.status IN ('OPEN', 'IN_PROCESS') AND n.due_at > $2)",
+            pfx,
+            opened,
+        )
+    }
+    потери = warnings_without_order(score["open"], keys, покрытые)
+    # Сколько открытых предупреждений держится только на чужой живой заявке.
+    по_живой = sum(
+        1 for pfx, _, строка in score["open"]
+        if (pfx, строка) in покрытые
+        and not any(k.startswith(f"warn:{pfx}:{строка}:") for k in keys)
+    )
     top = await conn.fetchval(
         "SELECT value FROM ref.app_setting WHERE key = 'order_top_sections_per_object'"
     )
@@ -323,7 +350,8 @@ async def check_m10(conn, score):
     суть = (
         f"модель {score['model']}: по предупреждению без заявки {len(потери)} из "
         f"{len(score['open'])} (ключ warn:<pfx>:<открытие>, заявок с таким ключом "
-        f"{len(keys)}); справочно по коллектору {len(без_коллектора)} из {коллекторов}"
+        f"{len(keys)}, без своей заявки из-за живой на участке {по_живой}); "
+        f"справочно по коллектору {len(без_коллектора)} из {коллекторов}"
     )
     суть += (
         f"; заявок на предупреждение вне 1…{int(top)}: {len(вне)}, заявок warn: "
@@ -584,6 +612,9 @@ def demo(verbose=True):
         "warn:150:2026-06-17T23:59:59:9",
     ]
     assert warnings_without_order(открытые, ключи) == [("15", t)]
+    # Ф-48 (решение Славы 26.09.2026): у 15 своей заявки нет, потому что на его
+    # участках уже живая заявка — это не потеря, бригада туда едет.
+    assert warnings_without_order(открытые, ключи, {("15", "2026-06-17T23:59:59")}) == []
     # Сколько заявок и нарядов: у 889 четыре заявки при потолке 3, у одной нет наряда.
     заявки = [(k, 1) for k in ключи] + [
         ("warn:889:2026-06-10T08:36:56:12", 1),
@@ -615,7 +646,7 @@ def demo(verbose=True):
     assert _сроки(по_новой, 16.3, [5.0, 30.0])[0] == [], "срок 16 ч при медиане 16,3 — беда"
 
     if verbose:
-        print("демо М-10: ключ чужого открытия и чужого префикса не засчитан")
+        print("демо М-10: ключ чужого открытия и чужого префикса не засчитан, живая заявка на участке — не потеря")
         print("демо М-13: отказ ровно в срок не предотвращён")
         print("OK")
 
