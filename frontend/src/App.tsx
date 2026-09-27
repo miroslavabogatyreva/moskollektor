@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { Router, route } from 'preact-router'
 import { Nav } from './Nav'
+import { AlertBar } from './components/AlertBar'
 import { ROUTES } from './routes'
 import { fetchMe, type AuthUser } from './lib/auth'
 import { DashboardScreen } from './screens/dashboard'
@@ -53,6 +54,7 @@ export function App() {
   return (
     <>
       {currentPath !== '/login' && <Nav currentPath={currentPath} me={me} />}
+      {currentPath !== '/login' && <AlertBar />}
       <Router onChange={(e) => setCurrentPath(e.url)}>
         <LoginScreen path="/login" />
         <DashboardScreen path="/dashboard" />
