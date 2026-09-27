@@ -303,7 +303,7 @@ interface Участок {
   kinds?: string[]
 }
 
-test('Узел дерева сужает схему', async ({ page }) => {
+test('US-05 сц. 6: узел дерева сужает схему', async ({ page }) => {
   const дерево = (await (await page.request.get('/api/objects/tree')).json()) as ДеревоКоллектор[]
   expect(дерево).toHaveLength(16)
   const бета = дерево.find((к) => к.name === 'объект Бета')!
@@ -355,11 +355,128 @@ test('Узел дерева сужает схему', async ({ page }) => {
   )
 })
 
-test('Карточка называет объект диспетчера', async ({ page }) => {
+test('US-05 сц. 7: карточка называет объект диспетчера', async ({ page }) => {
   await page.goto('/objects/1490')
   await expect(page.getByTestId('dispatcher-object')).toHaveText([
     'Объект диспетчера: ДП объект Бета → объект Бета',
     'Объект диспетчера: объект Фита → объект Зита',
     'Объект диспетчера: ДП объект Зита → объект Зита',
   ])
+})
+
+interface Риск {
+  section_id: number
+  probability: number
+  risk_class: 'high' | 'normal' | null
+}
+
+const коллекторы = (page: Page) => page.locator('select').first()
+// Значок уровня у метки: закрашенный треугольник или пустой круг. Кольцо выбранного
+// участка — тоже circle, но с fill="none", его не берём.
+const ЗНАЧОК = 'polygon, circle:not([fill="none"])'
+
+test('US-05 сц. 1: риск виден на схеме', async ({ page }) => {
+  test.setTimeout(120_000)
+  const риски = (await (await page.request.get('/api/risks')).json()) as Риск[]
+  const класс = new Map(риски.map((r) => [r.section_id, r.risk_class]))
+
+  // Цвет уровня на дашборде — полоска строки.
+  await page.goto('/dashboard')
+  const цвет: Record<string, string> = {}
+  for (const [cls, слово] of [
+    ['high', 'высокий риск'],
+    ['normal', 'низкий риск'],
+  ]) {
+    const строка = page.locator('main table tbody tr').filter({ hasText: слово }).first()
+    цвет[cls] = await строка.evaluate((e) => getComputedStyle(e).borderLeftColor)
+  }
+
+  // Метки рисуются до ответа /api/risks — тогда у всех значок «класса нет».
+  const рискиЭкрана = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
+  await page.goto('/map')
+  await рискиЭкрана
+  await expect(page.locator('svg[role="img"]').first()).toBeVisible()
+  const значения = await коллекторы(page)
+    .locator('option')
+    .evaluateAll((оп) => оп.map((о) => (о as HTMLOptionElement).value))
+  const ошибки: string[] = []
+  let меток = 0
+  for (const к of значения) {
+    await коллекторы(page).selectOption(к)
+    await expect(page.locator('main svg[role="img"] g[data-section-id]').first()).toBeAttached()
+    const наОси = await page.locator('main svg[role="img"] g[data-section-id]').evaluateAll(
+      (гг, sel) =>
+        гг.map((г) => {
+          const з = г.querySelector(sel)
+          return {
+            id: Number(г.getAttribute('data-section-id')),
+            цвет: з ? getComputedStyle(з).stroke : null,
+          }
+        }),
+      ЗНАЧОК,
+    )
+    for (const м of наОси) {
+      меток++
+      const cls = класс.get(м.id)
+      if (!cls) ошибки.push(`${м.id}: у участка нет уровня риска в /api/risks`)
+      else if (м.цвет !== цвет[cls]) ошибки.push(`${м.id}: ${м.цвет} вместо ${цвет[cls]} (${cls})`)
+    }
+  }
+  expect(меток, 'на схеме все участки из /api/risks').toBe(риски.length)
+  expect(ошибки.slice(0, 10), `цвет значка равен цвету уровня на дашборде`).toEqual([])
+})
+
+test('US-05 сц. 3: фильтры складываются', async ({ page }) => {
+  const риски = (await (await page.request.get('/api/risks')).json()) as Риск[]
+  const класс = new Map(риски.map((r) => [r.section_id, r.risk_class]))
+  const участки = (await (await page.request.get('/data/sections.json')).json()) as Участок[]
+
+  // Коллектор, где под три условия подходит больше всего участков.
+  const подходит = (у: Участок) =>
+    класс.get(у.section_id) === 'high' && (у.kinds ?? []).includes('guardObject')
+  const поКоллектору = new Map<number, number>()
+  for (const у of участки)
+    if (подходит(у)) поКоллектору.set(у.collector, (поКоллектору.get(у.collector) ?? 0) + 1)
+  const [коллектор, ждём] = [...поКоллектору.entries()].sort((a, b) => b[1] - a[1])[0]
+  const всего = участки.filter((у) => у.collector === коллектор).length
+
+  await page.goto('/map')
+  await коллекторы(page).selectOption(String(коллектор))
+  await page.getByLabel('Уровень риска').selectOption({ label: 'Высокий' })
+  await page.getByLabel('Тип объекта').selectOption({ label: 'Охраняемый объект' })
+  // Район у заказчика один на весь парк — он назван на экране, выбирать нечего.
+  await expect(page.getByText('Район: Район по эксплуатации')).toBeVisible()
+
+  await expect(page.getByText(`${ждём} из ${всего} участков`)).toBeVisible()
+  const наОси = await page
+    .locator('main svg[role="img"] g[data-section-id]')
+    .evaluateAll((гг) => гг.map((г) => Number(г.getAttribute('data-section-id'))))
+  expect(наОси.length, 'меток на схеме столько же, сколько в счётчике').toBe(ждём)
+  const лишние = наОси.filter((id) => !подходит(участки.find((у) => у.section_id === id)!))
+  expect(лишние, 'на схеме только участки под все условия').toEqual([])
+})
+
+test('US-05 сц. 4: со схемы в карточку', async ({ page }) => {
+  const риски = (await (await page.request.get('/api/risks')).json()) as Риск[]
+  const участки = (await (await page.request.get('/data/sections.json')).json()) as Участок[]
+  const высокий = new Set(риски.filter((r) => r.risk_class === 'high').map((r) => r.section_id))
+  const коллектор = участки.find((у) => высокий.has(у.section_id))!.collector
+  const рискиЭкрана = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
+  await page.goto('/map')
+  await рискиЭкрана
+  await коллекторы(page).selectOption(String(коллектор))
+  await page.getByLabel('Уровень риска').selectOption({ label: 'Высокий' })
+  // Густая ось кладёт соседние метки внахлёст (через ~1 px), сверху лежит нарисованная
+  // последней — её диспетчер и видит, и нажимает.
+  const метка = page.locator('main svg[role="img"] g[data-section-id]').last()
+  const id = Number(await метка.getAttribute('data-section-id'))
+  const риск = риски.find((r) => r.section_id === id)!
+  expect(риск.risk_class, 'на схеме виден рискованный участок').toBe('high')
+
+  await метка.locator(ЗНАЧОК).click()
+  await expect(page).toHaveURL(new RegExp(`/objects/${id}$`))
+  await expect(
+    page.locator('section', { hasText: 'Уровень риска' }),
+    'в карточке прогноз этого участка',
+  ).toContainText(`вероятность ${риск.probability.toFixed(4)}`)
 })
