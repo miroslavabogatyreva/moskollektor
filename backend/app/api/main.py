@@ -27,7 +27,7 @@ from app.api.weather import emu_router
 from app.api.weather import router as weather_router
 from app.api.xml import to_xml, wants_xml
 from app.auth.session import require_secret
-from app.db import get_pool
+from app.db import get_audit_pool
 
 app = FastAPI(title="Москоллектор API")
 app.include_router(auth_router)
@@ -75,7 +75,9 @@ async def write_audit_log(request: Request, call_next):
     if request.url.path == "/health" or request.url.path.startswith(("/api/ingest/", "/emu/")):
         return response
 
-    pool = await get_pool()
+    # Свой пул, не общий: запрос ещё держит соединение из общего, и второе
+    # оттуда же вешало api под нагрузкой (backend/app/db.py, get_audit_pool).
+    pool = await get_audit_pool()
     user_id = getattr(request.state, "user_id", None)
     details = getattr(request.state, "audit_details", None)
     async with pool.acquire() as conn:

@@ -82,7 +82,9 @@ services:
       - backups:/backups
     ports:
       # Наружу база не смотрит: только петля хоста, чтобы ходить psql-ом со стенда.
-      - "127.0.0.1:5432:5432"
+      # Порт — переменной: демо-стенд живёт на том же сервере вторым проектом
+      # compose и берёт 5433 (deploy/demo.env.example, задача 1.10).
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -121,11 +123,16 @@ services:
   nginx:
     image: nginx:1.31-alpine
     ports:
-      - "80:80"
-      - "443:443"
+      # Порты и сертификат — переменными ради демо-стенда (задача 1.10): он
+      # поднимается вторым проектом compose на 8080/8443 со своим сертификатом.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:ro
+      # Проверочные файлы Let's Encrypt для сертификата демо-стенда
+      # (deploy/demo-cert.sh): удостоверяющий центр читает их по порту 80.
+      - ./nginx/acme:/var/www/acme:ro
       # Заглушка «Стенд поднят» (в git) и собранный фронт (кладёт deploy.sh,
       # в git его нет) — разные каталоги, задача 1.11. nginx отдаёт app,
       # а заглушку — только пока app пуст.
