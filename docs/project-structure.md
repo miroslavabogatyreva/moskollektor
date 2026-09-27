@@ -48,7 +48,7 @@ moskollektor/
 │                        плюс наш скилл `skills/story-tdd` — TDD по историям
 │   └── hooks/format.sh   форматирует файл после правки: ruff для Python,
 │                          prettier для фронта. Старые 43 файла не трогает
-├── docs/          117   документы: постановка, ТЗ, архитектура, план, приёмка
+├── docs/          118   документы: постановка, ТЗ, архитектура, план, приёмка
 │   ├── task.md               постановка заказчика, класс А
 │   ├── libraries.md          перечень библиотек с лицензиями, четыре набора —
 │   │                          приёмка НФ-82, проверка code/check_licenses.py
@@ -157,7 +157,7 @@ moskollektor/
 │                        по ним пишутся экран заявок и GET /api/orders;
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
-├── deploy/         18   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
+├── deploy/         20   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
 ├── code/           63   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
@@ -241,7 +241,8 @@ frontend/src/screens/{dashboard, map, log, orders}
 frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на историю
                     из docs/user-stories.md, тест на сценарий; конфигурация
                     frontend/playwright.config.ts, запуск npm run e2e
-deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, check-db-access.sh, backup.sh
+deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, check-db-access.sh,
+                    backup.sh (копии, учения, восстановление — служба backup), check-backup.sh
 deploy/db/          pg_hba.conf — правила доступа к базе без trust по сети (задача 1.6)
 deploy/nginx/app/   собранный фронт на стенде, в git не идёт; заглушка — deploy/nginx/html (задача 1.11)
 deploy/ldap/        демонстрационный каталог LDAP (MOS-39, НФ-76): Dockerfile,
@@ -303,5 +304,6 @@ delivery/           check-all.sh — один прогон всех провер
 | что должна перепроверить ML-команда | `docs/for-ml-team.md` |
 | чем получено любое число в документах | `analysis/README.md` |
 | как подключиться к серверу и забрать выгрузку | `docs/server.md` |
+| как снять копию базы и восстановиться после аварии | `docs/restore.md` |
 | как работать над проектом | `CLAUDE.md` |
 | как писать документы | `docs/CLAUDE.md` |
