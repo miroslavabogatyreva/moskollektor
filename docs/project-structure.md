@@ -167,7 +167,7 @@ moskollektor/
 │                        по ним пишутся экран заявок и GET /api/orders;
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
-├── deploy/         24   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
+├── deploy/         27   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
 ├── code/           64   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
@@ -256,6 +256,8 @@ deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh
 deploy/db/          pg_hba.conf — правила доступа к базе без trust по сети (задача 1.6)
 deploy/load/        20-users.mjs — нагрузочный сценарий на 20 диспетчеров, НФ-74 (задачи 1.3, 1.4)
 deploy/             demo.env.example, demo-cert.sh, check-demo.sh — демо-стенд вторым проектом compose (задача 1.10)
+deploy/             archive-wal.sh — archive_command базы; wal-rate.sh — замер журнала за сутки (задача 1.18)
+deploy/nginx/templates/  https-redirect.conf.template — редирект с http с внешним портом https (задача 1.10)
 deploy/nginx/app/   собранный фронт на стенде, в git не идёт; заглушка — deploy/nginx/html (задача 1.11)
 deploy/ldap/        демонстрационный каталог LDAP (MOS-39, НФ-76): Dockerfile,
                     slapd.conf, bootstrap.ldif (4 учётки, роли, область видимости),

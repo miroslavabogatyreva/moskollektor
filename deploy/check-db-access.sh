@@ -11,6 +11,7 @@
 # Запуск из корня репозитория:
 #   sh deploy/check-db-access.sh                          # только п. 1, стенд не нужен
 #   DB_CONTAINER=moskollektor-db-1 sh deploy/check-db-access.sh
+#   API_CONTAINER=moskollektor-api-1 …  — ещё и ключ подписи куки AUTH_SECRET у api
 # Стенд с другой машины — тот же DOCKER_HOST=ssh://root@СЕРВЕР, что у строки
 # «лицензии: сборка» в delivery/check-all.sh.
 set -u
@@ -64,6 +65,23 @@ if [ -n "${DB_CONTAINER:-}" ]; then
   else
     echo "СБОЙ  127.0.0.1 в контейнере: верный пароль не пускает: $out"
     fail=1
+  fi
+fi
+
+# Ключ подписи куки входа в живом контейнере api (замечание проверки 27.09.2026).
+# Заглушка «СМЕНИ-МЕНЯ» из старого образца не роняет api: куки подписываются
+# ключом, который знает всякий, кто читал git, и подделать вход может любой.
+# openssl rand -hex 32 даёт 64 знака; меньше 32 — не он.
+if [ -n "${API_CONTAINER:-}" ]; then
+  out=$(docker exec "$API_CONTAINER" sh -c 'printf "%s" "$AUTH_SECRET" | wc -c; [ "$AUTH_SECRET" = "СМЕНИ-МЕНЯ" ] && echo заглушка' 2>&1)
+  if printf '%s' "$out" | grep -q заглушка || [ "$(printf '%s' "$out" | head -1)" -lt 32 ] 2>/dev/null; then
+    echo "СБОЙ  AUTH_SECRET в контейнере не сгенерирован: $(printf '%s' "$out" | tr '\n' ' ')"
+    fail=1
+  elif ! [ "$(printf '%s' "$out" | head -1)" -ge 32 ] 2>/dev/null; then
+    echo "СБОЙ  AUTH_SECRET в контейнере не прочитан: $out"
+    fail=1
+  else
+    echo "OK    AUTH_SECRET в контейнере: знаков $(printf '%s' "$out" | head -1), не заглушка"
   fi
 fi
 

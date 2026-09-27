@@ -124,16 +124,34 @@ fingerprint() {
 
 drill_fail() {
   log "учения СБОЙ $1: $2 — $(grep -E 'FATAL|PANIC' "$B/drill.log" | tail -1)"
-  su postgres -c "pg_ctl -D $B/drill -m immediate stop" >/dev/null 2>&1 || true
-  rm -rf "$B/drill"
+  d=${DRILL_DIR:-$B/drill}
+  su postgres -c "pg_ctl -D $d -m immediate stop" >/dev/null 2>&1 || true
+  rm -rf "$d"
 }
 
 # Учебное восстановление (1.9): последняя копия плюс весь архив разворачиваются
 # во временный кластер рядом, поднимаются на порту 5499, и отпечаток сверяется
 # с живой базой. Живую базу не трогаем. Места нужно столько же, сколько весит база.
 drill() {
-  d="$B/drill"
+  # Каталог учений — DRILL_DIR, по умолчанию рядом с копиями. Места он просит
+  # столько же, сколько весит база: если на диске стенда его нет, каталог
+  # выносят на отдельный том (docs/restore.md, «Место на диске»).
+  d=${DRILL_DIR:-$B/drill}
   rm -rf "$d"
+  mkdir -p "$(dirname "$d")"
+  # Сначала место, потом разворот: база в 55 ГБ, развёрнутая в недостающие
+  # 45 ГБ, забила бы диск живой базы вместе с её архивом журнала.
+  need=$(psql -d "$DB" -tAc "select (sum(pg_database_size(datname)) * 1.1)::bigint from pg_database")
+  free=$(df -B1 --output=avail "$(dirname "$d")" | tail -1)
+  if [ "$free" -lt "$need" ]; then
+    log "учения СБОЙ: места нет — нужно $((need / 1073741824)) ГБ (база плюс 10 %), свободно $((free / 1073741824)) ГБ в $(dirname "$d"); docs/restore.md, «Место на диске»"
+    return 1
+  fi
+  # Отпечаток живой базы — прямо перед тем, как выгнать в архив текущий сегмент:
+  # так между сверяемыми состояниями проходят доли секунды, а не весь разворот.
+  # Писать в базу в это время всё равно нельзя: worker и emulator-smvu пишут
+  # каждую минуту, их останавливают до учений (docs/restore.md, «Учения»).
+  fingerprint > "$B/drill.live"
   # Выгнать в архив текущий сегмент: иначе последние минуты до учений остались бы
   # только в живой базе, и сверка разошлась бы на них.
   psql -d "$DB" -tAc "select pg_switch_wal()" >/dev/null
@@ -162,7 +180,6 @@ drill() {
   done
   secs=$(( $(date +%s) - t0 ))
   last=$(grep -o 'last completed transaction was at log time [0-9: .+-]*' "$B/drill.log" | tail -1 | sed 's/.*log time //')
-  fingerprint > "$B/drill.live"
   fingerprint -h /tmp -p 5499 > "$B/drill.restored"
   su postgres -c "pg_ctl -D $d -m fast stop" >/dev/null
   rm -rf "$d"

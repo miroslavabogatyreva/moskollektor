@@ -1960,7 +1960,11 @@ Precision, Recall, медиана упреждения, ложных на 1000 �
 и `db` и каталог сертификата заданы переменными `HTTP_PORT`, `HTTPS_PORT`,
 `DB_PORT` и `CERTS_DIR` с прежними умолчаниями 80, 443, 5432 и `./nginx/certs`;
 демо берёт 8080, 8443, 5433 и `./nginx/certs-demo`. У `nginx` появился том
-`./nginx/acme` для проверки Let's Encrypt по порту 80. Порядок —
+`./nginx/acme` для проверки Let's Encrypt по порту 80 и том `./nginx/templates`:
+из шаблона `https-redirect.conf.template` образ nginx при старте пишет редирект
+с http на https с портом из переменной `HTTPS_PORT` — без порта редирект с 8080
+демо уводил на основной стенд. У `db` появился том `./archive-wal.sh`
+с `archive_command` (задача 1.18). Порядок —
 `deploy/README.md`, раздел «Демо-стенд».
 
 `ldap` — под профилем compose `ldap` (`docker compose --profile app --profile ldap up -d`),
