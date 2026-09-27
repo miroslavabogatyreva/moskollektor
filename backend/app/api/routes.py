@@ -286,7 +286,7 @@ async def list_forecasts(
                 "write_reason": r["write_reason"],
                 "decision": решения.get(r["forecast_id"]),
                 "outcome": исходы.get(r["forecast_id"]),
-                "horizon_expired": горизонт_истёк(r["as_of"], r["horizon_h"], сейчас),
+                "horizon_expired": горизонт_истёк(r["computed_at"], r["horizon_h"], сейчас),
             }
             for r in rows
         ],
@@ -331,14 +331,19 @@ async def get_forecast(
         **dict(row),
         "decision": dict(решение) if решение else None,
         "outcome": dict(исход) if исход else None,
-        "horizon_expired": горизонт_истёк(row["as_of"], row["horizon_h"]),
+        "horizon_expired": горизонт_истёк(row["computed_at"], row["horizon_h"]),
     }
 
 
-def горизонт_истёк(as_of: datetime, horizon_h: int, сейчас: datetime | None = None) -> bool:
-    """Окно прогноза [as_of, as_of + horizon_h] позади (US-10 сц. 4). Истёкший горизонт
-    исхода не ставит: без отметки человека журнал так и пишет — «горизонт истёк»."""
-    return as_of + timedelta(hours=horizon_h) < (сейчас or datetime.now(timezone.utc))
+def горизонт_истёк(выдан: datetime, horizon_h: int, сейчас: datetime | None = None) -> bool:
+    """Окно прогноза [выдан, выдан + horizon_h] позади (US-10 сц. 4). Истёкший горизонт
+    исхода не ставит: без отметки человека журнал так и пишет — «горизонт истёк».
+
+    Считаем от computed_at (pred.run.started_at) — когда прогноз выдан, — а не от as_of.
+    as_of — срез данных, и на стенде это край архива 30.06.2026: от него 720 ч истекли
+    у всех прогнозов, и сводка 27.09.2026 показала 67 531 «горизонт истёк» и 0 «ещё
+    открыт» за сегодняшний день."""
+    return выдан + timedelta(hours=horizon_h) < (сейчас or datetime.now(timezone.utc))
 
 
 # Исход прогноза (US-10, миграция 056). Действует последний по decided_at: исход
@@ -555,15 +560,15 @@ async def forecast_outcomes(
     горизонт истёк, ещё открыт. Отбор — ОТБОР_ЖУРНАЛА с теми же параметрами, что
     у журнала, и под той же областью видимости: руководитель района видит свой
     район, диспетчер ОДС — весь парк. Каждый прогноз попадает ровно в одно из пяти:
-    исход — последний по decided_at; без исхода делит горизонт (as_of + horizon_h
-    против now(), как horizon_expired в строке журнала). Сумма пяти = total.
+    исход — последний по decided_at; без исхода делит горизонт (computed_at +
+    horizon_h против now(), как horizon_expired в строке журнала). Сумма пяти = total.
     """
     to_exclusive = to + timedelta(days=1) if to else None
     участки = await видимые_участки(user, conn)
     row = await conn.fetchrow(
         f"""
         WITH f AS (
-            SELECT f.forecast_id, r.as_of, f.horizon_h
+            SELECT f.forecast_id, r.started_at AS computed_at, f.horizon_h
               FROM pred.forecast f
               JOIN pred.run r ON r.run_id = f.run_id
             {ОТБОР_ЖУРНАЛА}
@@ -577,10 +582,10 @@ async def forecast_outcomes(
                count(*) FILTER (WHERE o.outcome_code = 'false_alarm') AS false_alarm,
                count(*) FILTER (WHERE o.outcome_code = 'not_checked') AS not_checked,
                count(*) FILTER (WHERE o.outcome_code IS NULL
-                                  AND f.as_of + make_interval(hours => f.horizon_h) < now())
+                                  AND f.computed_at + make_interval(hours => f.horizon_h) < now())
                    AS horizon_expired,
                count(*) FILTER (WHERE o.outcome_code IS NULL
-                                  AND f.as_of + make_interval(hours => f.horizon_h) >= now())
+                                  AND f.computed_at + make_interval(hours => f.horizon_h) >= now())
                    AS open
           FROM f LEFT JOIN o ON o.forecast_id = f.forecast_id
         """,

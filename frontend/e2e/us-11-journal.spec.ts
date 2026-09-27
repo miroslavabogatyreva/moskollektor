@@ -12,6 +12,10 @@ interface Row {
 }
 
 const строки = (page: Page) => page.locator('main table tbody tr')
+// Первая страница журнала на стенде приходит за 3–5 с (goto около 3 с плюс журнал за
+// день около 1,5 с, рядом сводка исходов US-20): умолчание expect 5 с — впритык,
+// 27.09.2026 три теста упали на нём. Сколько она идёт на самом деле, пишет замер сц. 1.
+const ПЕРВАЯ_СТРАНИЦА = { timeout: 15_000 }
 const день = (iso: string) => new Date(iso).toLocaleDateString('sv-SE')
 const днейНазад = (n: number) => день(new Date(Date.now() - n * 86_400_000).toISOString())
 
@@ -50,7 +54,7 @@ test('US-11 сц. 1: отбор по периоду и участку', async ({
 
   const начало = Date.now()
   await page.goto('/log')
-  await expect(строки(page).first()).toBeVisible()
+  await expect(строки(page).first()).toBeVisible(ПЕРВАЯ_СТРАНИЦА)
   const перваяСтраница = Date.now() - начало
 
   await отобрать(page, с, по, прогноз.section_id)
@@ -81,7 +85,7 @@ test('US-11 сц. 2: период включает последний день',
 
 test('US-11 сц. 3: видно, чем кончилось', async ({ page }) => {
   await page.goto('/log')
-  await expect(строки(page).first()).toBeVisible()
+  await expect(строки(page).first()).toBeVisible(ПЕРВАЯ_СТРАНИЦА)
   const заголовки = await page.locator('main table thead th').allInnerTexts()
   expect(заголовки.map((т) => т.replace(/[↑↓]/g, '').trim().toLowerCase())).toEqual(
     expect.arrayContaining(['решение', 'исход']),
@@ -101,7 +105,7 @@ test('US-11 сц. 4: возврат не сбрасывает отбор', async
   const по = день(прогноз.computed_at)
   await page.goto('/log')
   await отобрать(page, с, по, прогноз.section_id)
-  await expect(строки(page).first()).toBeVisible()
+  await expect(строки(page).first()).toBeVisible(ПЕРВАЯ_СТРАНИЦА)
   const доКарточки = await строки(page).count()
 
   await строки(page).first().click()
