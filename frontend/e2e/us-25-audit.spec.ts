@@ -11,19 +11,69 @@ function местноеВремя(d: Date): string {
 test.describe('под администратором', () => {
   test.use({ extraHTTPHeaders: { 'X-User-Login': 'admin1' } })
 
-  test('US-25 сц. 1: каждое действие — одна запись', async ({ page }) => {
-    test.setTimeout(120_000) // до минуты ждём начала следующей минуты
-    // Начало периода — начало следующей минуты: поле даты режет до минуты, и
-    // чужие действия tech1 из текущей минуты в период не попадут.
-    const начало = new Date(Math.ceil((Date.now() + 1) / 60_000) * 60_000)
-    await page.waitForTimeout(начало.getTime() - Date.now() + 500)
-    // Десять действий техника: заголовок X-User-Login на каждый запрос,
-    // промежуточный слой пишет строку в audit.user_action на каждый.
-    for (let i = 0; i < 10; i++) {
-      const r = await page.request.get('/api/auth/me', { headers: { 'X-User-Login': 'tech1' } })
-      expect(r.status()).toBe(200)
+  // Диспетчер делает действия из сценария тем же путём, каким их делает экран:
+  // вход POST /api/auth/login (дальше личность едет кукой mk_session, а не
+  // заголовком), 4 решения POST /api/forecasts/{id}/feedback, выход
+  // POST /api/auth/logout. Запросы идут напрямую, без страниц: открытая страница
+  // сама шлёт GET (риски, уведомления, /api/auth/me), и каждый GET — тоже
+  // запись журнала (НФ-77 считает просмотр раздела действием), так что в журнале
+  // было бы больше, чем действий в сценарии.
+  //
+  // ИСХОДОВ ПОКА НЕТ: US-10 (MOS-195, «закрыть прогноз фактом») делается
+  // параллельно. После неё сюда добавляются 4 исхода, и ДЕЙСТВИЙ станет 10,
+  // как в сценарии; сейчас их 6.
+  //
+  // ВНИМАНИЕ: решения на стенде необратимы (pred.feedback, решение 4f 27.09.2026).
+  // Ставим их на 4 САМЫХ СТАРЫХ прогноза, как e2e/us-09-decision.spec.ts.
+  //
+  // Диспетчер — disp2, а не dispatcher1: под dispatcher1 по умолчанию ходят все
+  // остальные спеки и соседние сессии, и 27.09.2026 первый прогон поймал в своей
+  // минуте 22 чужих GET dispatcher1 («найдено 28» при 6 действиях). disp2 трогает
+  // только US-16. Его пароля нет в GET /api/auth/info, он записан в db/seed/rbac.sql.
+  test('US-25 сц. 1: каждое действие — одна запись', async ({ page, browser }) => {
+    const диспетчер = {
+      login: process.env.E2E_US25_LOGIN ?? 'disp2',
+      password: process.env.E2E_US25_PASSWORD ?? 'disp2123123',
     }
 
+    // Четыре самых старых прогноза в районе диспетчера — до входа: этот просмотр
+    // тоже запись журнала, но в период между входом и выходом он не попадёт.
+    const поиск = await browser.newContext({
+      baseURL: test.info().project.use.baseURL,
+      extraHTTPHeaders: { 'X-User-Login': диспетчер.login },
+    })
+    const первая = await поиск.request.get('/api/forecasts?limit=1')
+    const { total } = (await первая.json()) as { total: number }
+    expect(total).toBeGreaterThanOrEqual(4)
+    const старые = await поиск.request.get(`/api/forecasts?limit=4&offset=${total - 4}`)
+    const прогнозы = ((await старые.json()) as { items: { forecast_id: number }[] }).items.map(
+      (f) => f.forecast_id,
+    )
+    expect(прогнозы).toHaveLength(4)
+    await поиск.close()
+
+    const начало = new Date()
+    const сессия = await browser.newContext({ baseURL: test.info().project.use.baseURL })
+    const действия: { method: string; path: string; status: number }[] = []
+    const вход = await сессия.request.post('/api/auth/login', {
+      data: { login: диспетчер.login, password: диспетчер.password },
+    })
+    действия.push({ method: 'POST', path: '/api/auth/login', status: вход.status() })
+    for (const id of прогнозы) {
+      const r = await сессия.request.post(`/api/forecasts/${id}/feedback`, {
+        data: { decision_code: 'monitor', comment: 'E2E US-25 сц. 1' },
+      })
+      действия.push({ method: 'POST', path: `/api/forecasts/${id}/feedback`, status: r.status() })
+    }
+    const выход = await сессия.request.post('/api/auth/logout')
+    действия.push({ method: 'POST', path: '/api/auth/logout', status: выход.status() })
+    const конец = new Date()
+    await сессия.close()
+    expect(действия.map((д) => д.status)).toEqual([200, 201, 201, 201, 201, 204])
+
+    // Администратор открывает журнал за этот период. Поле даты режет до минуты,
+    // часы стенда идут впереди облачных примерно на секунду (замер 27.09.2026),
+    // поэтому края периода взяты с запасом в 5 секунд.
     await page.goto('/dashboard')
     await page
       .getByRole('navigation', { name: 'Разделы' })
@@ -33,17 +83,43 @@ test.describe('под администратором', () => {
     for (const h of ['Время', 'Логин', 'Метод', 'Путь', 'Код ответа']) {
       await expect(page.getByRole('columnheader', { name: h })).toBeVisible()
     }
-    await page.getByLabel('Логин').fill('tech1')
-    // «С 12:30 по 12:30» — ровно та минута, в которую уложились десять действий:
-    // верхняя граница включает минуту целиком (ревью c0, 27.09.2026).
-    await page.getByLabel('С момента').fill(местноеВремя(начало))
-    await page.getByLabel('По момент').fill(местноеВремя(начало))
+    await page.getByLabel('Логин').fill(диспетчер.login)
+    await page.getByLabel('С момента').fill(местноеВремя(new Date(начало.getTime() - 5_000)))
+    await page.getByLabel('По момент').fill(местноеВремя(new Date(конец.getTime() + 5_000)))
     await page.getByRole('button', { name: 'Найти' }).click()
-    await expect(page.getByText('найдено 10')).toBeVisible()
+    await expect(page.getByText(/найдено \d+/)).toBeVisible()
+    // Каждое действие — ровно одна строка, у каждой учётная запись, время
+    // и объект: путь с номером прогноза.
     const строки = page.locator('tbody tr')
-    await expect(строки).toHaveCount(10)
-    await expect(строки.filter({ hasText: 'tech1' })).toHaveCount(10)
-    await expect(строки.filter({ hasText: '/api/auth/me' })).toHaveCount(10)
+    for (const д of действия) {
+      const строка = строки.filter({
+        hasText: new RegExp(`${д.method}\\s*${д.path}\\s*${д.status}`),
+      })
+      await expect(строка, д.path).toHaveCount(1)
+      await expect(строка).toContainText(диспетчер.login)
+      await expect(строка.locator('td').first()).toHaveText(/\d{2}\.\d{2}\.\d{4},? \d{2}:\d{2}/)
+    }
+
+    // Ровно столько записей, сколько действий, между входом и выходом по часам
+    // самого журнала. Экран считает целыми минутами, и в них попадают чужие
+    // запросы под тем же логином: 27.09.2026 соседняя сессия ходила под disp2
+    // через 8 секунд после выхода. Здесь окно — секунды сценария, без округления.
+    const журнал = await page.request.get(
+      `/api/audit?login=${диспетчер.login}&from=${new Date(начало.getTime() - 5_000).toISOString()}&limit=1000`,
+    )
+    const { items } = (await журнал.json()) as {
+      items: { occurred_at: string; method: string; path: string; status_code: number }[]
+    }
+    const поПорядку = [...items].reverse()
+    const i = поПорядку.findIndex((a) => a.path === '/api/auth/login' && a.status_code === 200)
+    const j = поПорядку.findIndex((a, k) => k > i && a.path === '/api/auth/logout')
+    expect(i, 'вход записан').toBeGreaterThanOrEqual(0)
+    expect(j, 'выход записан после входа').toBeGreaterThan(i)
+    expect(
+      поПорядку
+        .slice(i, j + 1)
+        .map((a) => ({ method: a.method, path: a.path, status: a.status_code })),
+    ).toEqual(действия)
   })
 
   // Каждый GET /api/audit сам пишет строку в журнал — без верхней границы
@@ -80,15 +156,23 @@ test.describe('под администратором', () => {
   })
 })
 
-test('US-25 сц. 2: журнал закрыт от остальных', async ({ page }) => {
-  const r = await page.request.get('/api/audit')
-  expect(r.status()).toBe(403)
-  await page.goto('/dashboard')
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Разделы' })
-      .getByRole('link', { name: 'Журнал действий' }),
-  ).toHaveCount(0)
-  await page.goto('/admin/audit')
-  await expect(page.getByText('Журнал действий доступен только администратору')).toBeVisible()
+test.describe('под диспетчером ОДС', () => {
+  test.use({ extraHTTPHeaders: { 'X-User-Login': 'ods1' } })
+
+  test('US-25 сц. 2: журнал закрыт от остальных', async ({ page }) => {
+    const r = await page.request.get('/api/audit')
+    expect(r.status()).toBe(403)
+    // Пункты администратора Nav дорисовывает по ответу /api/auth/me: без ожидания
+    // проверка «пункта нет» прошла бы и до ответа, на любой роли.
+    const кто = page.waitForResponse((r) => r.url().endsWith('/api/auth/me'))
+    await page.goto('/dashboard')
+    expect(((await (await кто).json()) as { roles: string[] }).roles).toEqual(['ods_dispatcher'])
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Разделы' })
+        .getByRole('link', { name: 'Журнал действий' }),
+    ).toHaveCount(0)
+    await page.goto('/admin/audit')
+    await expect(page.getByText('Журнал действий доступен только администратору')).toBeVisible()
+  })
 })
