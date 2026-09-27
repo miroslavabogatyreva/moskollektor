@@ -147,6 +147,9 @@ services:
       # (backend/app/worker/run_v3.py). Файл кладёт образ ml-score по расписанию.
       SCORE_V3_PATH: ${SCORE_V3_PATH:-}
       SCORE_V3_MAX_AGE_H: ${SCORE_V3_MAX_AGE_H:-1.5}
+      # 1 — проигрывание архива: срез прогона берётся из score.json, если он раньше
+      # края данных. Пара к ML_SCORE_REPLAY_* в deploy/ml-score.sh, docs/server.md.
+      SCORE_V3_REPLAY: ${SCORE_V3_REPLAY:-0}
     volumes:
       - parquet:/srv/parquet
       - uploads:/srv/uploads

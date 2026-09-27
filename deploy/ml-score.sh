@@ -27,7 +27,25 @@ LOG="${ML_SCORE_LOG:-/var/log/ml-score.log}"
 # Срез — край выгрузки, а не текущий момент. Выгрузка заказчика кончается
 # 30.06.2026, и расчёт на сегодня дал бы пустые признаки у всех коллекторов:
 # та же ловушка, что описана у worker в deploy/docker-compose.yml.
-AS_OF="${ML_SCORE_AS_OF:-2026-06-30 23:59:59}"
+EDGE="2026-06-30 23:59:59"
+AS_OF="${ML_SCORE_AS_OF:-$EDGE}"
+
+# ПРОИГРЫВАНИЕ АРХИВА. Данные стоят на краю, и без этого на стенде не появляется
+# ни одного нового предупреждения и ни одной новой заявки. Задан ML_SCORE_REPLAY_FROM —
+# срез идёт от него вперёд: архивный момент = FROM + (сейчас − START) × SPEED,
+# с точностью до часа, не дальше края. SPEED 24 — сутки архива за час; при запуске
+# раз в час каждый расчёт сдвигает срез на сутки, июнь проходит за 30 часов.
+# Worker берёт срез из файла сам (app.worker.scheduler.срез_проигрывания).
+# Время архива московское без пояса, часы хоста — в UTC, поэтому TZ у date явный.
+if [ -n "${ML_SCORE_REPLAY_FROM:-}" ] && [ -z "${ML_SCORE_AS_OF:-}" ]; then
+    replay_start=$(date -d "${ML_SCORE_REPLAY_START:?задайте ML_SCORE_REPLAY_START}" +%s)
+    replay_from=$(TZ=Europe/Moscow date -d "$ML_SCORE_REPLAY_FROM" +%s)
+    replay_edge=$(TZ=Europe/Moscow date -d "$EDGE" +%s)
+    replay_t=$(( replay_from + ( $(date +%s) - replay_start ) * ${ML_SCORE_REPLAY_SPEED:-24} / 3600 * 3600 ))
+    [ "$replay_t" -lt "$replay_from" ] && replay_t=$replay_from
+    [ "$replay_t" -gt "$replay_edge" ] && replay_t=$replay_edge
+    AS_OF=$(TZ=Europe/Moscow date -d "@$replay_t" '+%Y-%m-%d %H:%M:%S')
+fi
 
 started=$(date +%s)
 echo "$(date -Iseconds) старт, срез $AS_OF, образ $IMAGE" >> "$LOG"
