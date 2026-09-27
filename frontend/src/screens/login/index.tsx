@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { errorMessage } from '../../lib/format'
 import { login, ROLE_LABELS } from '../../lib/auth'
+import { Logo } from '../../components/Logo'
 import { fetchAuthInfo } from './api'
 import type { DemoAccount } from './types'
 
@@ -67,8 +68,8 @@ export function LoginScreen(_props: Record<string, unknown>) {
   return (
     <main class="p-5 flex flex-col gap-6 items-center">
       <div class="w-full flex flex-col gap-4" style="max-width:320px">
-        <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Москоллектор
+        <h1 class="self-center mt-6 mb-2" style="color:var(--brand)">
+          <Logo height={120} />
         </h1>
 
         <form onSubmit={submit} class="flex flex-col gap-3">
