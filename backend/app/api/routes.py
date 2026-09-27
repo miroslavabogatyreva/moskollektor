@@ -172,6 +172,7 @@ async def data_status(
 async def list_forecasts(
     from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
     to: date | None = Query(None, description="дата конца периода, включительно — весь день целиком"),
+    section_id: int | None = Query(None, description="участок, точное совпадение (US-11)"),
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -221,7 +222,11 @@ async def list_forecasts(
         WHERE ($1::date IS NULL OR r.started_at >= $1)
           AND ($2::timestamptz IS NULL OR r.started_at < $2)
           AND ($3::int[] IS NULL OR f.section_id = ANY($3))
+          AND ($4::int IS NULL OR f.section_id = $4)
     """
+    # section_id — отбор журнала по участку (US-11 сц. 1) на сервере, одним условием
+    # для счёта и страницы: раньше участок отбирал браузер в пределах страницы, и
+    # total считал весь журнал.
     участки = await видимые_участки(user, conn)
     total = await conn.fetchval(
         f"""
@@ -230,7 +235,7 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         """,
-        from_, to_exclusive, участки,
+        from_, to_exclusive, участки, section_id,
     )
     rows = await conn.fetch(
         f"""
@@ -241,9 +246,9 @@ async def list_forecasts(
         JOIN pred.run r ON r.run_id = f.run_id
         {where}
         ORDER BY r.started_at DESC, f.risk_rank, f.forecast_id
-        LIMIT $4 OFFSET $5
+        LIMIT $5 OFFSET $6
         """,
-        from_, to_exclusive, участки, limit, offset,
+        from_, to_exclusive, участки, section_id, limit, offset,
     )
     # Последнее решение по каждой строке страницы (US-08, US-09 сц. 4): журнал
     # показывает, что прогноз разобран, кем и когда, и отметку о проверке.
