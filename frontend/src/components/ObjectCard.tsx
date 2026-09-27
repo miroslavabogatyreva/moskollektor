@@ -295,6 +295,69 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </p>
       ))}
 
+      {/* Уровень риска — сразу под шапкой (US-06, НФ-71): вероятность, объяснение
+          и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
+          и без двух экранов прокрутки их не было видно. */}
+      {risk && (
+        <section>
+          <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
+            Уровень риска
+          </h2>
+          <div class="text-sm flex flex-col gap-1">
+            <div>
+              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
+              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
+              <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
+              {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
+            </div>
+            {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
+                «Данные по состоянию на … — момент среза выгрузки заказчика»,
+                и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство
+                выгрузки, и к данным именно этого участка он отношения не имеет.
+                Участок 2477 показывал сверху 19.09.2026, а его последняя запись
+                — 22.04.2026, разрыв 150 суток, и объяснение модели в этой же
+                карточке говорило «датчики молчат 150 суток подряд». Три
+                утверждения на одном экране, и неверным было ровно это.
+
+                Имя «последняя запись участка» взято у соседнего блока «Показания
+                датчиков», а не придумано новое («край данных по участку», как
+                названо в тикете): одно число обязано на экране называться одним
+                словом, иначе диспетчер читает две подписи как два разных факта —
+                ровно та беда, ради которой этот тикет и заведён. */}
+            {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
+                ними и есть «данные участка устарели». */}
+            <div style="color:var(--text-secondary)">
+              Расчёт от {new Date(risk.computed_at).toLocaleString('ru-RU')}
+            </div>
+            <div style="color:var(--text-secondary)">
+              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
+              и не последняя запись по этому участку
+            </div>
+            <div style="color:var(--text-secondary)">
+              {data.last_reading_at
+                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleString('ru-RU')}: позже неё датчики участка не писали ничего`
+                : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
+            </div>
+          </div>
+
+          {explanationLines.length > 0 && (
+            <div
+              class="text-sm p-3 mt-2 rounded"
+              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
+            >
+              <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
+                Почему такой риск
+              </div>
+              {explanationLines.map((line, i) => (
+                <p key={i} class="m-0">
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
           Паспорт: каналы участка
@@ -389,66 +452,6 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </table>
         )}
       </section>
-
-      {risk && (
-        <section>
-          <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-            Уровень риска
-          </h2>
-          <div class="text-sm flex flex-col gap-1">
-            <div>
-              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
-              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
-              <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
-              {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
-            </div>
-            {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
-                «Данные по состоянию на … — момент среза выгрузки заказчика»,
-                и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство
-                выгрузки, и к данным именно этого участка он отношения не имеет.
-                Участок 2477 показывал сверху 19.09.2026, а его последняя запись
-                — 22.04.2026, разрыв 150 суток, и объяснение модели в этой же
-                карточке говорило «датчики молчат 150 суток подряд». Три
-                утверждения на одном экране, и неверным было ровно это.
-
-                Имя «последняя запись участка» взято у соседнего блока «Показания
-                датчиков», а не придумано новое («край данных по участку», как
-                названо в тикете): одно число обязано на экране называться одним
-                словом, иначе диспетчер читает две подписи как два разных факта —
-                ровно та беда, ради которой этот тикет и заведён. */}
-            {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
-                ними и есть «данные участка устарели». */}
-            <div style="color:var(--text-secondary)">
-              Расчёт от {new Date(risk.computed_at).toLocaleString('ru-RU')}
-            </div>
-            <div style="color:var(--text-secondary)">
-              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
-              и не последняя запись по этому участку
-            </div>
-            <div style="color:var(--text-secondary)">
-              {data.last_reading_at
-                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleString('ru-RU')}: позже неё датчики участка не писали ничего`
-                : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
-            </div>
-          </div>
-
-          {explanationLines.length > 0 && (
-            <div
-              class="text-sm p-3 mt-2 rounded"
-              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
-            >
-              <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
-                Почему такой риск
-              </div>
-              {explanationLines.map((line, i) => (
-                <p key={i} class="m-0">
-                  {line}
-                </p>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
