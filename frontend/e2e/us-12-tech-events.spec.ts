@@ -222,3 +222,53 @@ test('US-12 сц. 2: общий журнал из меню — сортиров�
   for (const o of await t.locator('tbody tr td:nth-child(2)').allTextContents())
     expect(o).toContain(первый)
 })
+
+// Сц. 5: эмулятор ОДС шлёт событие через API (POST /api/ingest/ods-events,
+// миграция 054). Эмулятором выступает сам тест под admin1 (право
+// ods_events.write): так засекаем время от отправки до строки на экране.
+// Журнал спрашивает номер последнего события ОДС раз в 2 с (ods-last).
+// ВНИМАНИЕ: тест необратимо добавляет событие в maint.ods_event стенда.
+test('US-12 сц. 5: событие ОДС появляется быстрее', async ({ page }) => {
+  const сегодня = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Moscow' })
+  await page.goto('/tech-events')
+  const ж = журнал(page)
+  await ж.getByLabel('С даты').fill(сегодня)
+  await ж.getByLabel('По дату').fill(сегодня)
+  const загрузка = page.waitForResponse(
+    (r) => r.url().includes(`/api/tech-events?`) && r.url().includes(`to=${сегодня}`),
+  )
+  await ж.getByRole('button', { name: 'Применить' }).click()
+  await загрузка
+  await expect(ж.getByLabel('Автообновление')).toBeChecked()
+
+  // Событие привязано к участку из области видимости диспетчера: событие ОДС без
+  // участка диспетчер района не видит, как и тревогу канала без участка, —
+  // его видит только диспетчер ОДС.
+  const [риск] = (await (await page.request.get('/api/risks')).json()) as { section_id: number }[]
+  const текст = `E2E US-12 сц. 5 ${Date.now()}`
+  const отправлено = Date.now()
+  const r = await page.request.post('/api/ingest/ods-events', {
+    headers: { 'X-User-Login': 'admin1' },
+    data: {
+      events: [
+        {
+          source_id: текст,
+          event_time: new Date().toISOString(),
+          section_id: риск.section_id,
+          event_text: текст,
+          event_type: 'Предупреждение',
+        },
+      ],
+    },
+  })
+  expect(r.status(), await r.text()).toBe(201)
+  const строка = таблица(page).locator('tbody tr', { hasText: текст })
+  await expect(строка, 'событие ОДС в журнале не позже 5 с').toBeVisible({ timeout: 5_000 })
+  const задержка = Date.now() - отправлено
+  await expect(строка).toContainText('Журнал ОДС')
+  await expect(строка).toContainText('Предупреждение')
+  expect(задержка).toBeLessThanOrEqual(5_000)
+  test
+    .info()
+    .annotations.push({ type: 'замер', description: `событие ОДС на экране через ${задержка} мс` })
+})

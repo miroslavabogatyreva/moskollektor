@@ -5,6 +5,7 @@ import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
 import { TechEventsTable } from './TechEventsTable'
+import { ChannelHistory } from './ChannelHistory'
 import {
   axisTicks,
   defaultWindow,
@@ -13,6 +14,7 @@ import {
   groupRepeatedForecasts,
   shortDate,
   type RecentForecast,
+  эпизодыПотериСвязи,
 } from './ObjectCard.logic'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
@@ -61,6 +63,16 @@ interface CurrentRisk {
   is_stale: boolean
   direction: Direction
   explanation_ru: string | null
+  computed_at: string // время расчёта текущего риска (US-06 сц. 4)
+}
+
+// Действующий наряд-допуск (US-13): участок «в работах».
+interface OpenPermit {
+  id: number
+  number: string
+  work_type_name: string
+  valid_from: string
+  valid_to: string
 }
 
 interface ObjectDetail {
@@ -70,6 +82,7 @@ interface ObjectDetail {
   last_reading_at: string | null
   channels: Channel[]
   current_risk: CurrentRisk | null
+  open_permits?: OpenPermit[]
   recent_forecasts: RecentForecast[]
   // Узлы дерева диспетчера участка (MOS-101, 5.9). Опционально: бандл может
   // доехать до стенда раньше API, и старый ответ этого поля не несёт.
@@ -89,9 +102,15 @@ interface Reading {
   value_num: number | null
 }
 
-export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string, unknown>) {
+// channel — из адреса /objects/:id?channel=<cid> (preact-router кладёт параметры
+// запроса в props): история отказов этого канала сверху карточки (US-22 сц. 3).
+export function ObjectCard({
+  sectionId,
+  channel,
+}: { sectionId?: string; channel?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ObjectDetail | null>(null)
-  const [notFound, setNotFound] = useState(false)
+  // 404 — участка нет; 403 — участок вне района или комплекса пользователя (US-16 сц. 3).
+  const [notFound, setNotFound] = useState<404 | 403 | false>(false)
   const [error, setError] = useState<string | null>(null)
 
   // Пустая строка = "дефолт ещё не посчитан от last_reading_at". Даты можно
@@ -127,7 +146,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
         // не весь парк, сервер не говорит, есть ли объект, поэтому текст у них общий.
         if (r.status === 404 || r.status === 403) {
-          if (!отменено) setNotFound(true)
+          if (!отменено) setNotFound(r.status)
           return null
         }
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
@@ -163,7 +182,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     // Зависимость только от section_id: пересчитать дефолт при смене участка,
     // но не при каждом обновлении data (его тут больше не с чем сравнивать).
     if (!data) return
-    const [from, to] = defaultWindow(data.last_reading_at)
+    // Окно расчёта (US-07 сц. 1): неделя до среза, на котором считал прогноз, —
+    // за неё модель сравнивает, как писали каналы. Прогноза нет — неделя до
+    // последней записи участка, как раньше.
+    const [from, to] = defaultWindow(data.current_risk?.as_of ?? data.last_reading_at)
     setReadFrom(from)
     setReadTo(to)
   }, [data?.section_id])
@@ -214,8 +236,10 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
   if (notFound) {
     return (
       <main class="p-5">
-        <p style="color:var(--text-muted)">
-          Участок {sectionId} не найден или вне вашей области видимости.
+        <p data-testid="out-of-scope" style="color:var(--text-muted)">
+          {notFound === 403
+            ? `Участок ${sectionId} вне вашего района или комплекса — его карточку откроет диспетчер ОДС или диспетчер того района.`
+            : `Участок ${sectionId} не найден.`}
         </p>
       </main>
     )
@@ -246,7 +270,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
-          <code class="num">{data.smvu_key}</code> · <a href={`/map?section=${data.section_id}`}>на схеме</a>
+          <code class="num">{data.smvu_key}</code> ·{' '}
+          <a href={`/map?section=${data.section_id}`}>на схеме</a>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
@@ -261,6 +286,85 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </p>
         ))}
       </div>
+
+      {channel && sectionId && <ChannelHistory sectionId={sectionId} channelId={channel} />}
+
+      {/* Участок в работах (US-13 сц. 1): открыт наряд-допуск — потеря связи во время
+          работ не отказ, и бригаду к своим же рабочим не шлют. */}
+      {(data.open_permits ?? []).map((p) => (
+        <p
+          key={p.id}
+          data-testid="in-works"
+          class="text-sm px-3 py-2 rounded"
+          style="background:var(--bg-surface); border-left:3px solid var(--state-warning)"
+        >
+          <b>Объект в работах:</b> наряд-допуск {p.number}, {p.work_type_name}, срок с{' '}
+          {formatDateTime(p.valid_from)} до {formatDateTime(p.valid_to)}
+        </p>
+      ))}
+
+      {/* Уровень риска — сразу под шапкой (US-06, НФ-71): вероятность, объяснение
+          и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
+          и без двух экранов прокрутки их не было видно. */}
+      {risk && (
+        <section>
+          <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
+            Уровень риска
+          </h2>
+          <div class="text-sm flex flex-col gap-1">
+            <div>
+              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
+              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
+              <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
+              {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
+            </div>
+            {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
+                «Данные по состоянию на … — момент среза выгрузки заказчика»,
+                и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство
+                выгрузки, и к данным именно этого участка он отношения не имеет.
+                Участок 2477 показывал сверху 19.09.2026, а его последняя запись
+                — 22.04.2026, разрыв 150 суток, и объяснение модели в этой же
+                карточке говорило «датчики молчат 150 суток подряд». Три
+                утверждения на одном экране, и неверным было ровно это.
+
+                Имя «последняя запись участка» взято у соседнего блока «Показания
+                датчиков», а не придумано новое («край данных по участку», как
+                названо в тикете): одно число обязано на экране называться одним
+                словом, иначе диспетчер читает две подписи как два разных факта —
+                ровно та беда, ради которой этот тикет и заведён. */}
+            {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
+                ними и есть «данные участка устарели». */}
+            <div style="color:var(--text-secondary)">
+              Расчёт от {new Date(risk.computed_at).toLocaleString('ru-RU')}
+            </div>
+            <div style="color:var(--text-secondary)">
+              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
+              и не последняя запись по этому участку
+            </div>
+            <div style="color:var(--text-secondary)">
+              {data.last_reading_at
+                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleString('ru-RU')}: позже неё датчики участка не писали ничего`
+                : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
+            </div>
+          </div>
+
+          {explanationLines.length > 0 && (
+            <div
+              class="text-sm p-3 mt-2 rounded"
+              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
+            >
+              <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
+                Почему такой риск
+              </div>
+              {explanationLines.map((line, i) => (
+                <p key={i} class="m-0">
+                  {line}
+                </p>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
@@ -340,7 +444,13 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
               {channelFaults.map((c) => (
                 <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
                   <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2">{c.name}</td>
+                  <td class="px-2 py-2">
+                    {c.faults_cnt > 0 ? (
+                      <a href={`/objects/${sectionId}?channel=${c.channel_id}`}>{c.name}</a>
+                    ) : (
+                      c.name
+                    )}
+                  </td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
                     {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}
@@ -356,61 +466,6 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </table>
         )}
       </section>
-
-      {risk && (
-        <section>
-          <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-            Уровень риска
-          </h2>
-          <div class="text-sm flex flex-col gap-1">
-            <div>
-              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
-              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
-              <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
-              {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
-            </div>
-            {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
-                «Данные по состоянию на … — момент среза выгрузки заказчика»,
-                и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство
-                выгрузки, и к данным именно этого участка он отношения не имеет.
-                Участок 2477 показывал сверху 19.09.2026, а его последняя запись
-                — 22.04.2026, разрыв 150 суток, и объяснение модели в этой же
-                карточке говорило «датчики молчат 150 суток подряд». Три
-                утверждения на одном экране, и неверным было ровно это.
-
-                Имя «последняя запись участка» взято у соседнего блока «Показания
-                датчиков», а не придумано новое («край данных по участку», как
-                названо в тикете): одно число обязано на экране называться одним
-                словом, иначе диспетчер читает две подписи как два разных факта —
-                ровно та беда, ради которой этот тикет и заведён. */}
-            <div style="color:var(--text-secondary)">
-              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
-              и не последняя запись по этому участку
-            </div>
-            <div style="color:var(--text-secondary)">
-              {data.last_reading_at
-                ? `Последняя запись этого участка — ${new Date(data.last_reading_at).toLocaleDateString('ru-RU')}: позже неё датчики участка не писали ничего`
-                : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
-            </div>
-          </div>
-
-          {explanationLines.length > 0 && (
-            <div
-              class="text-sm p-3 mt-2 rounded"
-              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
-            >
-              <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
-                Почему такой риск
-              </div>
-              {explanationLines.map((line, i) => (
-                <p key={i} class="m-0">
-                  {line}
-                </p>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
@@ -463,9 +518,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           Показания датчиков
         </h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
-          {data.last_reading_at
-            ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
-            : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
+          {risk
+            ? `Окно расчёта: 7 суток до среза ${new Date(risk.as_of).toLocaleDateString('ru-RU')}, на котором считал прогноз.`
+            : data.last_reading_at
+              ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
+              : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
         </p>
         <div
           class="flex flex-wrap items-end gap-4 text-sm mb-3"
@@ -509,7 +566,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                   ? 0
                   : chReadings.filter((r) => r.value_num != null).length / chReadings.length
               return (
-                <div key={c.channel_id}>
+                <div key={c.channel_id} data-channel-chart={c.channel_id}>
                   <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
                     {c.name} · {c.sensor_kind}
                   </div>
@@ -520,10 +577,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                         : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
                     </p>
                   ) : numericShare > 0.5 ? (
-                    <NumericLine readings={chReadings} />
+                    <NumericLine readings={chReadings} unit={ЕДИНИЦА[c.sensor_kind]} />
                   ) : (
                     <StateRibbon readings={chReadings} from={readFrom} to={readTo} />
                   )}
+                  {chReadings.length >= 2 && <EpisodeList readings={chReadings} to={readTo} />}
                 </div>
               )
             })}
@@ -603,7 +661,7 @@ function TimeAxis({ start, end }: { start: number; end: number }) {
   const TICKS = 4
   const ticks = axisTicks(start, end, TICKS)
   return (
-    <svg viewBox={`0 0 ${W} 14`} class="w-full">
+    <svg viewBox={`0 0 ${W} 14`} class="w-full" data-axis="time">
       {ticks.map((t, i) => (
         <text
           key={i}
@@ -625,7 +683,78 @@ function TimeAxis({ start, end }: { start: number; end: number }) {
 // лежать "Отключено устройство" — отрезок через него показал бы работающий
 // прибор там, где его выключили (доля числовых у канала берётся порогом 0,5
 // в ObjectCard: одна случайная цифра среди состояний линию не включает).
-function NumericLine({ readings }: { readings: Reading[] }) {
+// Единица на оси значений (US-07 сц. 2). Числа пишут два типа датчиков
+// (smvu.sensor_kind.is_numeric): у температуры это °C (канал 2943 «Темп. ПК366»
+// пишет 18–26), у газового датчика единицы в выгрузке нет — так и пишем, а не
+// придумываем «% НКПР».
+const ЕДИНИЦА: Record<string, string> = {
+  'Датчик температуры': '°C',
+  'Газовый датчик': 'показание прибора, единица в выгрузке не указана',
+}
+
+// Эпизоды потери связи поверх графика (US-07 сц. 3): полупрозрачная полоса
+// от начала до конца и черта в начале. data-episode-start — время записи
+// журнала, с которой эпизод открылся.
+function EpisodeMarks({
+  episodes,
+  x,
+  top,
+  height,
+}: {
+  episodes: ReturnType<typeof эпизодыПотериСвязи>
+  x: (t: number) => number
+  top: number
+  height: number
+}) {
+  return (
+    <>
+      {episodes.map((e) => (
+        <g key={e.start} data-episode-start={e.start}>
+          <title>{`Потеря связи с ${formatDateTime(e.start)}`}</title>
+          <rect
+            x={x(e.startMs)}
+            y={top}
+            width={Math.max(x(e.endMs) - x(e.startMs), 2)}
+            height={height}
+            fill="var(--state-error)"
+            fill-opacity={0.25}
+          />
+          <line
+            x1={x(e.startMs)}
+            x2={x(e.startMs)}
+            y1={top}
+            y2={top + height}
+            stroke="var(--state-error)"
+            stroke-width={2}
+          />
+        </g>
+      ))}
+    </>
+  )
+}
+
+// Подпись под графиком: когда началась и кончилась потеря связи — словами,
+// чтобы не мерить полосу глазом.
+function EpisodeList({ readings, to }: { readings: Reading[]; to: string }) {
+  const winEnd = new Date(`${to}T00:00:00+03:00`).getTime() + 24 * 3600 * 1000
+  if (!Number.isFinite(winEnd)) return null
+  const эпизоды = эпизодыПотериСвязи(readings, winEnd)
+  if (эпизоды.length === 0) return null
+  return (
+    <ul class="text-xs mt-1" style="color:var(--state-error); list-style:none; padding:0; margin:0">
+      {эпизоды.map((e) => (
+        <li key={e.start} data-episode-label={e.start}>
+          Потеря связи («Неисправен») с {formatDateTime(e.start)}
+          {e.endMs < winEnd
+            ? ` по ${formatDateTime(new Date(e.endMs).toISOString())}`
+            : ' до конца окна'}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function NumericLine({ readings, unit }: { readings: Reading[]; unit?: string }) {
   const W = 1000
   const H = 70
   const PAD = 10
@@ -665,13 +794,24 @@ function NumericLine({ readings }: { readings: Reading[] }) {
           stroke-linecap="round"
         />
         <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
+        <EpisodeMarks
+          episodes={эпизодыПотериСвязи(readings, tMax)}
+          x={(t) => x(Math.min(t, tMax))}
+          top={0}
+          height={H}
+        />
         <text x={PAD} y={PAD + 2} font-size="10" fill="var(--text-muted)">
           {fmtValue(vMax)}
+          {unit === '°C' ? ' °C' : ''}
         </text>
         <text x={PAD} y={H - 3} font-size="10" fill="var(--text-muted)">
           {fmtValue(vMin)}
+          {unit === '°C' ? ' °C' : ''}
         </text>
       </svg>
+      <div data-axis="value" class="text-xs" style="color:var(--text-muted)">
+        Ось значений: {unit ?? 'значение прибора'}
+      </div>
       <TimeAxis start={tMin} end={tMax} />
     </>
   )
@@ -725,8 +865,25 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
             </rect>
           )
         })}
+        <EpisodeMarks episodes={эпизодыПотериСвязи(readings, winEnd)} x={x} top={0} height={H} />
       </svg>
       <TimeAxis start={winStart} end={winEnd} />
+      {/* Ось значений у ленты — названия состояний (US-07 сц. 2): цветом служебным,
+          а словом — то, что прибор писал в журнал. */}
+      <div data-axis="value" class="text-xs flex flex-wrap gap-3" style="color:var(--text-muted)">
+        Состояния:
+        {[...new Map(readings.map((r) => [r.value_text ?? '—', r.is_alarm])).entries()].map(
+          ([имя, тревога]) => (
+            <span key={имя} data-state={имя} class="flex items-center gap-1">
+              <span
+                aria-hidden="true"
+                style={`display:inline-block; width:10px; height:10px; background:${тревога ? 'var(--state-warning)' : 'var(--border-strong)'}`}
+              />
+              {имя}
+            </span>
+          ),
+        )}
+      </div>
     </>
   )
 }

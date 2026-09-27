@@ -22,7 +22,7 @@ function сегодня(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-test('Одно имя на пяти экранах', async ({ page }) => {
+test('US-14 сц. 1: одно имя на пяти экранах', async ({ page }) => {
   const участки = (await (await page.request.get('/data/sections.json')).json()) as Участок[]
   const поКлючу = new Map(участки.map((у) => [у.smvu_key, у]))
   const заявки = (

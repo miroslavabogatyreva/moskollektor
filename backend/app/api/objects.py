@@ -21,8 +21,15 @@ from datetime import date, timedelta
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.schemas import ObjectChannelList, ObjectDetail, ObjectReading, TreeCollector
+from app.api.schemas import (
+    ChannelEpisodeList,
+    ObjectChannelList,
+    ObjectDetail,
+    ObjectReading,
+    TreeCollector,
+)
 from app.auth.deps import require, видимые_участки, проверить_участок
+from app.api.permits import ДЕЙСТВУЮЩИЕ
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
@@ -126,8 +133,12 @@ async def get_object(
         -- строка текущего прогона. Проверено по всем 3 173 участкам: 3 173 из 3 173
         -- получают и direction, и explanation_ru, а не 0 из 3 173, как было.
         SELECT fc.run_id, fc.probability, fc.risk_rank, fc.horizon_h,
-               fc.as_of, fc.is_stale, p.direction, p.explanation_ru
+               fc.as_of, fc.is_stale, p.direction, p.explanation_ru,
+               -- Время расчёта текущего риска (US-06 сц. 4): карточка ставит его
+               -- рядом с последней записью участка, чтобы было видно разрыв.
+               r.started_at AS computed_at
         FROM pred.forecast_current fc
+        JOIN pred.run r ON r.run_id = fc.run_id
         LEFT JOIN LATERAL (
             SELECT direction, explanation_ru FROM pred.forecast f
              WHERE f.section_id = fc.section_id
@@ -164,8 +175,12 @@ async def get_object(
         section_id,
     )
 
+    # Действующие наряды-допуски участка (US-13 сц. 1): «объект в работах» и срок.
+    permits = await conn.fetch(ДЕЙСТВУЮЩИЕ, section_id)
+
     return {
         **dict(passport),
+        "open_permits": [dict(p) for p in permits],
         "channels": [dict(c) for c in channels],
         "dispatcher_objects": [dict(d) for d in dispatcher_objects],
         "current_risk": dict(current_risk) if current_risk else None,
@@ -289,6 +304,61 @@ async def list_object_channels(
         section_id, limit, offset,
     )
     return {"total": total, "items": [dict(r) for r in rows]}
+
+
+@router.get(
+    "/objects/{section_id}/channels/{channel_id}/episodes", response_model=ChannelEpisodeList
+)
+async def list_channel_episodes(
+    section_id: int,
+    channel_id: int,
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("objects.read")),
+):
+    """История отказов одного канала (US-22 сц. 3): техник перед выездом видит,
+    когда канал терял связь раньше и сколько лежал.
+
+    Эпизод — тот же, что считает faults_cnt в list_object_channels выше:
+    smvu.model_failure_event от нижней границы pred.weight_window() до конца
+    архива. Поэтому число строк здесь равно числу «Отказов» в таблице карточки,
+    и одно число на экране не называется двумя разными. Открытый эпизод идёт
+    без длительности (duration_h = null), а не с нулём: он ещё не кончился.
+
+    Канал чужого участка — 404, а не пустой список: иначе по пустоте не отличить
+    «канал связь не терял» от «такого канала на участке нет».
+    """
+    await проверить_участок(user, conn, section_id)
+    канал = await conn.fetchrow(
+        """
+        SELECT channel_id, name, sensor_kind, system_kind
+          FROM smvu.channel
+         WHERE section_id = $1 AND channel_id = $2
+        """,
+        section_id, channel_id,
+    )
+    if канал is None:
+        raise HTTPException(404, "канал на участке не найден")
+    rows = await conn.fetch(
+        """
+        SELECT e.started_at, e.ended_at, e.fault_value
+          FROM smvu.model_failure_event e
+         CROSS JOIN pred.weight_window() w
+         WHERE e.channel_id = $1
+           AND timezone('Europe/Moscow', e.started_at)::date >= w.date_from
+         ORDER BY e.started_at DESC
+        """,
+        channel_id,
+    )
+    items = [
+        {
+            **dict(r),
+            "duration_h": None
+            if r["ended_at"] is None
+            else round((r["ended_at"] - r["started_at"]).total_seconds() / 3600, 1),
+        }
+        for r in rows
+    ]
+    return {"channel": dict(канал), "total": len(items), "items": items}
 
 
 def _selfcheck():

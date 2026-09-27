@@ -38,6 +38,8 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 ]
 
 const PAGE_SIZE = 200 // умолчание GET /api/tech-events
+// Опрос номера последнего события ОДС, мс (US-12 сц. 5, Ф-61: не позже 5 с).
+const ОПРОС_ОДС_МС = 2_000
 
 interface Отбор {
   from: string
@@ -93,6 +95,35 @@ export function TechEventsTable({
     if (авто) setТикТаблицы(tick)
   }, [tick, авто])
 
+  // События ОДС — не позже 5 с (US-12 сц. 5, Ф-61), а общий опрос раз в минуту.
+  // Раз в 2 с спрашиваем только номер последнего события ОДС (max по ключу,
+  // доли миллисекунды) и перечитываем таблицу, когда он вырос: 2 с опроса
+  // плюс чтение таблицы укладываются в 5 с, а тяжёлый запрос журнала не идёт
+  // каждые 2 с с каждой вкладки.
+  const [тикОдс, setТикОдс] = useState(0)
+  useEffect(() => {
+    if (!авто) return
+    let последний: number | null | undefined
+    // Ответ, пришедший после ухода с экрана или выключения автообновления,
+    // в состояние не пишем (code/check_stale_fetch.py).
+    let отменено = false
+    const спросить = () =>
+      apiFetch('/api/tech-events/ods-last')
+        .then((r) => (r.ok ? (r.json() as Promise<{ last_id: number | null }>) : null))
+        .then((b) => {
+          if (!b || отменено) return
+          if (последний !== undefined && b.last_id !== последний) setТикОдс((n) => n + 1)
+          последний = b.last_id
+        })
+        .catch(() => {})
+    спросить()
+    const t = setInterval(спросить, ОПРОС_ОДС_МС)
+    return () => {
+      отменено = true
+      clearInterval(t)
+    }
+  }, [авто])
+
   useEffect(() => {
     const ac = new AbortController()
     const q = new URLSearchParams({
@@ -124,7 +155,7 @@ export function TechEventsTable({
         setError(errorMessage(e))
       })
     return () => ac.abort()
-  }, [sectionId, отбор, sort, offset, тикТаблицы])
+  }, [sectionId, отбор, sort, offset, тикТаблицы, тикОдс])
 
   const поле = (k: keyof Отбор) => (e: Event) =>
     setЧерновик((d) => ({ ...d, [k]: (e.target as HTMLInputElement).value }))

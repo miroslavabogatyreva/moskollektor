@@ -60,6 +60,8 @@ class DataStatus(BaseModel):
     as_of: IsoDatetime | None
     computed_at: IsoDatetime | None
     lag_days: float | None
+    sections_scored: int
+    sections_total: int
 
 
 class WeatherStatus(BaseModel):
@@ -83,6 +85,12 @@ class ForecastListItem(BaseModel):
     as_of: IsoDatetime
     computed_at: IsoDatetime
     write_reason: str
+    # Последнее решение диспетчера (US-08, US-09 сц. 4); null — прогноз не разобран.
+    decision: "ForecastDecision | None" = None
+    # Исход (US-10): null — никто не отметил; тогда horizon_expired говорит, истёк ли
+    # горизонт (computed_at + horizon_h позади). Сама система исход не ставит.
+    outcome: "ForecastOutcome | None" = None
+    horizon_expired: bool = False
 
 
 class ForecastList(BaseModel):
@@ -100,6 +108,32 @@ class ForecastDecision(BaseModel):
     verified_externally: bool
     decided_by: str
     decided_at: IsoDatetime
+
+
+class ForecastOutcome(BaseModel):
+    outcome_id: int
+    outcome_code: str
+    outcome_name: str
+    reason_code: str | None
+    reason_name: str | None
+    decided_by: str
+    decided_at: IsoDatetime
+
+
+class OutcomeSummary(BaseModel):
+    # US-20: пять исходов за период; каждый прогноз ровно в одном, total — их сумма.
+    confirmed: int
+    false_alarm: int
+    not_checked: int
+    horizon_expired: int
+    open: int
+    total: int
+
+
+class OutcomeIn(BaseModel):
+    # Три исхода (ref.forecast_outcome) и пять причин у «ложной» — Ф-34, Ф-35.
+    outcome_code: str
+    reason_code: str | None = None
 
 
 class FeedbackIn(BaseModel):
@@ -125,6 +159,8 @@ class ForecastDetail(BaseModel):
     order_ids: list[int]
     # Последнее решение диспетчера (MOS-55, Ф-92); null — прогноз ещё не разобран.
     decision: ForecastDecision | None
+    outcome: ForecastOutcome | None = None
+    horizon_expired: bool = False
 
 
 class DictItem(BaseModel):
@@ -135,6 +171,8 @@ class DictItem(BaseModel):
 class DecisionOptions(BaseModel):
     decisions: list[DictItem]
     reasons: list[DictItem]
+    # Исходы прогноза (US-10): подтвердилось, ложная, не проверяли.
+    outcomes: list[DictItem] = []
 
 
 class ObjectChannel(BaseModel):
@@ -154,6 +192,7 @@ class ObjectCurrentRisk(BaseModel):
     is_stale: bool
     direction: str | None
     explanation_ru: str | None
+    computed_at: IsoDatetime
 
 
 class ObjectRecentForecast(BaseModel):
@@ -172,6 +211,14 @@ class DispatcherObject(BaseModel):
     collector_name: str
 
 
+class OpenPermit(BaseModel):
+    id: int
+    number: str
+    work_type_name: str
+    valid_from: IsoDatetime
+    valid_to: IsoDatetime
+
+
 class ObjectDetail(BaseModel):
     section_id: int
     smvu_key: str
@@ -183,6 +230,8 @@ class ObjectDetail(BaseModel):
     # Узлы дерева диспетчера, где у участка есть активный канал (MOS-101, 5.9):
     # у 564 участков из 3 173 их больше одного, поэтому список, а не поле.
     dispatcher_objects: list[DispatcherObject]
+    # Действующие наряды-допуски (US-13 сц. 1): пусто — участок не в работах.
+    open_permits: list[OpenPermit] = []
 
 
 class TreeNode(BaseModel):
@@ -221,6 +270,26 @@ class ObjectChannelStat(BaseModel):
 class ObjectChannelList(BaseModel):
     total: int
     items: list[ObjectChannelStat]
+
+
+class ChannelEpisodeChannel(BaseModel):
+    channel_id: int
+    name: str
+    sensor_kind: str | None
+    system_kind: str | None
+
+
+class ChannelEpisode(BaseModel):
+    started_at: IsoDatetime
+    ended_at: IsoDatetime | None
+    duration_h: float | None
+    fault_value: str
+
+
+class ChannelEpisodeList(BaseModel):
+    channel: ChannelEpisodeChannel
+    total: int
+    items: list[ChannelEpisode]
 
 
 class OrderListItem(BaseModel):

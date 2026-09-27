@@ -3,8 +3,9 @@ import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
 import { fetchMe } from '../lib/auth'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { errorMessage, formatDateTime } from '../lib/format'
+import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { type Decision, VerdictDialog } from './VerdictDialog'
+import { type Outcome, OutcomeDialog } from './OutcomeDialog'
 
 /* Карточка прогноза — задача 6.6 (MOS-61). До этой задачи адресуемого экрана
    на forecast_id не было вовсе: прогнозы жили только внутри карточки объекта
@@ -27,6 +28,9 @@ interface ForecastDetail {
   order_ids?: number[]
   // Последнее решение диспетчера (MOS-55); null — прогноз ещё не разобран.
   decision?: Decision | null
+  // Исход (US-10): null — никто не отметил; horizon_expired — окно прогноза позади.
+  outcome?: Outcome | null
+  horizon_expired?: boolean
 }
 
 export function ForecastCard({ forecastId }: { forecastId?: string } & Record<string, unknown>) {
@@ -35,11 +39,22 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const decideButton = useRef<HTMLButtonElement>(null)
+  const [outcomeOpen, setOutcomeOpen] = useState(false)
+  const outcomeButton = useRef<HTMLButtonElement>(null)
   // Кнопку решения видят только роли с правом forecasts.decide (миграция 052).
   // Сервер и так ответит технику 403 — это удобство, а не защита.
   // null — ответ /api/auth/me ещё не пришёл: E2E ждёт по data-can-decide именно
   // ответа, иначе «кнопки нет» проверялось бы раньше, чем она могла появиться.
   const [canDecide, setCanDecide] = useState<boolean | null>(null)
+  // Ключ участка «коллектор:пикет» — из того же справочника, что у дашборда и журнала
+  // (US-06 сц. 1, US-14): участок называется «Коллектор 847, пикет 1», а не номером.
+  const [ключи, setКлючи] = useState<Map<number, string> | null>(null)
+  useEffect(() => {
+    fetch('/data/sections.json')
+      .then((r) => (r.ok ? (r.json() as Promise<{ section_id: number; smvu_key: string }[]>) : []))
+      .then((all) => setКлючи(new Map(all.map((x) => [x.section_id, x.smvu_key]))))
+      .catch(() => setКлючи(new Map()))
+  }, [])
   useEffect(() => {
     fetchMe()
       .then((me) =>
@@ -122,11 +137,13 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
               e.preventDefault()
               route(`/objects/${data.section_id}`)
             }}
-            class="num"
             style="color:var(--link)"
           >
-            {data.section_id}
-          </a>
+            {ключи?.get(data.section_id) ? имяУчастка(ключи.get(data.section_id)!) : 'участок'}
+          </a>{' '}
+          <span class="num" style="color:var(--text-muted)">
+            · {data.section_id}
+          </span>
         </p>
       </div>
 
@@ -178,6 +195,48 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
               decideButton.current?.focus()
             }}
             onSaved={(d) => setData({ ...data, decision: d })}
+          />
+        )}
+      </section>
+
+      {/* Исход прогноза (US-10): чем прогноз кончился. Без отметки человека система
+          исход не ставит — пишет «ещё открыт» или «горизонт истёк» (сц. 4, Ф-75). */}
+      <section data-testid="outcome" class="text-sm flex flex-col gap-2 items-start">
+        <h2 class="font-semibold" style="color:var(--text-muted)">
+          Исход прогноза
+        </h2>
+        {data.outcome ? (
+          <p>
+            <b>{data.outcome.outcome_name}</b>
+            {data.outcome.reason_name && <> · причина: {data.outcome.reason_name}</>} ·{' '}
+            {data.outcome.decided_by}, {formatDateTime(data.outcome.decided_at)}
+          </p>
+        ) : (
+          <p style="color:var(--text-muted)">
+            {data.horizon_expired
+              ? 'Исход не отмечен, горизонт истёк.'
+              : 'Исход не отмечен, прогноз ещё открыт.'}
+          </p>
+        )}
+        {canDecide && (
+          <button
+            ref={outcomeButton}
+            type="button"
+            onClick={() => setOutcomeOpen(true)}
+            class="px-3 py-1 rounded"
+            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          >
+            Отметить исход
+          </button>
+        )}
+        {outcomeOpen && (
+          <OutcomeDialog
+            forecastId={data.forecast_id}
+            onClose={() => {
+              setOutcomeOpen(false)
+              outcomeButton.current?.focus()
+            }}
+            onSaved={(o) => setData({ ...data, outcome: o })}
           />
         )}
       </section>
