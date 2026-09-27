@@ -126,8 +126,12 @@ async def get_object(
         -- строка текущего прогона. Проверено по всем 3 173 участкам: 3 173 из 3 173
         -- получают и direction, и explanation_ru, а не 0 из 3 173, как было.
         SELECT fc.run_id, fc.probability, fc.risk_rank, fc.horizon_h,
-               fc.as_of, fc.is_stale, p.direction, p.explanation_ru
+               fc.as_of, fc.is_stale, p.direction, p.explanation_ru,
+               -- Время расчёта текущего риска (US-06 сц. 4): карточка ставит его
+               -- рядом с последней записью участка, чтобы было видно разрыв.
+               r.started_at AS computed_at
         FROM pred.forecast_current fc
+        JOIN pred.run r ON r.run_id = fc.run_id
         LEFT JOIN LATERAL (
             SELECT direction, explanation_ru FROM pred.forecast f
              WHERE f.section_id = fc.section_id
