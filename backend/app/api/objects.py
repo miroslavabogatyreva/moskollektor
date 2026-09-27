@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api")
 
 # Узлы дерева диспетчера и участки под ними (MOS-101, план 5.9). Принадлежность —
 # по активным каналам: участок относится к КАЖДОМУ узлу и коллектору, где у него
-# есть канал (у 564 из 3 173 узлов больше одного, у участка 1490 — два коллектора).
+# есть канал (у 564 участков из 3 173 узлов больше одного, у участка 1490 — два коллектора).
 # Ось схемы по-прежнему раскладывает участок по большинству каналов
 # (УЧАСТКИ_КОЛЛЕКТОРА в app.worker.run_v3) — дерево это правило не трогает,
 # иначе участок пропадал бы из узла, где у него меньшинство каналов.
@@ -289,3 +289,23 @@ async def list_object_channels(
         section_id, limit, offset,
     )
     return {"total": total, "items": [dict(r) for r in rows]}
+
+
+def _selfcheck():
+    """Порядок маршрутов: GET /api/objects/tree обязан попасть в get_tree, а не в
+    /objects/{section_id}. Переставь их — «tree» уйдёт в целочисленный section_id,
+    и стенд ответит 422 (так было до MOS-101). Без стенда и без базы: только
+    сопоставление маршрутов Starlette."""
+    from starlette.routing import Match
+
+    # Порядок, который решает, — внутри этого router: оба пути объявлены здесь.
+    scope = {"type": "http", "path": "/api/objects/tree", "method": "GET"}
+    первый = next(r for r in router.routes if r.matches(scope)[0] == Match.FULL)
+    assert первый.path == "/api/objects/tree", (
+        f"/api/objects/tree достался маршруту {первый.path} — /objects/tree должен стоять выше"
+    )
+    print("objects selfcheck ok: /api/objects/tree → get_tree")
+
+
+if __name__ == "__main__":
+    _selfcheck()

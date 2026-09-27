@@ -45,6 +45,7 @@ export function ObjectTree({
               <button
                 type="button"
                 aria-pressed={open && node == null}
+                aria-expanded={open}
                 onClick={() => onCollector(c.object_id)}
                 class={BUTTON}
                 style={`font-weight:600; color:var(--text-primary); background:${open ? 'var(--bg-surface)' : 'transparent'}`}
