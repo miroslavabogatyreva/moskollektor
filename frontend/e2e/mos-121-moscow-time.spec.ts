@@ -118,7 +118,10 @@ test('карточка объекта: последняя запись, прог
   }
   expect(о.last_reading_at, 'у участка с первым рангом нет ни одной записи').not.toBeNull()
   await expect(
-    page.getByText(`Последняя запись участка: ${мск(о.last_reading_at!, true)}`),
+    // Разделитель после подписи экран менял («:» и «—»), время — нет.
+    page
+      .getByText(new RegExp(`Последняя запись участка[:\\s—]+${мск(о.last_reading_at!, true)}`))
+      .first(),
   ).toBeVisible()
   if (о.recent_forecasts.length > 0) {
     await expect(page.getByText(мск(о.recent_forecasts[0].computed_at, true)).first()).toBeVisible()
