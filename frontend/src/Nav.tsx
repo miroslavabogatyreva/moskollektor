@@ -7,6 +7,7 @@ const ADMIN_ROUTES = [
   { path: '/admin/users', label: 'Пользователи' },
   { path: '/admin/sources', label: 'Источники данных' },
   { path: '/admin/audit', label: 'Журнал действий' },
+  { path: '/admin/settings', label: 'Настройки' },
 ]
 
 export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
