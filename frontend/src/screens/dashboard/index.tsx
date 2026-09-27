@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
+import { RiskBadge } from '../../components/RiskBadge'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { errorMessage } from '../../lib/format'
@@ -151,8 +152,8 @@ export function DashboardScreen(_props: Record<string, unknown>) {
                       · {r.section_id}
                     </span>
                   </td>
-                  <td class="px-2 py-2">
-                    {словоРиска(r.risk_class)}
+                  <td class="px-2 py-1.5">
+                    <RiskBadge cls={r.risk_class}>{словоРиска(r.risk_class)}</RiskBadge>
                     {r.is_stale && (
                       <span style="color:var(--state-warning)">
                         {' '}
