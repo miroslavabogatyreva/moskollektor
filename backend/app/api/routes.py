@@ -79,7 +79,7 @@ async def list_risks(
 @router.get("/data-status", response_model=DataStatus)
 async def data_status(
     conn: asyncpg.Connection = Depends(get_conn),
-    _user=Depends(require("risks.read")),
+    user=Depends(require("risks.read")),
 ):
     """Состояние данных, на которых стоит текущий прогноз (MOS-148, М-04, М-15).
 
@@ -124,6 +124,13 @@ async def data_status(
     и сверить их можно вычитанием, а не сравнением двух методик.
 
     Поле мёртвое до MOS-129: на экране его пока никто не показывает.
+
+    `sections_scored` и `sections_total` — «посчитано N из M» на дашборде (US-01
+    сц. 4): N — участков, у которых текущий прогноз свежий (`is_stale` = false),
+    M — всех участков в области видимости пользователя. Устаревший прогноз
+    и участок без прогноза посчитанными не считаются: по ним диспетчер видит
+    прошлое число или ничего. Оба считаются по той же подрезке роли, что
+    и `GET /api/risks`, иначе технику написали бы «из 3 173».
     """
     # Край в запросе встречается РОВНО ОДИН РАЗ — отсюда вложенный SELECT.
     # Посчитай я отставание вторым обращением к КРАЙ_ДАННЫХ, в одном методе
@@ -145,7 +152,18 @@ async def data_status(
           ) t
         """
     )
-    return dict(row)
+    участки = await видимые_участки(user, conn)
+    счёт = await conn.fetchrow(
+        """
+        SELECT (SELECT count(*) FROM pred.forecast_current
+                 WHERE NOT is_stale
+                   AND ($1::int[] IS NULL OR section_id = ANY($1))) AS sections_scored,
+               (SELECT count(*) FROM ref.object_xref
+                 WHERE $1::int[] IS NULL OR section_id = ANY($1)) AS sections_total
+        """,
+        участки,
+    )
+    return {**dict(row), **dict(счёт)}
 
 
 @router.get("/forecasts", response_model=ForecastList)
