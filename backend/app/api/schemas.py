@@ -156,6 +156,7 @@ class ObjectCurrentRisk(BaseModel):
     is_stale: bool
     direction: str | None
     explanation_ru: str | None
+    computed_at: IsoDatetime
 
 
 class ObjectRecentForecast(BaseModel):
