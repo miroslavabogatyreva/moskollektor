@@ -96,6 +96,10 @@ in_range AS (
            true AS is_alarm
       FROM smvu.reading r, bounds
      WHERE r.is_alarm = true AND r.read_time >= bounds.от AND r.read_time < bounds.до
+       -- Участок карточки (MOS-54) — здесь, а не в хвосте: LATERAL ниже ищет
+       -- снятие тревоги только для тревог этого участка. Снятие — того же
+       -- канала, значит, и того же участка.
+       AND ($8::int IS NULL OR r.section_id = $8)
 ),
 paired_normal AS (
     -- DISTINCT: если у канала подряд две тревоги, а следующая только одна
@@ -161,6 +165,9 @@ async def list_tech_events(
     event_type: str | None = Query(None, pattern="^(Предупреждение|Норма)$"),
     object: str | None = Query(None, description="подстрока в имени объекта"),
     value_text: str | None = Query(None, description="подстрока в значении датчика"),
+    # Точный участок для карточки (MOS-54): object — подстрока, и 250 имён из 3 173
+    # входят в чужое имя — «Коллектор 797, пикет 1» ловит пикеты 100 и 137.
+    section_id: int | None = Query(None, description="участок, точное совпадение"),
     sort: str = Query("read_time", description="/".join(СОРТИРОВКА)),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(200, ge=1, le=1000),
@@ -205,13 +212,14 @@ async def list_tech_events(
             object,
             value_text,
             участки,
+            section_id,
         )
         # Второй ключ сортировки — m.journal_id: у read_time бывают повторы
         # (несколько каналов пишут в одну секунду), без второго ключа offset
         # на разных проходах вернул бы разный набор строк (нашла 98, MOS-223,
         # тот же дефект уже был у /api/orders).
         rows = await conn.fetch(
-            f"{ВЫБОРКА_SQL} ORDER BY {СОРТИРОВКА[sort]} {order.upper()}, m.journal_id {order.upper()} LIMIT $8 OFFSET $9",
+            f"{ВЫБОРКА_SQL} ORDER BY {СОРТИРОВКА[sort]} {order.upper()}, m.journal_id {order.upper()} LIMIT $9 OFFSET $10",
             from_,
             to_exclusive,
             sensor_kind,
@@ -219,6 +227,7 @@ async def list_tech_events(
             object,
             value_text,
             участки,
+            section_id,
             limit,
             offset,
         )
