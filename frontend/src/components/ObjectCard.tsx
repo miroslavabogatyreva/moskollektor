@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
+import { errorMessage, formatDate, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
 import { TechEventsTable } from './TechEventsTable'
 import {
@@ -246,7 +246,8 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
-          <code class="num">{data.smvu_key}</code> · <a href={`/map?section=${data.section_id}`}>на схеме</a>
+          <code class="num">{data.smvu_key}</code> ·{' '}
+          <a href={`/map?section=${data.section_id}`}>на схеме</a>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
@@ -343,7 +344,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                   <td class="px-2 py-2">{c.name}</td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
-                    {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}
+                    {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
                   </td>
                   <td class="px-2 py-2 num">
                     {c.faults_cnt === 0 || c.avg_duration_h == null
@@ -384,12 +385,12 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                 словом, иначе диспетчер читает две подписи как два разных факта —
                 ровно та беда, ради которой этот тикет и заведён. */}
             <div style="color:var(--text-secondary)">
-              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
-              и не последняя запись по этому участку
+              Считали на срез {formatDate(risk.as_of)} — не время расчёта и не последняя запись по
+              этому участку
             </div>
             <div style="color:var(--text-secondary)">
               {data.last_reading_at
-                ? `Последняя запись этого участка — ${new Date(data.last_reading_at).toLocaleDateString('ru-RU')}: позже неё датчики участка не писали ничего`
+                ? `Последняя запись этого участка — ${formatDate(data.last_reading_at)}: позже неё датчики участка не писали ничего`
                 : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
             </div>
           </div>
@@ -438,7 +439,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
                 style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
               >
                 <td class="px-2 py-2 num">
-                  {new Date(f.computed_at).toLocaleString('ru-RU')}
+                  {formatDateTime(f.computed_at, true)}
                   {repeats > 1 && <span style="color:var(--text-muted)"> · {repeats}×</span>}
                 </td>
                 <td class="px-2 py-2">{DIRECTION_LABEL[f.direction]}</td>
@@ -464,7 +465,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
           {data.last_reading_at
-            ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
+            ? `Последняя запись участка: ${formatDateTime(data.last_reading_at, true)}. Окно ниже подобрано вокруг неё.`
             : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
         </p>
         <div
@@ -613,7 +614,7 @@ function TimeAxis({ start, end }: { start: number; end: number }) {
           fill="var(--text-muted)"
           text-anchor={i === 0 ? 'start' : i === TICKS - 1 ? 'end' : 'middle'}
         >
-          {formatDateTime(new Date(t).toISOString())}
+          {formatDateTime(new Date(t))}
         </text>
       ))}
     </svg>
@@ -721,7 +722,7 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
               height={H - 12}
               fill={r.is_alarm ? 'var(--state-warning)' : 'var(--border-strong)'}
             >
-              <title>{`${r.value_text ?? '—'} · ${new Date(r.read_time).toLocaleString('ru-RU')}`}</title>
+              <title>{`${r.value_text ?? '—'} · ${formatDateTime(r.read_time, true)}`}</title>
             </rect>
           )
         })}

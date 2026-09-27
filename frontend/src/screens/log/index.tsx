@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
-import { errorMessage, имяУчастка } from '../../lib/format'
+import { errorMessage, formatDateTime, isoDateMoscow, имяУчастка } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { usePoll, свежо } from '../../lib/poll'
 
@@ -30,9 +30,10 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 const PAGE_SIZE = 200 // умолчание backend/app/api/routes.py::list_forecasts
 
+// Московские сутки, а не сутки браузера: иначе во Владивостоке после 17:00
+// по Москве фильтр по умолчанию уже смотрел бы в завтра.
 function сегодня(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return isoDateMoscow(new Date())
 }
 
 export function LogScreen(_props: Record<string, unknown>) {
@@ -213,7 +214,7 @@ export function LogScreen(_props: Record<string, unknown>) {
               {...rowLink(() => route(`/forecasts/${r.forecast_id}`))}
               style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
-              <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>
+              <td class="px-2 py-2 num">{formatDateTime(r.computed_at, true)}</td>
               <td class="px-2 py-2">{имя(r.section_id)}</td>
               <td class="px-2 py-2">{DIRECTION_LABEL[r.direction]}</td>
               <td class="px-2 py-2 num">{r.probability.toFixed(2)}</td>

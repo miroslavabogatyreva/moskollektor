@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
-import { errorMessage } from '../../lib/format'
+import { errorMessage, formatDate, formatDateTime } from '../../lib/format'
 import { usePoll, свежо } from '../../lib/poll'
 import { отставание } from './lag'
 import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
@@ -199,17 +199,17 @@ function DataEdgeTile({ status, error }: { status: DataStatus | null; error: str
   return (
     <Tile
       label="Данные по состоянию на"
-      value={new Date(status.data_edge).toLocaleDateString('ru-RU')}
+      value={formatDate(status.data_edge)}
       sub="конец выгрузки заказчика, по всему парку сразу"
       note={
         status.computed_at
-          ? `расчёт от ${new Date(status.computed_at).toLocaleString('ru-RU')}` +
+          ? `расчёт от ${formatDateTime(status.computed_at, true)}` +
             (разрыв.разошлись ? '' : `, ${разрыв.текст}`)
           : 'расчёта ещё не было'
       }
       warn={
         разрыв.разошлись && status.as_of
-          ? `срез расчёта — ${new Date(status.as_of).toLocaleDateString('ru-RU')}: ${разрыв.текст}`
+          ? `срез расчёта — ${formatDate(status.as_of)}: ${разрыв.текст}`
           : undefined
       }
     />
