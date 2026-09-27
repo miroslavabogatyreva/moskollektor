@@ -448,6 +448,7 @@ docker compose --profile app stop worker emulator-smvu    # учения: сна
 docker compose exec backup sh /backup.sh --drill           # восстановить рядом и сверить,
 docker compose --profile app start worker emulator-smvu   # вернуть писателей
 tail /var/lib/docker/volumes/moskollektor_backups/_data/backup.log   # журнал копий
+DB_CONTAINER=moskollektor-db-1 sh wal-rate.sh 60           # журнал за сутки и сколько копий хранить
 ```
 
 Замер 27.09.2026 на базе 2,3 ГБ: копия 23 с и 480 МБ, учения 14–25 с, восстановление

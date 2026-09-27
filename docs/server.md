@@ -606,12 +606,13 @@ DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 API_CONTAI
 до ночи — `docker compose exec backup sh /backup.sh`. Устройство, учения и
 восстановление — `docs/restore.md`.
 
-**Что сделать на стенде после первой выкладки** — три команды с мака:
+**Что сделать на стенде после первой выкладки** — три команды с мака, четвёртая через сутки:
 
 ```
 DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 sh deploy/check-backup.sh
 ssh root@135.106.216.101 'df -h /var/lib/docker'
 ssh root@135.106.216.101 'cd /srv/moskollektor/deploy && docker compose --profile app stop worker emulator-smvu && docker compose exec -T backup sh /backup.sh --drill; docker compose --profile app start worker emulator-smvu'
+DOCKER_HOST=ssh://root@135.106.216.101 DB_CONTAINER=moskollektor-db-1 sh deploy/wal-rate.sh 60
 ```
 
 Первая проверяет, что архив журнала идёт. Про журнал копий она будет красной
@@ -621,7 +622,11 @@ ssh root@135.106.216.101 'cd /srv/moskollektor/deploy && docker compose --profil
 том, `docs/restore.md`, «Место на диске». Третья — сами учения: останавливает
 `worker` и `emulator-smvu`, иначе сверка разойдётся на строках, записанных
 по ходу, и запускает их обратно, даже если учения упали (`;`, а не `&&`). Время
-в секундах ляжет строкой в журнал копий, это и есть замер НФ-39.
+в секундах ляжет строкой в журнал копий, это и есть замер НФ-39. Четвёртая —
+сколько журнала стенд пишет за сутки и сколько копий помещается на диск; её
+запускают через сутки после выкладки, когда есть ночная копия, и не в 02:00.
+Напечатанное `BACKUP_KEEP` меньше, чем в `deploy/.env`, — ставим напечатанное,
+`docs/restore.md`, «Сколько хранить».
 
 ## Демо-стенд рядом с основным (задача 1.10)
 
