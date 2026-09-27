@@ -27,8 +27,11 @@ HLD разд. 3.3 называет ещё три задания (полный р
 
 import argparse
 import asyncio
+import json
 import os
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -65,10 +68,32 @@ REFRESH_INTERVAL_MIN = int(os.environ.get("SCHEDULER_REFRESH_INTERVAL_MIN", "5")
 # граница берётся у свёртки, а не у журнала, написано там же.
 
 
+def срез_проигрывания(край: datetime, путь: str) -> datetime:
+    """Срез прогона при проигрывании архива: срез файла модели, если он раньше края.
+
+    Проигрывание двигает срез в `deploy/ml-score.sh` (ML_SCORE_REPLAY_FROM): модель
+    считает на 01.06, 02.06 и дальше, а край данных стоит на 30.06. Worker обязан
+    считать на том же срезе, что файл, иначе прогон отобьёт допуск в 1,5 ч. Без
+    проигрывания срез файла равен краю, и ничего не меняется. Файла нет или он
+    кривой — отдаём край: об этом прогон скажет сам, прочитав файл по-настоящему.
+    """
+    try:
+        срез = datetime.fromisoformat(json.loads(Path(путь).read_text("utf-8"))["as_of"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return край
+    if срез.tzinfo is None:
+        срез = срез.replace(tzinfo=run.МОСКВА)
+    return min(край, срез)
+
+
 async def тик_расчёт():
     conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=900)
     try:
         край = await conn.fetchval(КРАЙ_ДАННЫХ)
+        # Только по явному выключателю: без него отставший файл (ml-score не отработал)
+        # должен ронять прогон защитой «срез файла отстал», а не тихо сдвигать срез назад.
+        if край is not None and run.ПУТЬ_SCORE and os.environ.get("SCORE_V3_REPLAY") == "1":
+            край = срез_проигрывания(край, run.ПУТЬ_SCORE)
         if край is None:
             # Свёртки нет вовсе — считаем по текущему моменту и говорим об этом
             # вслух. Молчаливый откат к now() вернул бы ровно ту беду, ради
@@ -292,6 +317,21 @@ def _selfcheck_слоты():
     )
     print("selfcheck слотов ok: 09:37 + час -> 10:00, граница, пять минут, "
           "четыре минуты, полночь")
+
+    # Проигрывание: срез файла 02.06 00:00 МСК раньше края 30.06 — берём срез файла,
+    # в московском поясе. Без проигрывания срез файла равен краю — берём край.
+    # Файла нет — тоже край.
+    край = datetime.fromisoformat("2026-06-30T20:59:59+00:00")
+    with tempfile.TemporaryDirectory() as к:
+        п = Path(к) / "score.json"
+        п.write_text(json.dumps({"as_of": "2026-06-02T00:00:00"}), "utf-8")
+        assert срез_проигрывания(край, str(п)) == datetime.fromisoformat(
+            "2026-06-02T00:00:00+03:00"), срез_проигрывания(край, str(п))
+        п.write_text(json.dumps({"as_of": "2026-06-30T23:59:59"}), "utf-8")
+        assert срез_проигрывания(край, str(п)) == край
+        assert срез_проигрывания(край, str(Path(к) / "нет.json")) == край
+    print("selfcheck проигрывания ok: 02.06 раньше края -> 02.06, край -> край, "
+          "нет файла -> край")
 
 
 def main():
