@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
+import { RiskBadge } from '../../components/RiskBadge'
 import { apiFetch } from '../../lib/api'
 import { usePoll, свежо } from '../../lib/poll'
 import { errorMessage, имяУчастка } from '../../lib/format'
@@ -318,19 +319,20 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
             )}
 
             {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
-              в title значка — на настенном экране диспетчерской мышью не водят. */}
+              в title значка — на настенном экране диспетчерской мышью не водят.
+              Значок оси и бейдж с тем же словом, что в столбце «Риск» дашборда. */}
             <div
-              class="flex flex-wrap items-center gap-4 text-sm"
+              class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"
               style="color:var(--text-secondary)"
             >
               {LEGEND_STATES.map((cls) => (
-                <span key={String(cls)} class="flex items-center gap-1.5">
+                <span key={String(cls)} class="flex items-center gap-2">
                   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
                     <RiskMark cls={cls} cx={6} cy={6} size={10} />
                   </svg>
-                  {riskLabel(cls)}
+                  <RiskBadge cls={cls}>{riskLabel(cls)}</RiskBadge>
                   {cls == null && (
-                    <span style="color:var(--text-muted)"> — расчёта по объекту не было</span>
+                    <span style="color:var(--text-muted)">— расчёта по объекту не было</span>
                   )}
                 </span>
               ))}
