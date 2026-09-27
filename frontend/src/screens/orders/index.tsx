@@ -5,12 +5,15 @@ import { usePoll, свежо } from '../../lib/poll'
 import { PRIORITY_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
+import { isoDate } from '../../components/ObjectCard.logic'
 
 /* Экран заявок — задача 6.7 (MOS-62), постраничность — 4.13 (MOS-117). Данные
    читаются из GET /api/orders, форма ответа — contracts/examples/orders/order-list.json
    (moskollektor-44, 17.09.2026): узкий список, полная карточка — отдельным
-   запросом по клику. Фильтров нет — они в части III (docs/acceptance-test.md),
-   сюда не входят. Клик по строке ведёт на /orders/:id (карточка заявки, тот же тикет). */
+   запросом по клику. Клик по строке ведёт на /orders/:id (карточка заявки, тот же тикет).
+   План на неделю (US-18): список идёт по сроку, ближайший сверху; период срока
+   отбирает сервер (GET /api/orders?due_from&due_to), поэтому число строк равно
+   total ответа; просроченная заявка подписана словом «просрочено», не только цветом. */
 
 const PRIORITY_BORDER: Record<string, string> = {
   '1': 'var(--state-error)',
@@ -20,6 +23,13 @@ const PRIORITY_BORDER: Record<string, string> = {
 }
 
 const PAGE_SIZE = 200 // умолчание backend/app/api/orders.py::list_orders
+const СУТКИ_МС = 24 * 3600 * 1000
+
+// Просрочена — срок прошёл, а заявка не закрыта и не отменена
+// (backend/app/domain/state_machine.py: COMPLETED и CANCELLED — конечные).
+function просрочена(o: OrderListItem, сейчас: number): boolean {
+  return Date.parse(o.due_at) < сейчас && o.status !== 'COMPLETED' && o.status !== 'CANCELLED'
+}
 
 const TABS = [
   { id: 'orders', label: 'Все заявки' },
@@ -71,6 +81,8 @@ function OrdersTab() {
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [dueFrom, setDueFrom] = useState('')
+  const [dueTo, setDueTo] = useState('')
   // Та же страница — раз в минуту от общего опроса (НФ-89, MOS-123). Вкладка
   // «Неквитированные» не опрашивается: она копит страницы «Показать ещё»,
   // и перезапрос первой страницы выбросил бы подгруженные.
@@ -81,7 +93,7 @@ function OrdersTab() {
     // в зависимостях перезапускает эффект на каждое «дальше», и ответ
     // прошлой страницы, пришедший позже нового, клал чужие строки в таблицу.
     let отменено = false
-    fetchOrders(offset)
+    fetchOrders(offset, dueFrom, dueTo)
       .then((r) => {
         if (!отменено) {
           setItems(r.items)
@@ -95,11 +107,66 @@ function OrdersTab() {
     return () => {
       отменено = true
     }
-  }, [offset, tick])
+  }, [offset, tick, dueFrom, dueTo])
+
+  function период(from: string, to: string) {
+    setDueFrom(from)
+    setDueTo(to)
+    setOffset(0)
+  }
+  const сейчас = Date.now()
+  const стильПоля =
+    'background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)'
 
   return (
     <>
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
+
+      <div class="flex flex-wrap items-end gap-3 text-sm mb-3" style="color:var(--text-secondary)">
+        <label class="flex flex-col gap-1">
+          Срок с
+          <input
+            type="date"
+            value={dueFrom}
+            onInput={(e) => период((e.target as HTMLInputElement).value, dueTo)}
+            class="px-2 py-1 rounded text-sm"
+            style={стильПоля}
+          />
+        </label>
+        <label class="flex flex-col gap-1">
+          Срок по
+          <input
+            type="date"
+            value={dueTo}
+            onInput={(e) => период(dueFrom, (e.target as HTMLInputElement).value)}
+            class="px-2 py-1 rounded text-sm"
+            style={стильПоля}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => период(isoDate(new Date()), isoDate(new Date(Date.now() + 6 * СУТКИ_МС)))}
+          class="px-2 py-1 rounded"
+          style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+        >
+          7 дней вперёд
+        </button>
+        {(dueFrom || dueTo) && (
+          <button
+            type="button"
+            onClick={() => период('', '')}
+            class="px-2 py-1 rounded"
+            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          >
+            Все сроки
+          </button>
+        )}
+        {items !== null && (
+          <span data-testid="orders-count">
+            {dueFrom || dueTo ? 'заявок в периоде' : 'заявок'}: {total}
+          </span>
+        )}
+      </div>
 
       <SkipTable targetId="orders-table-end" />
       <table class="w-full text-sm" style="border-collapse:collapse">
@@ -108,10 +175,13 @@ function OrdersTab() {
             {['№', 'Объект', 'Вид работ', 'Срок', 'Реакция', 'Статус'].map((h) => (
               <th
                 key={h}
+                // Список всегда идёт по сроку, ближайший сверху (ORDER BY n.due_at
+                // в backend/app/api/orders.py) — заголовок это и называет (US-18 сц. 1).
+                aria-sort={h === 'Срок' ? 'ascending' : undefined}
                 class="text-left px-2 py-2 text-xs uppercase tracking-wide"
                 style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
               >
-                {h}
+                {h === 'Срок' ? 'Срок ↑' : h}
               </th>
             ))}
           </tr>
@@ -131,7 +201,12 @@ function OrdersTab() {
                 </span>
               </td>
               <td class="px-2 py-2">{o.work_type_name}</td>
-              <td class="px-2 py-2 num">{formatDateTime(o.due_at)}</td>
+              <td class="px-2 py-2 num">
+                {formatDateTime(o.due_at)}
+                {просрочена(o, сейчас) && (
+                  <span style="color:var(--state-error)"> · просрочено</span>
+                )}
+              </td>
               <td class="px-2 py-2 num">{o.deadline_hours.toFixed(1)} ч</td>
               <td class="px-2 py-2">
                 {o.status}{' '}
@@ -147,7 +222,9 @@ function OrdersTab() {
 
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && items.length === 0 && (
-        <p style="color:var(--text-muted)">Заявок пока нет.</p>
+        <p style="color:var(--text-muted)">
+          {dueFrom || dueTo ? 'Заявок со сроком в этом периоде нет.' : 'Заявок пока нет.'}
+        </p>
       )}
 
       {items !== null && total > 0 && (
