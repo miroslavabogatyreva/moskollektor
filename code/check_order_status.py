@@ -12,7 +12,10 @@ maint.notification → GET /api/orders/{id}. Задача MOS-63 (план 6.8),
 Проверка умеет падать: подмена `AND (external_status IS DISTINCT FROM $2 ...)`
 на безусловный UPDATE в app.ingest.order_status.синхронизировать() ломает шаг
 «повтор без реального изменения», а сдвиг диапазона «в работе» в
-app.api.helpdesk_emu за верхнюю границу 4 ч ломает шаг границ.
+app.api.helpdesk_emu за верхнюю границу 4 ч ломает шаг границ. Замена
+`з["created_at"]` обратно на `з["reported_at"]` в order_status.адрес() ломает
+шаг «архивный reported_at, свежий created_at»: KeyError, потому что этот ключ
+СПИСОК_ЗАЯВОК_SQL больше не отдаёт.
 """
 
 import asyncio
@@ -43,6 +46,7 @@ CREATE TABLE maint.notification (
     notification_no   varchar(12) NOT NULL UNIQUE,
     reported_at       timestamptz NOT NULL,
     due_at            timestamptz,
+    created_at        timestamptz NOT NULL DEFAULT now(),
     status            text NOT NULL DEFAULT 'OPEN',
     external_status      text,
     external_status_at   timestamptz,
@@ -62,26 +66,36 @@ async def проверить(сервер):
         await c.execute(СХЕМА)
 
         сейчас = datetime.now(ПОЯС)
-        # Заявка «свежая» — только что заведена, эмулятор ещё не отдаёт статус
-        # (первый шаг «принята» наступает через 5–30 мин от reported_at).
+        # Все reported_at/due_at — АРХИВНЫЕ (проигрывание, конец мая 2026), как
+        # у настоящих автозаявок на стенде. Цикл эмулятора при этом обязан идти
+        # от created_at, а не от reported_at — иначе обе заявки ниже, у которых
+        # reported_at на четыре месяца в прошлом, эмулятор счёл бы «выполнена»
+        # мгновенно, и Ф-87 не показать ни разу (это и была настоящая ошибка,
+        # найденная на стенде 27.09.2026: у всех 351 автозаявки external_status
+        # оказался «выполнена», включая заведённые сегодня).
+        архив_reported_at = сейчас - timedelta(days=120)
+        архив_due_at = архив_reported_at + timedelta(hours=16)
+
+        # Заявка «свежая» — заведена (created_at) только что, эмулятор ещё
+        # не отдаёт статус (первый шаг «принята» наступает через 5–30 мин).
         await c.execute(
-            "INSERT INTO maint.notification (notification_no, reported_at, due_at) "
-            "VALUES ($1, $2, $3)",
-            "AF9990001", сейчас, сейчас + timedelta(hours=16),
+            "INSERT INTO maint.notification (notification_no, reported_at, due_at, created_at) "
+            "VALUES ($1, $2, $3, $4)",
+            "AF9990001", архив_reported_at, архив_due_at, сейчас,
         )
-        # Заявка «старая» — заведена сутки назад, к этому моменту весь цикл
-        # эмулятора уже пройден, статус должен быть «выполнена».
+        # Заявка «старая» — заведена (created_at) сутки назад, к этому моменту
+        # весь цикл эмулятора уже пройден, статус должен быть «выполнена».
         вчера = сейчас - timedelta(days=1)
         await c.execute(
-            "INSERT INTO maint.notification (notification_no, reported_at, due_at) "
-            "VALUES ($1, $2, $3)",
-            "AF9990002", вчера, вчера + timedelta(hours=16),
+            "INSERT INTO maint.notification (notification_no, reported_at, due_at, created_at) "
+            "VALUES ($1, $2, $3, $4)",
+            "AF9990002", архив_reported_at, архив_due_at, вчера,
         )
         # Завершённая заявка — опрашивать её не должны вовсе (её нет в СПИСОК_ЗАЯВОК_SQL).
         await c.execute(
-            "INSERT INTO maint.notification (notification_no, reported_at, due_at, status) "
-            "VALUES ($1, $2, $3, 'COMPLETED')",
-            "AF9990003", вчера, вчера + timedelta(hours=16),
+            "INSERT INTO maint.notification (notification_no, reported_at, due_at, created_at, status) "
+            "VALUES ($1, $2, $3, $4, 'COMPLETED')",
+            "AF9990003", архив_reported_at, архив_due_at, вчера,
         )
 
         # 1. Первый тик: свежая заявка ещё без статуса (эмулятор молчит про неё),
@@ -114,11 +128,12 @@ async def проверить(сервер):
             "external_status_at сдвинулся при повторном тике без смены статуса в источнике"
         )
 
-        # 3. Свежая заявка «дожила» до первого шага цикла: подменяем reported_at
-        # в прошлое, чтобы принята/назначена/в работе уже наступили, но не выполнена.
+        # 3. Свежая заявка «дожила» до первого шага цикла: подменяем created_at
+        # в прошлое (не reported_at — он архивный и цикл эмулятора не двигает),
+        # чтобы принята/назначена/в работе уже наступили, но не выполнена.
         давно = сейчас - timedelta(hours=2)
         await c.execute(
-            "UPDATE maint.notification SET reported_at = $2 WHERE notification_no = $1",
+            "UPDATE maint.notification SET created_at = $2 WHERE notification_no = $1",
             "AF9990001", давно,
         )
         изменено3 = await синхронизировать(c)

@@ -41,7 +41,7 @@ from datetime import datetime
 URL = os.environ.get("ORDER_SYSTEM_URL", "http://api:8000/emu/helpdesk/v1/tickets")
 
 СПИСОК_ЗАЯВОК_SQL = """
-    SELECT notification_no, reported_at, due_at
+    SELECT notification_no, created_at, (due_at - reported_at) AS срок
       FROM maint.notification
      WHERE due_at IS NOT NULL
        AND status NOT IN ('COMPLETED', 'CANCELLED')
@@ -53,12 +53,21 @@ URL = os.environ.get("ORDER_SYSTEM_URL", "http://api:8000/emu/helpdesk/v1/ticket
 # за типовым nginx с буфером заголовков 8 КБ (large_client_header_buffers)
 # такой запрос отклонит. Резать заявки на пачки, когда появится настоящий
 # ORDER_SYSTEM_URL и парк заявок вырастет настолько, что упрёмся в лимит.
+#
+# Эмулятору передаём created_at, а не reported_at. У автозаявок с проигрыванием
+# архива reported_at — архивное время (май-июнь 2026): для эмулятора такая
+# заявка выглядит заведённой несколько месяцев назад и сразу «выполнена» — Ф-87
+# («сменить статус → новый статус виден») не показать ни разу. Хелпдеск
+# заказчика узнаёт о заявке в момент, когда мы её завели у СЕБЯ, — это
+# created_at (нашла проверяющая на стенде 27.09.2026: у всех 351 автозаявки
+# external_status оказался «выполнена», включая заведённые сегодня). Срок
+# заявки (due_at − reported_at) сохраняем, но откладываем его от created_at.
 def адрес(url: str, заявки: list) -> str:
     параметры: list[tuple[str, str]] = []
     for з in заявки:
         параметры.append(("notification_no", з["notification_no"]))
-        параметры.append(("reported_at", з["reported_at"].isoformat()))
-        параметры.append(("due_at", з["due_at"].isoformat()))
+        параметры.append(("reported_at", з["created_at"].isoformat()))
+        параметры.append(("due_at", (з["created_at"] + з["срок"]).isoformat()))
     return url + "?" + urllib.parse.urlencode(параметры)
 
 
@@ -92,17 +101,24 @@ async def синхронизировать(conn, url: str = URL) -> int:
 
 
 if __name__ == "__main__":
+    from datetime import timedelta
     from zoneinfo import ZoneInfo
 
     ПОЯС = ZoneInfo("Europe/Moscow")
     заявки = [
-        {"notification_no": "AF01", "reported_at": datetime(2026, 9, 1, 10, tzinfo=ПОЯС),
-         "due_at": datetime(2026, 9, 2, 2, tzinfo=ПОЯС)},
-        {"notification_no": "AF02", "reported_at": datetime(2026, 9, 1, 11, tzinfo=ПОЯС),
-         "due_at": datetime(2026, 9, 1, 20, tzinfo=ПОЯС)},
+        {"notification_no": "AF01", "created_at": datetime(2026, 9, 27, 10, tzinfo=ПОЯС),
+         "срок": timedelta(hours=16)},
+        {"notification_no": "AF02", "created_at": datetime(2026, 9, 27, 11, tzinfo=ПОЯС),
+         "срок": timedelta(hours=9)},
     ]
     а = urllib.parse.parse_qs(urllib.parse.urlsplit(адрес(URL, заявки)).query)
     assert а["notification_no"] == ["AF01", "AF02"], а
-    assert а["reported_at"][0] == "2026-09-01T10:00:00+03:00", а
-    assert а["due_at"][1] == "2026-09-01T20:00:00+03:00", а
-    print("selfcheck адреса ok: notification_no/reported_at/due_at идут одной длины и порядком")
+    # Эмулятору уходит created_at под именем reported_at, а не архивный reported_at
+    # заявки: если код вернуть на з["reported_at"], в заявках этого ключа больше
+    # нет вовсе, и адрес() упадёт KeyError — самопроверка красная.
+    assert а["reported_at"][0] == "2026-09-27T10:00:00+03:00", а
+    assert а["due_at"][1] == "2026-09-27T20:00:00+03:00", а  # 11:00 + 9 ч
+    print(
+        "selfcheck адреса ok: notification_no/reported_at/due_at идут одной длины и "
+        "порядком, цикл отсчитан от created_at, а не от архивного reported_at"
+    )
