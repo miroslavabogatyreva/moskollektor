@@ -186,7 +186,16 @@ function UnackedTab() {
     fetchUnackedNotifications(offset)
       .then((r) => {
         if (отменено) return
-        setItems((prev) => (offset === 0 ? r.items : [...(prev ?? []), ...r.items]))
+        setItems((prev) => {
+          if (offset === 0) return r.items
+          // Дедуп по id (MOS-238, находка 0d): квитирование на предыдущей
+          // странице сдвигает выдачу — offset у следующей страницы теперь
+          // считаем от items.length, а не накопительно PAGE_SIZE'ами, но
+          // поток проигрывания может и вставлять записи, а не только убирать,
+          // так что дубль на стыке страниц исключать нужно с обеих сторон.
+          const известные = new Set((prev ?? []).map((n) => n.id))
+          return [...(prev ?? []), ...r.items.filter((n) => !известные.has(n.id))]
+        })
         setTotal(r.total)
       })
       .catch((e) => {
@@ -274,7 +283,12 @@ function UnackedTab() {
           {items.length < total && (
             <button
               type="button"
-              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              // items.length, не накопительный o + PAGE_SIZE (находка 0d,
+              // MOS-238): квитирование убирает строку из items без изменения
+              // offset — следующая страница обязана начинаться с того, что
+              // экран показывает СЕЙЧАС, а не с арифметики прошлых кликов,
+              // иначе ровно одна строка на стыке никогда не попадёт на экран.
+              onClick={() => setOffset(items.length)}
               class="px-2 py-1 rounded"
               style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
             >

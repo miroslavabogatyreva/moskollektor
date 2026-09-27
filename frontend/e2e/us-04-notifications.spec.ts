@@ -44,9 +44,15 @@ test('US-04 сц. 5: событие не пропадает, пока его н�
 
   // Докручиваем страницы до конца и проверяем, что подгрузка не теряет хвост:
   // число показанных строк должно сойтись с total, который экран видит сейчас.
+  // click({timeout}) сам ждёт появления кнопки — isVisible() без ожидания
+  // на первой же проверке иногда успевает выстрелить раньше рендера страницы.
   const showMore = page.getByRole('button', { name: 'Показать ещё' })
-  for (let i = 0; (await showMore.isVisible().catch(() => false)) && i < 50; i++) {
-    await showMore.click()
+  for (let i = 0; i < 50; i++) {
+    const clicked = await showMore
+      .click({ timeout: 2000 })
+      .then(() => true)
+      .catch(() => false)
+    if (!clicked) break
   }
   const строкаСчёта = await page.getByText(/показано \d+ из \d+/).textContent()
   const совпадение = строкаСчёта?.match(/показано (\d+) из (\d+)/)
@@ -76,4 +82,55 @@ test('US-04 сц. 5: событие не пропадает, пока его н�
   }).items
   const ackedRow = ackedItems.find((n) => n.id === oldest.id)
   expect(ackedRow?.acked_by).toBe(process.env.E2E_LOGIN ?? 'dispatcher1')
+})
+
+// Регресс на подменённом API (находка 0d, 27.09.2026): «Показать ещё» считал
+// следующий offset накопительно, o + PAGE_SIZE. Квитирование на первой
+// странице убирает строку из выдачи без изменения offset, и следующая
+// страница начиналась не там, где экран остановился, — ровно одна строка
+// на стыке пропадала навсегда. Стенд не квитирует — весь список подставной.
+test('US-04 сц. 5: «Показать ещё» не теряет строку после квитирования на первой странице', async ({
+  page,
+}) => {
+  const N = 250
+  let store = Array.from({ length: N }, (_, i) => ({
+    id: 1000 + i,
+    reported_at: new Date(Date.UTC(2026, 8, 20) - i * 60_000).toISOString(),
+    object_name: `obj${i}`,
+    smvu_key: `k${i}`,
+    probability: 0.9,
+    horizon_h: 24,
+    as_of: null,
+    acked_at: null,
+    acked_by: null,
+  }))
+
+  await page.route(/\/api\/notifications(\?|\/)/, async (route) => {
+    const u = new URL(route.request().url())
+    const ackMatch = u.pathname.match(/\/notifications\/(\d+)\/ack$/)
+    if (ackMatch && route.request().method() === 'POST') {
+      const id = +ackMatch[1]
+      store = store.filter((n) => n.id !== id)
+      return route.fulfill({ json: { id, acked_by: 'dispatcher1', acked_at: new Date().toISOString() } })
+    }
+    const limit = +(u.searchParams.get('limit') ?? 200)
+    const offset = +(u.searchParams.get('offset') ?? 0)
+    return route.fulfill({ json: { total: store.length, items: store.slice(offset, offset + limit) } })
+  })
+
+  await page.goto('/orders')
+  await page.getByRole('tab', { name: 'Неквитированные' }).click()
+  await page.getByText(`показано 200 из ${N}`).waitFor()
+
+  await page.locator('[data-notification-id="1000"]').getByRole('button', { name: 'Квитировать' }).click()
+  await page.getByText(`показано 199 из ${N - 1}`).waitFor()
+
+  await page.getByRole('button', { name: 'Показать ещё' }).click()
+  await expect(page.getByText(`показано ${N - 1} из ${N - 1}`)).toBeVisible()
+
+  const shownIds = await page
+    .locator('[data-notification-id]')
+    .evaluateAll((els) => els.map((e) => +(e as HTMLElement).dataset.notificationId!))
+  const missing = store.map((n) => n.id).filter((id) => !shownIds.includes(id))
+  expect(missing).toEqual([])
 })
