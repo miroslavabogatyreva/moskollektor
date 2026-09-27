@@ -148,7 +148,7 @@ systemctl is-active  docker -> active
 Что стоит на сервере после этого:
 
 ```
-/srv/moskollektor/          db, backend, deploy, contracts, ml-stub — без .git и dataset
+/srv/moskollektor/          git-копия origin/master (с 27.09.2026), без dataset
 /srv/moskollektor/deploy/.env   пароль базы, в репозиторий не идёт
 /srv/moskollektor/.venv/    python 3.12 плюс asyncpg, для запуска загрузчика
 /srv/moskollektor/load-*.log    журналы заливки по потокам
@@ -179,6 +179,34 @@ gather-узлов разом, 12 участников × 128 МБ = 1536 МБ н
 живости для `api` я добавил 16.09.2026, до этого она была у всех служб, кроме той
 единственной, ради которой стоит весь стенд — зовёт `python -c` по `/health`, потому
 что `curl` в образе бэкенда нет.
+
+**Выкладка с 27.09.2026 — пуш в master, дальше сама.** `/srv/moskollektor` стал
+git-копией репозитория: сервер забирает код ключом `/root/.ssh/moskollektor_deploy`,
+он заведён на GitHub как deploy key только на чтение. После каждого пуша в master
+GitHub Actions (`.github/workflows/deploy.yml`) собирает фронт, гоняет `tsc` и три
+самопроверки без базы (`check_schema`, `check_deploy_set`, `check_stale_fetch`),
+и если всё зелёное, заходит на сервер своим ключом и запускает
+`deploy/deploy.sh`. Ключ Actions стоит в `/root/.ssh/authorized_keys` с
+`command="/srv/moskollektor/deploy/deploy.sh",restrict`: чем бы он ни пытался
+войти, сервер выполнит только выкладку. Правка одних документов (`docs/**`, `*.md`)
+выкладку не запускает. Руками, если Actions лежит:
+
+```
+ssh root@135.106.216.101 /srv/moskollektor/deploy/deploy.sh
+```
+
+Скрипт берёт вершину `origin/master` и делает всё, что раньше делали руками по
+ловушкам ниже: собирает фронт в контейнере `node:26-alpine` (node на сервере нет),
+кладёт его в `deploy/nginx/html`, собирает `migrate api worker emulator-smvu`,
+накатывает миграции, перезапускает nginx, если менялся `deploy/nginx/`, и ждёт
+`healthy` у `api`. Что сейчас на стенде: `curl -sk https://135.106.216.101/version.txt`
+отдаёт хеш коммита, а `git -C /srv/moskollektor log -1` на сервере — его же.
+Откатывают через `git revert` в master и пуш, а не выкладкой старого коммита мимо git.
+`git status` на сервере показывает `M deploy/nginx/html/index.html` и неотслеживаемые
+журналы заливки — так и должно быть: в git по этому пути заглушка, а на стенде фронт.
+
+Ниже — как выкладывали до 27.09.2026 и о какие ловушки спотыкались. Каждая
+из них теперь закрыта строкой в `deploy/deploy.sh`.
 
 **Как выкладывать код и что при этом ломается.** Код едет `rsync -a` в
 `/srv/moskollektor/backend` и `/srv/moskollektor/db`, потом
