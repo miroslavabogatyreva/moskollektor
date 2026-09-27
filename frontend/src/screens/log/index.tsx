@@ -210,6 +210,12 @@ export function LogScreen(_props: Record<string, unknown>) {
             >
               Решение
             </th>
+            <th
+              class="text-left px-2 py-2 text-xs uppercase tracking-wide"
+              style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+            >
+              Исход
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -240,6 +246,20 @@ export function LogScreen(_props: Record<string, unknown>) {
                   </>
                 ) : (
                   <span style="color:var(--text-muted)">нет</span>
+                )}
+              </td>
+              {/* Исход (US-10 сц. 4, 5): отмеченный человеком — словом и причиной;
+                  без отметки — «горизонт истёк» или «открыт», система сама его не ставит. */}
+              <td class="px-2 py-2" data-testid="outcome-cell">
+                {r.outcome ? (
+                  <>
+                    {r.outcome.outcome_name}
+                    {r.outcome.reason_name && ` · ${r.outcome.reason_name}`}
+                  </>
+                ) : (
+                  <span style="color:var(--text-muted)">
+                    {r.horizon_expired ? 'горизонт истёк' : 'открыт'}
+                  </span>
                 )}
               </td>
             </tr>
