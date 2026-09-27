@@ -35,7 +35,7 @@ test('US-12 сц. 1: пять колонок формы заказчика', asy
   const t = таблица(page)
   for (const h of КОЛОНКИ) await expect(t.getByRole('columnheader', { name: h })).toBeVisible()
   await expect(t.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 })
-  // В карточке — только свой участок: «Коллектор 797, пикет 1» не тянет пикеты 19 и 178.
+  // В карточке — только свой участок: «Коллектор 797, пикет 1» не тянет пикеты 100 и 137.
   const объекты = await t.locator('tbody tr td:nth-child(2)').allTextContents()
   expect(new Set(объекты)).toEqual(new Set([u.name]))
 })
@@ -154,4 +154,63 @@ test('US-12 сц. 1: в карточке нет событий соседнег�
   await expect(page.getByText('Событий за период нет')).toBeVisible()
   await expect(таблица(page)).not.toContainText('пикет 100')
   await expect(таблица(page)).not.toContainText('пикет 137')
+})
+
+// Ревью c0, 27.09.2026: 422 от сервера (окно длиннее 31 суток) не оставляет под
+// ошибкой строк прошлого окна и не пишет «событий нет».
+test('US-12 сц. 3: окно длиннее 31 суток — ошибка без старых строк', async ({ page }) => {
+  const u = await участокСТревогами(page)
+  await page.goto(`/objects/${u.id}`)
+  await expect(таблица(page).locator('tbody tr').first()).toBeVisible({ timeout: 15_000 })
+  await журнал(page).getByLabel('С даты').fill('2026-05-01')
+  await журнал(page).getByLabel('По дату').fill('2026-06-30')
+  const ответ = page.waitForResponse((r) => r.url().includes('from=2026-05-01'))
+  await журнал(page).getByRole('button', { name: 'Применить' }).click()
+  expect((await ответ).status()).toBe(422)
+  await expect(
+    журнал(page).getByText(/Не удалось загрузить журнал: диапазон не длиннее 31 суток/),
+  ).toBeVisible()
+  await expect(таблица(page).locator('tbody tr')).toHaveCount(0)
+  await expect(журнал(page).getByText('Событий за период нет')).toHaveCount(0)
+})
+
+test('US-12 сц. 3: дата начала позже конца — отбор не уходит', async ({ page }) => {
+  const u = await участокСТревогами(page)
+  await page.goto(`/objects/${u.id}`)
+  await журнал(page).getByLabel('С даты').fill('2026-06-30')
+  await журнал(page).getByLabel('По дату').fill('2026-06-01')
+  await expect(журнал(page).getByRole('button', { name: 'Применить' })).toBeDisabled()
+  await expect(журнал(page).getByText('Дата начала позже даты конца')).toBeVisible()
+})
+
+// Общий журнал по всему парку — строка Ф-89 «открыть журнал»: здесь «Объект»
+// не один, и фильтр с сортировкой по нему имеют смысл.
+test('US-12 сц. 2: общий журнал из меню — сортировка и фильтр по объекту', async ({ page }) => {
+  await page.goto('/dashboard')
+  await page
+    .getByRole('navigation', { name: 'Разделы' })
+    .getByRole('link', { name: 'Журнал событий' })
+    .click()
+  await expect(page).toHaveURL(/\/tech-events$/)
+  const t = таблица(page)
+  await expect(t.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 })
+  const объекты = new Set(await t.locator('tbody tr td:nth-child(2)').allTextContents())
+  expect(объекты.size, 'по всему парку, а не один участок').toBeGreaterThan(1)
+  // Время без секунд, как на остальных экранах (formatDateTime, М-12).
+  await expect(t.locator('tbody tr td:nth-child(1)').first()).toHaveText(
+    /^\d\d\.\d\d\.\d{4} \d\d:\d\d$/,
+  )
+
+  const сорт = page.waitForResponse(
+    (r) => r.url().includes('sort=object') && r.url().includes('order=asc'),
+  )
+  await t.getByRole('button', { name: 'Объект' }).click()
+  await сорт
+  const [первый] = [...объекты].sort()
+  const отбор = page.waitForResponse((r) => r.url().includes('object='))
+  await журнал(page).getByLabel('Объект').fill(первый)
+  await журнал(page).getByRole('button', { name: 'Применить' }).click()
+  await отбор
+  for (const o of await t.locator('tbody tr td:nth-child(2)').allTextContents())
+    expect(o).toContain(первый)
 })

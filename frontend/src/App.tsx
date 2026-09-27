@@ -10,6 +10,7 @@ import { LogScreen } from './screens/log'
 import { OrdersScreen } from './screens/orders'
 import { OrderCard } from './screens/orders/OrderCard'
 import { ObjectCard } from './components/ObjectCard'
+import { TechEventsScreen } from './components/TechEventsTable'
 import { ForecastCard } from './components/ForecastCard'
 import { LoginScreen } from './screens/login'
 import { DirectoryScreen } from './screens/directory'
@@ -62,6 +63,7 @@ export function App() {
         <MapScreen path="/map" />
         <LogScreen path="/log" />
         <OrdersScreen path="/orders" />
+        <TechEventsScreen path="/tech-events" />
         <OrderCard path="/orders/:orderId" />
         <ObjectCard path="/objects/:sectionId" />
         <ForecastCard path="/forecasts/:forecastId" />
