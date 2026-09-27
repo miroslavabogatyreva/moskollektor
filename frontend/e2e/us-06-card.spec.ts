@@ -122,3 +122,16 @@ test('US-06 сц. 4: видно, что данные участка устаре
   const расчёт = await риск.getByText(/^Расчёт от /).innerText()
   expect(момент(запись), `${запись} раньше, чем ${расчёт}`).toBeLessThan(момент(расчёт))
 })
+
+// Замер истории: вероятность и объяснение видны без прокрутки (ТЗ разд. 18,
+// НФ-71 — логически связанные блоки рядом). 27.09.2026 блок стоял на 1 556 px.
+test('US-06 замер: блок «Уровень риска» на первом экране', async ({ page }) => {
+  const о = await участок(page)
+  await page.goto(`/objects/${о.section_id}`)
+  const заголовок = page.getByRole('heading', { name: 'Уровень риска' })
+  await expect(заголовок).toBeVisible()
+  const y = (await заголовок.boundingBox())!.y
+  expect(y, 'блок риска начинается в пределах первого экрана').toBeLessThan(
+    page.viewportSize()!.height,
+  )
+})
