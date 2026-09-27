@@ -34,19 +34,27 @@ export function DashboardScreen(_props: Record<string, unknown>) {
   // справочник участков статичен и грузится один раз.
   const { tick } = usePoll()
   useEffect(() => {
+    // Эффект перезапускается раз в минуту: медленный ответ прошлого тика
+    // (435 КБ рисков) не должен лечь поверх ответа нового.
+    let отменено = false
     fetchRisks()
       .then((r) => {
+        if (отменено) return
         setRows(r)
         setError(null)
         свежо()
       })
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => !отменено && setError(errorMessage(e)))
     fetchDataStatus()
       .then((s) => {
+        if (отменено) return
         setStatus(s)
         setStatusError(null)
       })
-      .catch((e) => setStatusError(errorMessage(e)))
+      .catch((e) => !отменено && setStatusError(errorMessage(e)))
+    return () => {
+      отменено = true
+    }
   }, [tick])
 
   useEffect(() => {
