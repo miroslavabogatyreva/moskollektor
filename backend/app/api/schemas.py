@@ -87,6 +87,10 @@ class ForecastListItem(BaseModel):
     write_reason: str
     # Последнее решение диспетчера (US-08, US-09 сц. 4); null — прогноз не разобран.
     decision: "ForecastDecision | None" = None
+    # Исход (US-10): null — никто не отметил; тогда horizon_expired говорит, истёк ли
+    # горизонт (as_of + horizon_h позади). Сама система исход не ставит.
+    outcome: "ForecastOutcome | None" = None
+    horizon_expired: bool = False
 
 
 class ForecastList(BaseModel):
@@ -104,6 +108,22 @@ class ForecastDecision(BaseModel):
     verified_externally: bool
     decided_by: str
     decided_at: IsoDatetime
+
+
+class ForecastOutcome(BaseModel):
+    outcome_id: int
+    outcome_code: str
+    outcome_name: str
+    reason_code: str | None
+    reason_name: str | None
+    decided_by: str
+    decided_at: IsoDatetime
+
+
+class OutcomeIn(BaseModel):
+    # Три исхода (ref.forecast_outcome) и пять причин у «ложной» — Ф-34, Ф-35.
+    outcome_code: str
+    reason_code: str | None = None
 
 
 class FeedbackIn(BaseModel):
@@ -129,6 +149,8 @@ class ForecastDetail(BaseModel):
     order_ids: list[int]
     # Последнее решение диспетчера (MOS-55, Ф-92); null — прогноз ещё не разобран.
     decision: ForecastDecision | None
+    outcome: ForecastOutcome | None = None
+    horizon_expired: bool = False
 
 
 class DictItem(BaseModel):
@@ -139,6 +161,8 @@ class DictItem(BaseModel):
 class DecisionOptions(BaseModel):
     decisions: list[DictItem]
     reasons: list[DictItem]
+    # Исходы прогноза (US-10): подтвердилось, ложная, не проверяли.
+    outcomes: list[DictItem] = []
 
 
 class ObjectChannel(BaseModel):
@@ -236,6 +260,26 @@ class ObjectChannelStat(BaseModel):
 class ObjectChannelList(BaseModel):
     total: int
     items: list[ObjectChannelStat]
+
+
+class ChannelEpisodeChannel(BaseModel):
+    channel_id: int
+    name: str
+    sensor_kind: str | None
+    system_kind: str | None
+
+
+class ChannelEpisode(BaseModel):
+    started_at: IsoDatetime
+    ended_at: IsoDatetime | None
+    duration_h: float | None
+    fault_value: str
+
+
+class ChannelEpisodeList(BaseModel):
+    channel: ChannelEpisodeChannel
+    total: int
+    items: list[ChannelEpisode]
 
 
 class OrderListItem(BaseModel):
