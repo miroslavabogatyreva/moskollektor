@@ -110,13 +110,39 @@ class _ФальшДистрибутив:
         self.metadata = _ФальшМетаданные(поля, классификаторы)
 
 
+def _имена_requirements():
+    """Имена пакетов из backend/requirements.txt в нижнем регистре.
+
+    backend/Dockerfile ставит только этот файл (`COPY backend/requirements.txt`,
+    `pip install -r requirements.txt`) — requirements-dev.txt в образ не идёт по
+    его собственному комментарию. Разработческий `.venv` держит оба файла разом,
+    поэтому pytest и его собственные транзитивные зависимости (Pygments,
+    iniconfig, packaging, pluggy — находка MOS-233, 27.09.2026) попадали в
+    «сборку» наравне с тем, что реально легло в образ. Старый список
+    НЕ_В_ОБРАЗЕ пришлось бы пополнять вручную при каждом обновлении pytest —
+    вместо этого сверяем с requirements.txt как с единственным источником
+    правды о составе образа.
+    """
+    путь = os.path.join(КОРЕНЬ, "backend", "requirements.txt")
+    имена = set()
+    with open(путь, encoding="utf-8") as f:
+        for строка in f:
+            строка = строка.split("#", 1)[0].strip()
+            if строка:
+                имена.add(строка.split("==")[0].strip().lower())
+    return имена
+
+
 def собрать_backend(path=None):
     """path — список каталогов site-packages; по умолчанию текущий интерпретатор.
 
     Параметр существует ради проверки на живом пакете (см. docs/libraries.md
     и разбор в чате с проверяющей 58): подсовываем сюда site-packages отдельного
     venv с реально установленным GPL-пакетом, без риска для .venv проекта.
+    Такой синтетический path проверяется целиком, без сверки с requirements.txt
+    настоящего backend — это стенд для одного пакета, а не снимок .venv.
     """
+    в_образе = _имена_requirements() if path is None else None
     строки, без_имени = [], 0
     for dist in ilm.distributions(path=path) if path else ilm.distributions():
         имя = dist.metadata["Name"]
@@ -130,6 +156,8 @@ def собрать_backend(path=None):
             без_имени += 1
             continue
         if имя.lower() in НЕ_В_ОБРАЗЕ:
+            continue
+        if в_образе is not None and имя.lower() not in в_образе:
             continue
         строки.append((имя, dist.version, _лицензия_пакета(dist), "api, worker"))
     if без_имени:
