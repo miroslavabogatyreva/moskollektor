@@ -158,7 +158,7 @@ async function значокИФон(page: Page, слово: string, чип: bool
         const площадь = Math.round(р.width * р.height)
         const скрыть = await page.addStyleTag({ content: '[data-e2e] { visibility: hidden }' })
         const фон = await снимок(page, р)
-        await скрыть.evaluate((тег) => тег.remove())
+        await скрыть.evaluate((тег) => (тег as Element).remove())
         return { знак, фон, площадь }
       }
       await page.getByRole('button', { name: '+ приблизить' }).first().click()

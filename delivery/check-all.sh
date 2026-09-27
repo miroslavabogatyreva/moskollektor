@@ -327,6 +327,13 @@ run "Ф-93 наполовину" "фильтры карты складывают
 # график и подзаголовки групп реально видны на экране участка 2477/2204 —
 # тоже Playwright/руки.
 run "Ф-91, НФ-71 наполовину" "окно, повторы и группы карточки объекта" node frontend/src/components/ObjectCard.selfcheck.ts
+# Типы фронта вместе со спецификациями E2E (MOS-216): до 27.09.2026 typecheck
+# смотрел только src/, и синтаксическую ошибку в e2e/ ловил один прогон Playwright.
+if [ -d frontend/node_modules ]; then
+  run "—" "typecheck фронта и e2e" npm --prefix frontend run -s typecheck
+else
+  skip_msg "—" "typecheck фронта — выполните npm install в frontend/"
+fi
 # Замер модели Николая на историческом окне и протокол по нему. Базы не требует
 # нарочно: прогнозы в pred.forecast на 21.09.2026 выдала заглушка (все 425 183
 # строки несут model_version = stub-0.1), а мерили мы бэктест, доказательства
