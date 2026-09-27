@@ -32,6 +32,7 @@ async def list_audit(
     to: datetime | None = Query(None, description="момент конца периода, включительно"),
     limit: int = Query(200, ge=1, le=1000, description="сколько записей вернуть, потолок 1000"),
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
+    login: str | None = Query(None, description="логин пользователя, точное совпадение"),
     conn: asyncpg.Connection = Depends(get_conn),
     _user=Depends(require("audit.read")),
 ):
@@ -43,14 +44,16 @@ async def list_audit(
     where = """
         WHERE ($1::timestamptz IS NULL OR a.occurred_at >= $1)
           AND ($2::timestamptz IS NULL OR a.occurred_at <= $2)
+          AND ($3::text IS NULL OR u.login = $3)
     """
     total = await conn.fetchval(
         f"""
         SELECT count(*)
         FROM audit.user_action a
+        LEFT JOIN ref.app_user u ON u.user_id = a.user_id
         {where}
         """,
-        from_, to,
+        from_, to, login,
     )
     rows = await conn.fetch(
         f"""
@@ -60,9 +63,9 @@ async def list_audit(
         LEFT JOIN ref.app_user u ON u.user_id = a.user_id
         {where}
         ORDER BY a.occurred_at DESC, a.action_id DESC
-        LIMIT $3 OFFSET $4
+        LIMIT $4 OFFSET $5
         """,
-        from_, to, limit, offset,
+        from_, to, login, limit, offset,
     )
     return {
         "total": total,

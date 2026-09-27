@@ -14,6 +14,7 @@ import { LoginScreen } from './screens/login'
 import { DirectoryScreen } from './screens/directory'
 import { UsersScreen } from './screens/users'
 import { SourcesScreen } from './screens/sources'
+import { AuditScreen } from './screens/audit'
 
 function NotFound(_props: Record<string, unknown>) {
   return (
@@ -65,6 +66,7 @@ export function App() {
         <DirectoryScreen path="/admin/directory" />
         <UsersScreen path="/admin/users" />
         <SourcesScreen path="/admin/sources" />
+        <AuditScreen path="/admin/audit" />
         <NotFound default />
       </Router>
     </>
