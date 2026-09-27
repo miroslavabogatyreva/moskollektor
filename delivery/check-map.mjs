@@ -102,7 +102,7 @@ const СПИСОК = `[...document.querySelectorAll('label')]
   .find(l => l.textContent.trim().startsWith('Коллектор')).querySelector('select')`
 
 // Метки оси: <g> со значком или густой <rect>-чип, у обоих внутри <title>
-// «smvu_key · участок N · класс риска». Центр берём у самого элемента.
+// «Коллектор П, пикет К · участок N · класс риска» (MOS-243). Центр берём у самого элемента.
 const МЕТКИ = `
   return [...document.querySelectorAll('svg[role="img"] [style*="cursor"]')].map(e => {
     const t = e.querySelector('title')?.textContent || ''
