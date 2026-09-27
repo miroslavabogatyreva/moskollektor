@@ -421,6 +421,20 @@ def _selfcheck():
         строки_рег = собрать_backend(path=[tmp])
     assert [и for и, *_ in строки_рег] == ["good-pkg"], строки_рег
 
+    # MOS-233: состав образа — backend/requirements.txt, dev-файл в образ не идёт.
+    в_образе = _имена_requirements()
+    assert "fastapi" in в_образе, "requirements.txt не прочитан"
+    assert "pytest" not in в_образе, "в состав образа попал requirements-dev.txt"
+    # Сам фильтр в собрать_backend() виден только на живом .venv: pytest стоит
+    # (dev-окружение) — в сборку он попасть не должен. Нет pytest — проверять нечем.
+    try:
+        ilm.distribution("pytest")
+    except ilm.PackageNotFoundError:
+        pass
+    else:
+        живая = [и.lower() for и, *_ in собрать_backend()]
+        assert "pytest" not in живая, "фильтр по requirements.txt не сработал: pytest в сборке"
+
     print(
         "самопроверка ok: ловушка scikit-survival (поле GPL) красит, UNKNOWN красит, "
         "сверка с перечнем ловит пропажу/лишнее/расхождение версии, дистрибутив "

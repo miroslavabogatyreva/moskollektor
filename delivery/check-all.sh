@@ -13,6 +13,7 @@
 #   BASE_URL=https://135.106.216.101 CURL_OPTS=-k bash delivery/check-all.sh
 # Полный прогон против стенда — ещё DATABASE_URL (туннель, docs/server.md),
 # STAND_SSH=root@135.106.216.101 (score.json для М-10, М-13), TLS_HOST, BACKEND_IMAGE.
+# EMPTY_DATABASE_URL — ПУСТАЯ база для строки «погода» (Ф-85), не база стенда.
 #
 # Код возврата 1, если упала хоть одна проверка. В bash здесь только латиница
 # в именах переменных: кириллица валит скрипт целиком (docs/server.md).
@@ -233,6 +234,17 @@ fi
 run "Ф-77, Ф-78, Ф-79" "загрузчик СМВУ: самопроверки и справочник" "$PY" code/check_ingest.py
 if [ ! -d "${DATASET_DIR:-dataset}" ]; then
   skip_msg "Ф-78, Ф-79" "загрузчик без справочника — нет каталога dataset/ (задайте DATASET_DIR)"
+fi
+
+# Погода (Ф-85, MOS-36) и заодно контракт эмулятора Open-Meteo — «контракт каждого
+# GET» ниже пропускает /emu/…, потому что nginx их наружу не отдаёт (MOS-239).
+# Скрипт накатывает 048 и заводит свои pred.* — только на ПУСТОЙ базе, на базе
+# стенда он законно откажется. Поэтому своя переменная, а не DATABASE_URL;
+# пустую базу без docker даёт pgserver, рецепт в docstring code/check_weather.py.
+if [ -n "${EMPTY_DATABASE_URL:-}" ]; then
+  run "Ф-85"        "погода: эмулятор → забор → статус" env DATABASE_URL="$EMPTY_DATABASE_URL" "$PY" code/check_weather.py
+else
+  skip_msg "Ф-85" "погода и эмулятор Open-Meteo — задайте EMPTY_DATABASE_URL (пустая база, см. code/check_weather.py)"
 fi
 
 echo
