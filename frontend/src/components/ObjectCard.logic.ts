@@ -3,6 +3,7 @@
 // чтобы ObjectCard.selfcheck.ts мог импортировать её напрямую через node
 // (Node вырезает типы из .ts, но не умеет JSX из .tsx).
 import type { Direction } from '../lib/direction'
+import { isoDateMoscow } from '../lib/format.ts'
 
 export interface RecentForecast {
   forecast_id: number
@@ -18,7 +19,7 @@ export interface RecentForecast {
 // на день больше, окно теряло последние сутки ровно там, где должно было
 // заканчиваться. У 53 участков из 3166 это меняло дату, у остальных — нет.
 export function isoDate(d: Date): string {
-  return d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Moscow' })
+  return isoDateMoscow(d)
 }
 
 // "2026-04-16" → "16.04" — короче formatDateTime: тут это подпись к фразе

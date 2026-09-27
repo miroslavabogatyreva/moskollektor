@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
+import { errorMessage, formatDate, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
 import { TechEventsTable } from './TechEventsTable'
 import { ChannelHistory } from './ChannelHistory'
@@ -335,15 +335,15 @@ export function ObjectCard({
             {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
                 ними и есть «данные участка устарели». */}
             <div style="color:var(--text-secondary)">
-              Расчёт от {new Date(risk.computed_at).toLocaleString('ru-RU')}
+              Расчёт от {formatDateTime(risk.computed_at, true)}
             </div>
             <div style="color:var(--text-secondary)">
-              Считали на срез {new Date(risk.as_of).toLocaleDateString('ru-RU')} — не время расчёта
-              и не последняя запись по этому участку
+              Считали на срез {formatDate(risk.as_of)} — не время расчёта и не последняя запись по
+              этому участку
             </div>
             <div style="color:var(--text-secondary)">
               {data.last_reading_at
-                ? `Последняя запись участка — ${new Date(data.last_reading_at).toLocaleString('ru-RU')}: позже неё датчики участка не писали ничего`
+                ? `Последняя запись участка — ${formatDateTime(data.last_reading_at, true)}: позже неё датчики участка не писали ничего`
                 : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
             </div>
           </div>
@@ -453,7 +453,7 @@ export function ObjectCard({
                   </td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
-                    {c.last_fault_at ? new Date(c.last_fault_at).toLocaleDateString('ru-RU') : '—'}
+                    {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
                   </td>
                   <td class="px-2 py-2 num">
                     {c.faults_cnt === 0 || c.avg_duration_h == null
@@ -493,7 +493,7 @@ export function ObjectCard({
                 style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
               >
                 <td class="px-2 py-2 num">
-                  {new Date(f.computed_at).toLocaleString('ru-RU')}
+                  {formatDateTime(f.computed_at, true)}
                   {repeats > 1 && <span style="color:var(--text-muted)"> · {repeats}×</span>}
                 </td>
                 <td class="px-2 py-2">{DIRECTION_LABEL[f.direction]}</td>
@@ -519,9 +519,9 @@ export function ObjectCard({
         </h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
           {risk
-            ? `Окно расчёта: 7 суток до среза ${new Date(risk.as_of).toLocaleDateString('ru-RU')}, на котором считал прогноз.`
+            ? `Окно расчёта: 7 суток до среза ${formatDate(risk.as_of)}, на котором считал прогноз.`
             : data.last_reading_at
-              ? `Последняя запись участка: ${new Date(data.last_reading_at).toLocaleString('ru-RU')}. Окно ниже подобрано вокруг неё.`
+              ? `Последняя запись участка: ${formatDateTime(data.last_reading_at, true)}. Окно ниже подобрано вокруг неё.`
               : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
         </p>
         <div
@@ -861,7 +861,7 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
               height={H - 12}
               fill={r.is_alarm ? 'var(--state-warning)' : 'var(--border-strong)'}
             >
-              <title>{`${r.value_text ?? '—'} · ${new Date(r.read_time).toLocaleString('ru-RU')}`}</title>
+              <title>{`${r.value_text ?? '—'} · ${formatDateTime(r.read_time, true)}`}</title>
             </rect>
           )
         })}

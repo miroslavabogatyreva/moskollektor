@@ -1,5 +1,6 @@
 import { ROUTES } from './routes'
 import { logout, roleLabels, type AuthUser } from './lib/auth'
+import { formatTime } from './lib/format'
 import { useLastUpdate } from './lib/poll'
 import { Logo } from './components/Logo'
 
@@ -50,7 +51,7 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
       </nav>
       {at && (
         <span class="num text-xs" style="color:#B9CCE6">
-          обновлено в {at.toLocaleTimeString('ru-RU')}
+          обновлено в {formatTime(at)}
         </span>
       )}
       {me && (

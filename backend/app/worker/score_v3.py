@@ -19,11 +19,14 @@
 настоящую тревогу четырьмя спокойными префиксами и спрячет её.
 """
 
-from datetime import datetime, timezone
-from pathlib import Path
 import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 СХЕМА = "score.v3"
+# Время в файле наивное и московское, как `as_of` (run.py).
+МОСКВА = ZoneInfo("Europe/Moscow")
 СХЕМА_ПРИЗНАКОВ = "feat.v3"
 
 
@@ -153,6 +156,37 @@ def предупреждения(данные: dict) -> tuple[list[dict], list[s
             "p": float(к["p"]),
         })
     return открытые, sorted(без_момента)
+
+
+def открытия(данные: dict, после: datetime) -> list[dict]:
+    """Все открытия предупреждений, на которые пора заводить заявки (MOS-182).
+
+    Открытые к срезу — из `collectors[]`, всегда: от повтора их держит ключ заявки
+    `warn:<pfx>:<открытие>:…`. Плюс из `alerts[]` — открытия строго позже `после`
+    (среза прошлого прогона): такое открытие могло закрыться между двумя
+    обновлениями файла и в `collectors[]` его уже нет, а бригада о нём не узнала.
+
+    У закрытого открытия в файле только `pfx` и `t`. Вероятность момента открытия
+    файл не передаёт, и сегодняшнюю мы за неё не выдаём: `p` = None, а в заявку
+    идёт порог модели — открытие значит, что вероятность его перешла. Окно риска —
+    `t + horizon_h` файла.
+    """
+    текущие, _ = предупреждения(данные)
+    итог = [п | {"закрыто": False} for п in текущие]
+    уже = {(п["pfx"], п["opened_at"]) for п in итог}
+    горизонт = timedelta(hours=int(данные.get("horizon_h") or 0))
+    for а in данные.get("alerts") or []:
+        pfx, t = str(а["pfx"]), а["t"]
+        момент = datetime.fromisoformat(t)
+        if момент.tzinfo is None:
+            момент = момент.replace(tzinfo=МОСКВА)
+        if (pfx, t) in уже or момент <= после:
+            continue
+        уже.add((pfx, t))
+        итог.append({"pfx": pfx, "opened_at": t, "p": None, "закрыто": True,
+                     "порог": данные.get("alert_threshold"),
+                     "expires_at": (datetime.fromisoformat(t) + горизонт).isoformat()})
+    return итог
 
 
 def _selfcheck():
