@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
+import { usePoll, свежо } from '../../lib/poll'
 import { PRIORITY_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
@@ -70,6 +71,10 @@ function OrdersTab() {
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  // Та же страница — раз в минуту от общего опроса (НФ-89, MOS-123). Вкладка
+  // «Неквитированные» не опрашивается: она копит страницы «Показать ещё»,
+  // и перезапрос первой страницы выбросил бы подгруженные.
+  const { tick } = usePoll()
 
   useEffect(() => {
     // Флажок отмены — та же гонка, что в ObjectCard.tsx (MOS-178): offset
@@ -81,6 +86,7 @@ function OrdersTab() {
         if (!отменено) {
           setItems(r.items)
           setTotal(r.total)
+          свежо()
         }
       })
       .catch((e) => {
@@ -89,7 +95,7 @@ function OrdersTab() {
     return () => {
       отменено = true
     }
-  }, [offset])
+  }, [offset, tick])
 
   return (
     <>

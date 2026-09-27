@@ -42,6 +42,7 @@ class NotificationItem(BaseModel):
     reported_at: str
     object_name: str | None
     smvu_key: str | None
+    section_id: int | None
     probability: float
     horizon_h: int
     as_of: str | None
@@ -72,7 +73,7 @@ FROM_SQL = """
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 
 LIST_SQL = f"""
-SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
+SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
        f.probability, f.horizon_h, r.as_of,
        n.acked_at, au.login AS acked_by
 {FROM_SQL}
@@ -86,7 +87,7 @@ SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
 # Область видимости — тем же участком, что и у списка: техник в потоке
 # не должен увидеть чужой коллектор раньше, чем откроет список.
 СОБЫТИЯ_SQL = """
-SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key,
+SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
        f.probability, f.horizon_h, r.as_of
   FROM maint.notification n
   JOIN asset.func_location l ON l.id = n.func_location_id
@@ -110,6 +111,7 @@ def _строка(r: asyncpg.Record) -> dict:
         "reported_at": r["reported_at"].isoformat(),
         "object_name": r["object_name"],
         "smvu_key": r["smvu_key"],
+        "section_id": r["section_id"],
         "probability": r["probability"],
         "horizon_h": r["horizon_h"],
         "as_of": r["as_of"].isoformat() if r["as_of"] else None,

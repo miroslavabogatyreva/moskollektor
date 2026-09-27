@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
+import { fetchMe } from '../lib/auth'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
 import { errorMessage, formatDateTime } from '../lib/format'
+import { type Decision, VerdictDialog } from './VerdictDialog'
 
 /* Карточка прогноза — задача 6.6 (MOS-61). До этой задачи адресуемого экрана
    на forecast_id не было вовсе: прогнозы жили только внутри карточки объекта
@@ -23,12 +25,28 @@ interface ForecastDetail {
   as_of: string
   computed_at: string
   order_ids?: number[]
+  // Последнее решение диспетчера (MOS-55); null — прогноз ещё не разобран.
+  decision?: Decision | null
 }
 
 export function ForecastCard({ forecastId }: { forecastId?: string } & Record<string, unknown>) {
   const [data, setData] = useState<ForecastDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const decideButton = useRef<HTMLButtonElement>(null)
+  // Кнопку решения видят только роли с правом forecasts.decide (миграция 052).
+  // Сервер и так ответит технику 403 — это удобство, а не защита.
+  // null — ответ /api/auth/me ещё не пришёл: E2E ждёт по data-can-decide именно
+  // ответа, иначе «кнопки нет» проверялось бы раньше, чем она могла появиться.
+  const [canDecide, setCanDecide] = useState<boolean | null>(null)
+  useEffect(() => {
+    fetchMe()
+      .then((me) =>
+        setCanDecide(!!me?.roles.some((r) => r === 'dispatcher' || r === 'ods_dispatcher')),
+      )
+      .catch(() => setCanDecide(false))
+  }, [])
 
   useEffect(() => {
     if (!forecastId) return
@@ -116,6 +134,52 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         {DIRECTION_LABEL[data.direction]}: вероятность{' '}
         <b class="num">{data.probability.toFixed(4)}</b>, ранг <b class="num">{data.risk_rank}</b>,
         горизонт {data.horizon_h} ч
+      </section>
+
+      <section
+        data-testid="last-decision"
+        data-can-decide={canDecide == null ? undefined : String(canDecide)}
+        class="text-sm flex flex-col gap-2 items-start"
+      >
+        <h2 class="font-semibold" style="color:var(--text-muted)">
+          Решение диспетчера
+        </h2>
+        {data.decision ? (
+          <p>
+            <b>{data.decision.decision_name}</b>
+            {data.decision.reason_name && <> · причина: {data.decision.reason_name}</>} ·{' '}
+            {data.decision.decided_by}, {formatDateTime(data.decision.decided_at)}
+            {data.decision.verified_externally && <> · проверено по внешним источникам</>}
+            {data.decision.comment && (
+              <span class="block" style="color:var(--text-secondary)">
+                {data.decision.comment}
+              </span>
+            )}
+          </p>
+        ) : (
+          <p style="color:var(--text-muted)">Решения по этому прогнозу ещё нет.</p>
+        )}
+        {canDecide && (
+          <button
+            ref={decideButton}
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            class="px-3 py-1 rounded"
+            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          >
+            Решение диспетчера
+          </button>
+        )}
+        {dialogOpen && (
+          <VerdictDialog
+            forecastId={data.forecast_id}
+            onClose={() => {
+              setDialogOpen(false)
+              decideButton.current?.focus()
+            }}
+            onSaved={(d) => setData({ ...data, decision: d })}
+          />
+        )}
       </section>
 
       <section>
