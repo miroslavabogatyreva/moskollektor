@@ -38,3 +38,27 @@ export async function fetchForecasts(
   }
   return body
 }
+
+export interface OutcomeSummary {
+  confirmed: number
+  false_alarm: number
+  not_checked: number
+  horizon_expired: number
+  open: number
+  total: number
+}
+
+// GET /api/forecast-outcomes — сводка исходов тем же отбором, что журнал (US-20):
+// сумма пяти чисел равна total журнала.
+export async function fetchOutcomeSummary(
+  query: ForecastQuery,
+  signal?: AbortSignal,
+): Promise<OutcomeSummary> {
+  const params = new URLSearchParams()
+  if (query.from) params.set('from', query.from)
+  if (query.to) params.set('to', query.to)
+  if (query.section) params.set('section_id', String(query.section))
+  const r = await apiFetch(`/api/forecast-outcomes?${params}`, { signal })
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  return r.json() as Promise<OutcomeSummary>
+}

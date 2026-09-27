@@ -18,6 +18,7 @@ from app.api.schemas import (
     ForecastList,
     ForecastOutcome,
     OutcomeIn,
+    OutcomeSummary,
     RiskItem,
 )
 from app.auth.deps import require, видимые_участки, проверить_участок
@@ -168,6 +169,19 @@ async def data_status(
     return {**dict(row), **dict(счёт)}
 
 
+# Отбор журнала прогнозов: период, область видимости, участок. Один текст на журнал
+# (GET /api/forecasts — счёт и страница) и сводку исходов (GET /api/forecast-outcomes):
+# сумма пяти чисел сводки обязана равняться total журнала (US-20 сц. 1).
+# section_id — отбор по участку на сервере (US-11 сц. 1): раньше участок отбирал
+# браузер в пределах страницы, и total считал весь журнал.
+ОТБОР_ЖУРНАЛА = """
+        WHERE ($1::date IS NULL OR r.started_at >= $1)
+          AND ($2::timestamptz IS NULL OR r.started_at < $2)
+          AND ($3::int[] IS NULL OR f.section_id = ANY($3))
+          AND ($4::int IS NULL OR f.section_id = $4)
+"""
+
+
 @router.get("/forecasts", response_model=ForecastList)
 async def list_forecasts(
     from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
@@ -218,15 +232,7 @@ async def list_forecasts(
     между двумя местами так же, как разошлась когда-то граница `to`.
     """
     to_exclusive = to + timedelta(days=1) if to else None
-    where = """
-        WHERE ($1::date IS NULL OR r.started_at >= $1)
-          AND ($2::timestamptz IS NULL OR r.started_at < $2)
-          AND ($3::int[] IS NULL OR f.section_id = ANY($3))
-          AND ($4::int IS NULL OR f.section_id = $4)
-    """
-    # section_id — отбор журнала по участку (US-11 сц. 1) на сервере, одним условием
-    # для счёта и страницы: раньше участок отбирал браузер в пределах страницы, и
-    # total считал весь журнал.
+    where = ОТБОР_ЖУРНАЛА
     участки = await видимые_участки(user, conn)
     total = await conn.fetchval(
         f"""
@@ -535,3 +541,50 @@ async def post_outcome(
         "reason_code": body.reason_code,
     }
     return dict(await conn.fetchrow(ИСХОД_ПО_ID, outcome_id))
+
+
+@router.get("/forecast-outcomes", response_model=OutcomeSummary)
+async def forecast_outcomes(
+    from_: date | None = Query(None, alias="from", description="дата начала периода, включительно"),
+    to: date | None = Query(None, description="дата конца периода, включительно"),
+    section_id: int | None = Query(None, description="участок, точное совпадение"),
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.read")),
+):
+    """Сводка исходов за период (US-20, Ф-95): подтвердилось, ложная, не проверяли,
+    горизонт истёк, ещё открыт. Отбор — ОТБОР_ЖУРНАЛА с теми же параметрами, что
+    у журнала, и под той же областью видимости: руководитель района видит свой
+    район, диспетчер ОДС — весь парк. Каждый прогноз попадает ровно в одно из пяти:
+    исход — последний по decided_at; без исхода делит горизонт (as_of + horizon_h
+    против now(), как horizon_expired в строке журнала). Сумма пяти = total.
+    """
+    to_exclusive = to + timedelta(days=1) if to else None
+    участки = await видимые_участки(user, conn)
+    row = await conn.fetchrow(
+        f"""
+        WITH f AS (
+            SELECT f.forecast_id, r.as_of, f.horizon_h
+              FROM pred.forecast f
+              JOIN pred.run r ON r.run_id = f.run_id
+            {ОТБОР_ЖУРНАЛА}
+        ), o AS (
+            SELECT DISTINCT ON (o.forecast_id) o.forecast_id, o.outcome_code
+              FROM pred.forecast_outcome o
+              JOIN f ON f.forecast_id = o.forecast_id
+             ORDER BY o.forecast_id, o.decided_at DESC, o.outcome_id DESC
+        )
+        SELECT count(*) FILTER (WHERE o.outcome_code = 'confirmed')   AS confirmed,
+               count(*) FILTER (WHERE o.outcome_code = 'false_alarm') AS false_alarm,
+               count(*) FILTER (WHERE o.outcome_code = 'not_checked') AS not_checked,
+               count(*) FILTER (WHERE o.outcome_code IS NULL
+                                  AND f.as_of + make_interval(hours => f.horizon_h) < now())
+                   AS horizon_expired,
+               count(*) FILTER (WHERE o.outcome_code IS NULL
+                                  AND f.as_of + make_interval(hours => f.horizon_h) >= now())
+                   AS open
+          FROM f LEFT JOIN o ON o.forecast_id = f.forecast_id
+        """,
+        from_, to_exclusive, участки, section_id,
+    )
+    итог = dict(row)
+    return {**итог, "total": sum(итог.values())}
