@@ -42,6 +42,7 @@
 moskollektor/
 ├── CLAUDE.md            правила работы над проектом, читается первым
 ├── README.md            что это за репозиторий, описание каждого файла
+├── .github/workflows/deploy.yml  пуш в master → проверки → deploy/deploy.sh на стенде
 ├── .claude/        12   настройки Claude Code: хук и ссылки на девять скиллов
 │                        из `.agents/skills/`, состав — в `skills-lock.json`;
 │                        плюс наш скилл `skills/story-tdd` — TDD по историям

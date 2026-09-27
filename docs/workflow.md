@@ -177,8 +177,11 @@ git update-ref refs/heads/master $COMMIT $(git rev-parse HEAD)
 1. **До «принято» — только свои файлы поимённо.** `rsync` по файлу или `docker cp`
    в живой контейнер. Каталогов не бывает: каталог в общем дереве — не моя работа,
    а срез всех.
-2. **Образ — только после «принято» и только из закоммиченного.** Контекст сборки
-   на сервере получают не из дерева, а из origin:
+2. **Образ — только после «принято» и только из закоммиченного.** С 27.09.2026
+   это делает сам пуш в master: GitHub Actions запускает `deploy/deploy.sh`, а тот
+   берёт вершину `origin/master` (`docs/server.md`). Поэтому в master пушат только
+   принятое — пуш и есть выкладка. Ниже — как было до этого и почему. Контекст сборки
+   на сервере получали не из дерева, а из origin:
    `git archive origin/master backend db contracts code deploy/docker-compose.yml deploy/nginx/nginx.conf | ssh root@стенд "tar -x -C /srv/moskollektor"`.
    **Четыре каталога, и все четыре обязательны:** `backend/Dockerfile` копирует
    `backend/app`, `db/migrations`, `contracts` и `code`, и пропуск любого не роняет
