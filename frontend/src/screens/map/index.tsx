@@ -44,6 +44,7 @@ export function MapScreen(_props: Record<string, unknown>) {
   // метки оси так же, как фильтры, — поверх них, а не вместо.
   const [tree, setTree] = useState<TreeCollector[]>([])
   const [node, setNode] = useState<number | null>(null)
+  const [treeError, setTreeError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -87,8 +88,8 @@ export function MapScreen(_props: Record<string, unknown>) {
         return r.json() as Promise<TreeCollector[]>
       })
       .then(setTree)
-      // Дерево не грузится — схема остаётся со списком коллекторов, как до 5.9.
-      .catch((e) => console.error('не удалось загрузить /api/objects/tree:', errorMessage(e)))
+      // Дерево не грузится — говорим об этом на его месте, схема со списком коллекторов работает дальше.
+      .catch((e) => setTreeError(errorMessage(e)))
   }, [])
 
   const selectCollector = (id: number) => {
@@ -187,14 +188,20 @@ export function MapScreen(_props: Record<string, unknown>) {
 
       {sections && (
         <div class="flex gap-5 items-start">
-          {tree.length > 0 && (
-            <ObjectTree
-              tree={tree}
-              collector={collector}
-              node={node}
-              onCollector={selectCollector}
-              onNode={setNode}
-            />
+          {treeError ? (
+            <p class="text-sm w-64 shrink-0" style="color:var(--state-error)">
+              Дерево объектов не загрузилось: {treeError}
+            </p>
+          ) : (
+            tree.length > 0 && (
+              <ObjectTree
+                tree={tree}
+                collector={collector}
+                node={node}
+                onCollector={selectCollector}
+                onNode={setNode}
+              />
+            )
           )}
           <div class="flex flex-col gap-4 flex-1 min-w-0">
             <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
