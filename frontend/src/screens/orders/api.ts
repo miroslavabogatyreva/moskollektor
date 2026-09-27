@@ -32,8 +32,12 @@ export async function fetchOrders(offset = 0): Promise<OrderListResponse> {
 }
 
 // US-04 сц. 5 — вкладка «Неквитированные», backend/app/api/notifications.py.
-export async function fetchUnackedNotifications(): Promise<NotificationsResponse> {
-  const r = await apiFetch('/api/notifications?acked=false')
+// offset — та же причина, что у fetchOrders: без него список ограничен
+// умолчанием limit=200 (MOS-238, находка проверяющей: на стенде 346 записей,
+// вкладка показывала только первые 200).
+export async function fetchUnackedNotifications(offset = 0): Promise<NotificationsResponse> {
+  const qs = offset ? `&offset=${offset}` : ''
+  const r = await apiFetch(`/api/notifications?acked=false${qs}`)
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   return r.json()
 }

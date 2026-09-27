@@ -175,30 +175,37 @@ function OrdersTab() {
 
 function UnackedTab() {
   const [items, setItems] = useState<UnackedNotification[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [ackError, setAckError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
 
   useEffect(() => {
     let отменено = false
-    fetchUnackedNotifications()
+    fetchUnackedNotifications(offset)
       .then((r) => {
-        if (!отменено) setItems(r.items)
+        if (отменено) return
+        setItems((prev) => (offset === 0 ? r.items : [...(prev ?? []), ...r.items]))
+        setTotal(r.total)
       })
       .catch((e) => {
-        if (!отменено) setError(errorMessage(e))
+        if (!отменено) setLoadError(errorMessage(e))
       })
     return () => {
       отменено = true
     }
-  }, [])
+  }, [offset])
 
   async function квитировать(id: number) {
     setBusyId(id)
+    setAckError(null)
     try {
       await ackNotification(id)
       setItems((prev) => (prev ? prev.filter((n) => n.id !== id) : prev))
+      setTotal((t) => Math.max(0, t - 1))
     } catch (e) {
-      setError(errorMessage(e))
+      setAckError(errorMessage(e))
     } finally {
       setBusyId(null)
     }
@@ -206,7 +213,8 @@ function UnackedTab() {
 
   return (
     <>
-      {error && <p style="color:var(--state-error)">Не удалось квитировать: {error}</p>}
+      {loadError && <p style="color:var(--state-error)">Не удалось загрузить: {loadError}</p>}
+      {ackError && <p style="color:var(--state-error)">Не удалось квитировать: {ackError}</p>}
 
       <table class="w-full text-sm" style="border-collapse:collapse">
         <thead>
@@ -253,9 +261,27 @@ function UnackedTab() {
         </tbody>
       </table>
 
-      {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
+      {items === null && !loadError && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && items.length === 0 && (
         <p style="color:var(--text-muted)">Неквитированных событий нет.</p>
+      )}
+
+      {items !== null && total > 0 && (
+        <div class="flex items-center gap-3 text-sm" style="color:var(--text-secondary)">
+          <span>
+            показано {items.length} из {total}
+          </span>
+          {items.length < total && (
+            <button
+              type="button"
+              onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              class="px-2 py-1 rounded"
+              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            >
+              Показать ещё
+            </button>
+          )}
+        </div>
       )}
     </>
   )
