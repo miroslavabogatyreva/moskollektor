@@ -32,9 +32,10 @@ test('US-13 сц. 1: пометка «в работах»', async ({ page }) => 
   const наряд = (await r.json()) as { id: number; number: string; valid_to: string }
   try {
     await page.goto(`/objects/${участок}`)
-    const пометка = page.getByTestId('in-works')
+    // Пометку ищем по номеру своего наряда: наряд прошлого прогона, который не успели
+    // закрыть (27.09.2026 закрытие попало на 502 во время выкладки), дал бы вторую.
+    const пометка = page.getByTestId('in-works').filter({ hasText: наряд.number })
     await expect(пометка).toContainText('Объект в работах')
-    await expect(пометка).toContainText(наряд.number)
     // Срок наряда — дата и время окончания.
     await expect(пометка).toContainText(/до \d\d\.\d\d\.\d{4} \d\d:\d\d/)
   } finally {
@@ -43,5 +44,5 @@ test('US-13 сц. 1: пометка «в работах»', async ({ page }) => 
   // Закрытый наряд пометку снимает.
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Уровень риска' })).toBeVisible()
-  await expect(page.getByTestId('in-works')).toHaveCount(0)
+  await expect(page.getByTestId('in-works').filter({ hasText: наряд.number })).toHaveCount(0)
 })
