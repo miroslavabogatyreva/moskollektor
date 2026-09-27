@@ -186,9 +186,11 @@ test('US-04 сц. 3: из уведомления один переход к уч
 // уведомления (27.09.2026, max id 7542 до и после), ждать живое событие тест
 // не может. Стартовая картина — GET /api/notifications?acked=false, новое —
 // событие SSE из GET /api/alerts/stream (id события = id уведомления).
-function подменить(page: import('@playwright/test').Page) {
+// Маршруты ждём до goto: без await первый запрос полосы успевал уйти на живой
+// стенд, и сц. 1 и 6 падали в общем прогоне (27.09.2026), а поодиночке проходили.
+async function подменить(page: import('@playwright/test').Page) {
   const state = { list: [] as object[], stream: [] as object[], ack: 0 }
-  page.route(/\/api\/notifications(\?|\/)/, (route) => {
+  await page.route(/\/api\/notifications(\?|\/)/, (route) => {
     if (route.request().method() === 'POST') {
       state.ack++
       return route.fulfill({ json: { id: 0, acked_by: 'x', acked_at: 'x' } })
@@ -197,7 +199,7 @@ function подменить(page: import('@playwright/test').Page) {
   })
   // Каждое подключение отдаёт накопленные события и закрывается — EventSource
   // переподключается сам через ~3 с с Last-Event-ID, как после обрыва nginx.
-  page.route('**/api/alerts/stream', (route) => {
+  await page.route('**/api/alerts/stream', (route) => {
     const body = state.stream
       .map((e) => `id: ${(e as { id: number }).id}\ndata: ${JSON.stringify(e)}\n\n`)
       .join('')
@@ -223,7 +225,7 @@ const запись = (id: number) => ({
 })
 
 test('US-04 сц. 1: уведомление приходит само', async ({ page }) => {
-  const state = подменить(page)
+  const state = await подменить(page)
   await page.goto('/dashboard')
   await expect(page.getByRole('heading', { name: 'Дашборд рисков' })).toBeVisible()
   await expect(полоса(page)).toHaveCount(0)
@@ -234,7 +236,7 @@ test('US-04 сц. 1: уведомление приходит само', async ({
 })
 
 test('US-04 сц. 6: «Принял» гасит полосу, а событие остаётся неквитированным', async ({ page }) => {
-  const state = подменить(page)
+  const state = await подменить(page)
   state.list = [{ ...запись(9001), acked_at: null, acked_by: null }]
   await page.goto('/dashboard')
   await полоса(page).getByRole('button', { name: 'Принял' }).click()
@@ -284,4 +286,35 @@ test('US-04 сц. 7: из карточки участка — на схему', 
   await page.getByRole('main').getByRole('link', { name: 'на схеме' }).click()
   await expect(page).toHaveURL(new RegExp(`/map\\?section=${n.section_id}$`))
   await expect(page.locator(`[data-section-id="${n.section_id}"][data-selected]`)).toBeVisible()
+})
+
+// Сц. 4 на живых данных: участок с самым низким риском. На пути модели v3
+// уведомление заводит открытое моделью предупреждение, а не порог вероятности
+// (backend/app/domain/order_rules.py, заявки_по_предупреждениям), поэтому
+// проверяем то, что видит диспетчер: участок есть в списке рисков, а уведомления
+// по нему нет ни среди неквитированных, ни среди квитированных.
+test('US-04 сц. 4: риск ниже порога не отвлекает', async ({ page }) => {
+  const риски = (await (await page.request.get('/api/risks')).json()) as {
+    section_id: number
+    probability: number
+    risk_class: string | null
+  }[]
+  const низкий = риски.reduce((a, b) => (a.probability < b.probability ? a : b))
+  expect(низкий.risk_class, 'самый низкий риск — не «высокий»').not.toBe('high')
+
+  const все: { section_id: number | null }[] = []
+  for (const acked of ['false', 'true']) {
+    const r = await page.request.get(`/api/notifications?acked=${acked}&limit=1000`)
+    все.push(...((await r.json()) as { items: { section_id: number | null }[] }).items)
+  }
+  expect(
+    все.filter((n) => n.section_id === низкий.section_id),
+    `уведомлений по участку ${низкий.section_id} (p = ${низкий.probability}) нет`,
+  ).toEqual([])
+
+  await page.goto('/dashboard')
+  await expect(
+    page.locator('main table tbody tr', { hasText: new RegExp(`·\\s*${низкий.section_id}\\b`) }),
+    'прогноз виден в списке рисков',
+  ).toHaveCount(1)
 })
