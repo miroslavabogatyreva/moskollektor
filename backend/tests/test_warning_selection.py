@@ -121,7 +121,7 @@ def ranking(monkeypatch, order):
     monkeypatch.setattr(order_rules, "_веса", weights)
 
 
-def test_migration_freezes_historical_excess_without_deleting_or_topping_up(database, monkeypatch):
+def test_migrations_trim_historical_excess_to_top_and_never_top_up(database, monkeypatch):
     ranking(monkeypatch, [6, 5, 4, 3, 2, 1])
     async def case():
         import asyncpg
@@ -134,7 +134,9 @@ def test_migration_freezes_historical_excess_without_deleting_or_topping_up(data
             run = await forecast(conn)
             assert (await order_rules.завести(conn, run, план=plan["участки"]))["заявок"] == 0
             assert dict(await counts(conn, "history")) == before
-            assert before["notifications"] == before["orders"] == 4
+            # 053 deletes the surplus: the three earliest orders (sections 1-3) stay.
+            assert before["notifications"] == before["orders"] == 3
+            assert before["sections"] == [1, 2, 3]
             one = await order_rules.план_заявок(conn, [warning("history-one")], SECTIONS)
             assert one["участки"] == {}
             assert (await counts(conn, "history-one"))["orders"] == 1
