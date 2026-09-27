@@ -22,22 +22,24 @@ interface Alert {
   horizon_h: number
 }
 
-const SEEN_KEY = 'mk_alert_seen_id'
+// Отметка своя у каждого логина: второй диспетчер за тем же компьютером
+// должен увидеть то, что погасил первый.
+const seenKey = (login: string) => `alertbar-seen:${login}`
 
-function видел(): number {
+function видел(login: string): number {
   try {
-    return Number(localStorage.getItem(SEEN_KEY)) || 0
+    return Number(localStorage.getItem(seenKey(login))) || 0
   } catch {
     return 0
   }
 }
 
-export function AlertBar() {
+export function AlertBar({ login }: { login: string }) {
   const [alert, setAlert] = useState<Alert | null>(null)
 
   useEffect(() => {
     const показать = (a: Alert) => {
-      if (a.id > видел()) setAlert((prev) => (prev && prev.id >= a.id ? prev : a))
+      if (a.id > видел(login)) setAlert((prev) => (prev && prev.id >= a.id ? prev : a))
     }
     let es: EventSource | undefined
     let закрыт = false
@@ -50,6 +52,10 @@ export function AlertBar() {
         // переподключался бы к 403 каждые 3 с до закрытия вкладки.
         if (!body || закрыт) return
         body.items.forEach(показать)
+        // ponytail: событие, записанное между ответом списка и открытием потока,
+        // теряется — окно в миллисекунды (поток без Last-Event-ID стартует
+        // с max id в момент подключения). Чинится передачей наибольшего id
+        // списка потоку как курсора.
         es = new EventSource('/api/alerts/stream')
         es.onmessage = (e) => показать(JSON.parse(e.data) as Alert)
       })
@@ -58,13 +64,13 @@ export function AlertBar() {
       закрыт = true
       es?.close()
     }
-  }, [])
+  }, [login])
 
   if (!alert) return null
 
   function принял() {
     try {
-      localStorage.setItem(SEEN_KEY, String(alert!.id))
+      localStorage.setItem(seenKey(login), String(alert!.id))
     } catch {
       /* без хранилища полоса погаснет до перезагрузки — хуже, но работает */
     }

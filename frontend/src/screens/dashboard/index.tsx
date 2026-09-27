@@ -3,7 +3,7 @@ import { route } from 'preact-router'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { errorMessage } from '../../lib/format'
-import { usePoll } from '../../lib/poll'
+import { usePoll, свежо } from '../../lib/poll'
 import { отставание } from './lag'
 import { имяОбъекта, словоРиска, указатель, цветРиска } from './rows'
 import type { SectionRef } from './rows'
@@ -38,6 +38,7 @@ export function DashboardScreen(_props: Record<string, unknown>) {
       .then((r) => {
         setRows(r)
         setError(null)
+        свежо()
       })
       .catch((e) => setError(errorMessage(e)))
     fetchDataStatus()
