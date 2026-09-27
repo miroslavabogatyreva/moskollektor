@@ -72,7 +72,7 @@ router = APIRouter(prefix="/api")
 СОРТИРОВКА = {
     "read_time": "m.read_time",
     "object": "object_name",
-    "sensor_kind": "c.sensor_kind",
+    "sensor_kind": "sensor_kind",
     "value_text": "m.value_text",
     "event_type": "m.is_alarm",
 }
@@ -118,21 +118,33 @@ paired_normal AS (
            LIMIT 1
       ) nxt ON true
 ),
+-- События журнала ОДС (US-12 сц. 5, миграция 054) — третьим источником,
+-- в тех же колонках. channel_id у них нет: тип датчика — «Журнал ОДС».
+ods AS (
+    SELECT e.event_id AS journal_id, e.event_time AS read_time, NULL::integer AS channel_id,
+           e.section_id, e.event_text AS value_text, e.event_type = 'Предупреждение' AS is_alarm
+      FROM maint.ods_event e, bounds
+     WHERE e.event_time >= bounds.от AND e.event_time < bounds.до
+       AND ($8::int IS NULL OR e.section_id = $8)
+),
 merged AS (
     SELECT * FROM in_range
     UNION ALL
     SELECT * FROM paired_normal
+    UNION ALL
+    SELECT * FROM ods
 )
 """
+
 
 # LEFT JOIN намеренно: канал без участка (section_id NULL, либо участка нет
 # в ref.object_xref) — это тоже тревога, её не теряем, object уходит null.
 _ОТ_MERGED = """
   FROM merged m
-  JOIN smvu.channel c             ON c.channel_id = m.channel_id
+  LEFT JOIN smvu.channel c        ON c.channel_id = m.channel_id
   LEFT JOIN ref.object_xref x     ON x.section_id = m.section_id
   LEFT JOIN asset.func_location l ON l.id = x.func_location_id
- WHERE ($3::text IS NULL OR c.sensor_kind = $3)
+ WHERE ($3::text IS NULL OR COALESCE(c.sensor_kind, 'Журнал ОДС') = $3)
    AND ($4::text IS NULL OR (CASE WHEN m.is_alarm THEN 'Предупреждение' ELSE 'Норма' END) = $4)
    AND ($5::text IS NULL OR l.name ILIKE '%' || $5 || '%')
    AND ($6::text IS NULL OR m.value_text ILIKE '%' || $6 || '%')
@@ -142,7 +154,8 @@ _ОТ_MERGED = """
 СЧЁТ_SQL = f"{_MERGED_CTE}SELECT count(*) {_ОТ_MERGED}"
 
 ВЫБОРКА_SQL = f"""{_MERGED_CTE}
-SELECT m.journal_id, m.read_time, m.is_alarm, m.value_text, c.sensor_kind, l.name AS object_name
+SELECT m.journal_id, m.read_time, m.is_alarm, m.value_text,
+       COALESCE(c.sensor_kind, 'Журнал ОДС') AS sensor_kind, l.name AS object_name
 {_ОТ_MERGED}
 """
 
@@ -246,3 +259,21 @@ async def list_tech_events(
             for r in rows
         ],
     }
+
+
+class OdsLast(BaseModel):
+    last_id: int | None
+
+
+@router.get("/tech-events/ods-last", response_model=OdsLast)
+async def ods_last(
+    conn: asyncpg.Connection = Depends(get_conn),
+    _user=Depends(require("tech_events.read")),
+):
+    """Номер последнего события ОДС (US-12 сц. 5, Ф-61: не позже 5 с).
+
+    Журнал спрашивает его раз в 5 секунд и перечитывает таблицу, только когда
+    номер вырос: гонять тяжёлый запрос журнала каждые 5 с на 20 вкладках
+    дорого, а max по первичному ключу стоит доли миллисекунды.
+    """
+    return {"last_id": await conn.fetchval("SELECT max(event_id) FROM maint.ods_event")}
