@@ -43,7 +43,7 @@ moskollektor/
 ├── CLAUDE.md            правила работы над проектом, читается первым
 ├── README.md            что это за репозиторий, описание каждого файла
 ├── .github/workflows/deploy.yml  пуш в master → проверки → deploy/deploy.sh на стенде
-├── .claude/        12   настройки Claude Code: хук и ссылки на девять скиллов
+├── .claude/        13   настройки Claude Code: хук и ссылки на девять скиллов
 │                        из `.agents/skills/`, состав — в `skills-lock.json`;
 │                        плюс наш скилл `skills/story-tdd` — TDD по историям
 │   └── hooks/format.sh   форматирует файл после правки: ruff для Python,
@@ -157,7 +157,7 @@ moskollektor/
 │                        по ним пишутся экран заявок и GET /api/orders;
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
-├── deploy/         15   стенд: docker-compose, nginx, сертификат, проверка TLS
+├── deploy/         16   стенд: docker-compose, nginx, сертификат, проверка TLS
 ├── code/           63   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
