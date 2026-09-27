@@ -51,11 +51,13 @@ interface AxisLineProps {
   all: Section[]
   visible: Section[]
   riskBySection: Map<number, RiskClass>
+  // Участок из /map?section= (MOS-245) — обводим кольцом, в любом режиме плотности.
+  selected?: number
   viewRange: ViewRange | null
   onViewRangeChange: (v: ViewRange | null) => void
 }
 
-export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onViewRangeChange }: AxisLineProps) {
+export function AxisLine({ prefix, all, visible, riskBySection, selected, viewRange, onViewRangeChange }: AxisLineProps) {
   // Ширина оси на экране, px. null — ещё не измерили: тогда рисуем пустую рамку,
   // а не метки с x() от нулевой ширины (NaN и мигание первого кадра).
   const svgRef = useRef<SVGSVGElement>(null)
@@ -187,13 +189,19 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
           const cls = riskBySection.get(s.section_id)
           const title = `${имяУчастка(s.smvu_key)} · участок ${s.section_id} · ${riskLabel(cls)}`
           const cx = x(s.picket)
+          const выбран = s.section_id === selected
+          const кольцо = выбран && (
+            <circle cx={cx} cy={baselineY} r={dense ? 7 : 15} fill="none" stroke="var(--brand-nav-marker)" stroke-width={2.5} />
+          )
+          const метка = { 'data-section-id': s.section_id, 'data-selected': выбран ? '' : undefined }
 
           // Густо — показываем только цветной чип без номера (правило плотности,
           // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
           if (dense) {
             return (
-              <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
+              <g key={s.section_id} {...метка} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
                 <title>{title}</title>
+                {кольцо}
                 {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
                     через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
                     видимого значка у 302 меток из 303 (линия 847). Кликается сама форма. */}
@@ -205,8 +213,9 @@ export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onVie
           // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
           // как на экране заказчика: номер читается при любом цвете чипа.
           return (
-            <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
+            <g key={s.section_id} {...метка} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
               <title>{title}</title>
+              {кольцо}
               <rect
                 x={cx - 10}
                 y={baselineY - 10}
