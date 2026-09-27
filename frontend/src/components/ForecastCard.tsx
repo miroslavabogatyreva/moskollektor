@@ -3,7 +3,7 @@ import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
 import { fetchMe } from '../lib/auth'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { errorMessage, formatDateTime } from '../lib/format'
+import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { type Decision, VerdictDialog } from './VerdictDialog'
 
 /* Карточка прогноза — задача 6.6 (MOS-61). До этой задачи адресуемого экрана
@@ -40,6 +40,15 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
   // null — ответ /api/auth/me ещё не пришёл: E2E ждёт по data-can-decide именно
   // ответа, иначе «кнопки нет» проверялось бы раньше, чем она могла появиться.
   const [canDecide, setCanDecide] = useState<boolean | null>(null)
+  // Ключ участка «коллектор:пикет» — из того же справочника, что у дашборда и журнала
+  // (US-06 сц. 1, US-14): участок называется «Коллектор 847, пикет 1», а не номером.
+  const [ключи, setКлючи] = useState<Map<number, string> | null>(null)
+  useEffect(() => {
+    fetch('/data/sections.json')
+      .then((r) => (r.ok ? (r.json() as Promise<{ section_id: number; smvu_key: string }[]>) : []))
+      .then((all) => setКлючи(new Map(all.map((x) => [x.section_id, x.smvu_key]))))
+      .catch(() => setКлючи(new Map()))
+  }, [])
   useEffect(() => {
     fetchMe()
       .then((me) =>
@@ -122,11 +131,13 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
               e.preventDefault()
               route(`/objects/${data.section_id}`)
             }}
-            class="num"
             style="color:var(--link)"
           >
-            {data.section_id}
-          </a>
+            {ключи?.get(data.section_id) ? имяУчастка(ключи.get(data.section_id)!) : 'участок'}
+          </a>{' '}
+          <span class="num" style="color:var(--text-muted)">
+            · {data.section_id}
+          </span>
         </p>
       </div>
 
