@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import { fetchOrders } from './api'
-import { PRIORITY_LABEL, type OrderListItem } from './types'
+import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
+import { PRIORITY_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 
@@ -20,7 +20,52 @@ const PRIORITY_BORDER: Record<string, string> = {
 
 const PAGE_SIZE = 200 // умолчание backend/app/api/orders.py::list_orders
 
+const TABS = [
+  { id: 'orders', label: 'Все заявки' },
+  { id: 'unacked', label: 'Неквитированные' },
+] as const
+type TabId = (typeof TABS)[number]['id']
+
 export function OrdersScreen(_props: Record<string, unknown>) {
+  const [tab, setTab] = useState<TabId>('orders')
+
+  return (
+    <main class="p-5 flex flex-col gap-4">
+      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
+        Заявки на превентивное обслуживание
+      </h1>
+
+      <div
+        role="tablist"
+        aria-label="Вкладки заявок"
+        class="flex gap-2"
+        style="border-bottom:1px solid var(--border-subtle)"
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`orders-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`orders-panel-${t.id}`}
+            onClick={() => setTab(t.id)}
+            class="px-3 py-2 text-sm"
+            style={`border-bottom:2px solid ${tab === t.id ? 'var(--brand)' : 'transparent'}; color:var(--text-${tab === t.id ? 'primary' : 'muted'})`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id={`orders-panel-${tab}`} aria-labelledby={`orders-tab-${tab}`}>
+        {tab === 'orders' ? <OrdersTab /> : <UnackedTab />}
+      </div>
+    </main>
+  )
+}
+
+function OrdersTab() {
   const [items, setItems] = useState<OrderListItem[] | null>(null)
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -47,11 +92,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
   }, [offset])
 
   return (
-    <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Заявки на превентивное обслуживание
-      </h1>
-
+    <>
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
 
       <SkipTable targetId="orders-table-end" />
@@ -128,6 +169,134 @@ export function OrdersScreen(_props: Record<string, unknown>) {
           </button>
         </div>
       )}
-    </main>
+    </>
+  )
+}
+
+function UnackedTab() {
+  const [items, setItems] = useState<UnackedNotification[] | null>(null)
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [ackError, setAckError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<number | null>(null)
+
+  useEffect(() => {
+    let отменено = false
+    fetchUnackedNotifications(offset)
+      .then((r) => {
+        if (отменено) return
+        setItems((prev) => {
+          if (offset === 0) return r.items
+          // Дедуп по id (MOS-238, находка 0d): квитирование на предыдущей
+          // странице сдвигает выдачу — offset у следующей страницы теперь
+          // считаем от items.length, а не накопительно PAGE_SIZE'ами, но
+          // поток проигрывания может и вставлять записи, а не только убирать,
+          // так что дубль на стыке страниц исключать нужно с обеих сторон.
+          const известные = new Set((prev ?? []).map((n) => n.id))
+          return [...(prev ?? []), ...r.items.filter((n) => !известные.has(n.id))]
+        })
+        setTotal(r.total)
+      })
+      .catch((e) => {
+        if (!отменено) setLoadError(errorMessage(e))
+      })
+    return () => {
+      отменено = true
+    }
+  }, [offset])
+
+  async function квитировать(id: number) {
+    setBusyId(id)
+    setAckError(null)
+    try {
+      await ackNotification(id)
+      setItems((prev) => (prev ? prev.filter((n) => n.id !== id) : prev))
+      setTotal((t) => Math.max(0, t - 1))
+    } catch (e) {
+      setAckError(errorMessage(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <>
+      {loadError && <p style="color:var(--state-error)">Не удалось загрузить: {loadError}</p>}
+      {ackError && <p style="color:var(--state-error)">Не удалось квитировать: {ackError}</p>}
+
+      <table class="w-full text-sm" style="border-collapse:collapse">
+        <thead>
+          <tr>
+            {['Объект', 'Вероятность', 'Горизонт', ''].map((h) => (
+              <th
+                key={h}
+                class="text-left px-2 py-2 text-xs uppercase tracking-wide"
+                style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items?.map((n) => (
+            <tr
+              key={n.id}
+              data-notification-id={n.id}
+              style="border-bottom:1px solid var(--border-subtle)"
+            >
+              <td class="px-2 py-2">
+                {n.object_name}{' '}
+                <span style="color:var(--text-muted)" class="num">
+                  · {n.smvu_key}
+                </span>
+              </td>
+              <td class="px-2 py-2 num">{(n.probability * 100).toFixed(0)} %</td>
+              <td class="px-2 py-2 num">{n.horizon_h} ч</td>
+              <td class="px-2 py-2">
+                <button
+                  type="button"
+                  disabled={busyId === n.id}
+                  onClick={() => квитировать(n.id)}
+                  class="px-2 py-1 rounded disabled:opacity-50"
+                  style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+                >
+                  Квитировать
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {items === null && !loadError && <p style="color:var(--text-muted)">Загрузка…</p>}
+      {items !== null && items.length === 0 && (
+        <p style="color:var(--text-muted)">Неквитированных событий нет.</p>
+      )}
+
+      {items !== null && total > 0 && (
+        <div class="flex items-center gap-3 text-sm" style="color:var(--text-secondary)">
+          <span>
+            показано {items.length} из {total}
+          </span>
+          {items.length < total && (
+            <button
+              type="button"
+              // items.length, не накопительный o + PAGE_SIZE (находка 0d,
+              // MOS-238): квитирование убирает строку из items без изменения
+              // offset — следующая страница обязана начинаться с того, что
+              // экран показывает СЕЙЧАС, а не с арифметики прошлых кликов,
+              // иначе ровно одна строка на стыке никогда не попадёт на экран.
+              onClick={() => setOffset(items.length)}
+              class="px-2 py-1 rounded"
+              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            >
+              Показать ещё
+            </button>
+          )}
+        </div>
+      )}
+    </>
   )
 }
