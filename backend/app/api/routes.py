@@ -7,9 +7,17 @@
 from datetime import date, timedelta
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.api.schemas import DataStatus, ForecastDetail, ForecastList, RiskItem
+from app.api.schemas import (
+    DataStatus,
+    DecisionOptions,
+    FeedbackIn,
+    ForecastDecision,
+    ForecastDetail,
+    ForecastList,
+    RiskItem,
+)
 from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import КРАЙ_ДАННЫХ, get_conn
 
@@ -268,4 +276,97 @@ async def get_forecast(
     await проверить_участок(user, conn, row["section_id"] if row else None)
     if row is None:
         raise HTTPException(404, "прогноз не найден")
-    return dict(row)
+    решение = await conn.fetchrow(ПОСЛЕДНЕЕ_РЕШЕНИЕ, forecast_id)
+    return {**dict(row), "decision": dict(решение) if решение else None}
+
+
+# Последнее решение по прогнозу (MOS-55, US-09 сц. 4). Строки pred.feedback без
+# decision_code (до миграции 052) решением не считаем — JOIN их отбрасывает.
+ПОСЛЕДНЕЕ_РЕШЕНИЕ = """
+    SELECT fb.feedback_id, fb.decision_code, d.name AS decision_name,
+           fb.reason_code, r.name AS reason_name, fb.comment,
+           fb.decided_by, fb.decided_at
+      FROM pred.feedback fb
+      JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
+      LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+     WHERE fb.forecast_id = $1
+     ORDER BY fb.decided_at DESC, fb.feedback_id DESC
+     LIMIT 1
+"""
+
+
+@router.get("/dispatcher-decisions", response_model=DecisionOptions)
+async def decision_options(
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.read")),
+):
+    """Два справочника для диалога решения (MOS-55): решения диспетчера и причины
+    ложного срабатывания. Отдельным методом, а не полем карточки прогноза: они одни
+    на все прогнозы, и таскать их в каждом GET /api/forecasts/{id} незачем."""
+    decisions = await conn.fetch("SELECT code, name FROM ref.dispatcher_decision ORDER BY sort_order")
+    # У причин колонки порядка нет (004_events.sql): по алфавиту, «Неизвестно» последней.
+    # COLLATE "C" — порядок байтов UTF-8, для кириллицы без «ё» это алфавит на любом
+    # сервере; en_US.UTF-8 на macOS ставил «Погода» раньше «Отказ датчика».
+    reasons = await conn.fetch(
+        "SELECT code, name FROM ref.feedback_reason"
+        " ORDER BY code = 'unknown', name COLLATE \"C\""
+    )
+    return {"decisions": [dict(r) for r in decisions], "reasons": [dict(r) for r in reasons]}
+
+
+@router.post("/forecasts/{forecast_id}/feedback", response_model=ForecastDecision, status_code=201)
+async def post_feedback(
+    forecast_id: int,
+    body: FeedbackIn,
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("forecasts.decide")),
+):
+    """Решение диспетчера по прогнозу (MOS-55, Ф-92). Пишут только dispatcher
+    и ods_dispatcher (разрешение forecasts.decide, миграция 052) — ту же пару
+    ролей проверяет половина Б code/check_no_auto_verdict.py (Ф-75).
+
+    decided_by — из сессии, а не из тела: иначе диспетчер записал бы решение
+    от чужого имени. verdict выводится из решения: false_alarm → 0, прочие → 1;
+    для 0 причина из ref.feedback_reason обязательна (CHECK в 004_events.sql),
+    поэтому без неё отвечаем 422 до INSERT, а не 500 на нарушении CHECK.
+
+    Каждый вызов — новая строка, а не правка прежней: история решений — часть
+    журнала, карточка показывает последнее. Область видимости — до 404, тем же
+    порядком, что GET /api/forecasts/{id}.
+    """
+    section_id = await conn.fetchval(
+        "SELECT section_id FROM pred.forecast WHERE forecast_id = $1", forecast_id
+    )
+    await проверить_участок(user, conn, section_id)
+    if section_id is None:
+        raise HTTPException(404, "прогноз не найден")
+
+    if not await conn.fetchval(
+        "SELECT true FROM ref.dispatcher_decision WHERE code = $1", body.decision_code
+    ):
+        raise HTTPException(422, f"решения {body.decision_code!r} нет в справочнике")
+    if body.reason_code is not None and not await conn.fetchval(
+        "SELECT true FROM ref.feedback_reason WHERE code = $1", body.reason_code
+    ):
+        raise HTTPException(422, f"причины {body.reason_code!r} нет в справочнике")
+    verdict = 0 if body.decision_code == "false_alarm" else 1
+    if verdict == 0 and body.reason_code is None:
+        raise HTTPException(422, "для ложного срабатывания нужна причина из справочника")
+
+    comment = (body.comment or "").strip() or None
+    feedback_id = await conn.fetchval(
+        """
+        INSERT INTO pred.feedback (forecast_id, verdict, reason_code, comment, decided_by, decision_code)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING feedback_id
+        """,
+        forecast_id, verdict, body.reason_code, comment, user["login"], body.decision_code,
+    )
+    # Middleware в app.api.main дописывает это в тот же ряд audit.user_action (Ф-53).
+    request.state.audit_details = {
+        "forecast_id": forecast_id,
+        "decision_code": body.decision_code,
+        "reason_code": body.reason_code,
+    }
+    return dict(await conn.fetchrow(ПОСЛЕДНЕЕ_РЕШЕНИЕ, forecast_id))

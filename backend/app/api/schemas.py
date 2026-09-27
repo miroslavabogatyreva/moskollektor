@@ -90,6 +90,23 @@ class ForecastList(BaseModel):
     items: list[ForecastListItem]
 
 
+class ForecastDecision(BaseModel):
+    feedback_id: int
+    decision_code: str
+    decision_name: str
+    reason_code: str | None
+    reason_name: str | None
+    comment: str | None
+    decided_by: str
+    decided_at: IsoDatetime
+
+
+class FeedbackIn(BaseModel):
+    decision_code: str
+    reason_code: str | None = None
+    comment: str | None = None
+
+
 class ForecastDetail(BaseModel):
     forecast_id: int
     section_id: int
@@ -101,6 +118,18 @@ class ForecastDetail(BaseModel):
     as_of: IsoDatetime
     computed_at: IsoDatetime
     order_ids: list[int]
+    # Последнее решение диспетчера (MOS-55, Ф-92); null — прогноз ещё не разобран.
+    decision: ForecastDecision | None
+
+
+class DictItem(BaseModel):
+    code: str
+    name: str
+
+
+class DecisionOptions(BaseModel):
+    decisions: list[DictItem]
+    reasons: list[DictItem]
 
 
 class ObjectChannel(BaseModel):

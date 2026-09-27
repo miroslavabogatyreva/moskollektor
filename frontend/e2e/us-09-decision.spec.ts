@@ -1,0 +1,118 @@
+// US-09 «Зафиксировать решение по прогнозу» — docs/user-stories.md, MOS-55 (план 5.8),
+// приёмка Ф-92. Кнопка «Решение диспетчера» в карточке прогноза открывает
+// VerdictDialog, «Сохранить» дёргает POST /api/forecasts/{id}/feedback
+// (backend/app/api/routes.py), справочники отдаёт GET /api/dispatcher-decisions.
+//
+// ВНИМАНИЕ: сц. 1 необратимо добавляет строку в pred.feedback стенда — история
+// решений входит в журнал и не удаляется (решение оркестратора 4f, 27.09.2026).
+// Решение ставим на САМЫЙ СТАРЫЙ прогноз: GET /api/forecasts сортирует по
+// started_at DESC, значит последняя строка по offset=total-1 — самая старая,
+// и живые прогнозы, которые интересны диспетчеру, тест не трогает. Повторный
+// прогон добавит ещё одну строку тому же прогнозу, карточка покажет последнюю.
+import { expect, test, type Page } from '@playwright/test'
+
+const DISPATCHER = process.env.E2E_LOGIN ?? 'dispatcher1'
+
+async function oldestForecastId(page: Page): Promise<number> {
+  const first = await page.request.get('/api/forecasts?limit=1')
+  const { total } = (await first.json()) as { total: number }
+  expect(total).toBeGreaterThan(0)
+  const last = await page.request.get(`/api/forecasts?limit=1&offset=${total - 1}`)
+  const { items } = (await last.json()) as { items: { forecast_id: number }[] }
+  return items[0].forecast_id
+}
+
+test('US-09 сц. 1, 2, 3, 4: решение из справочника, без выбора не сохранить, текст — только комментарий', async ({
+  page,
+}) => {
+  const id = await oldestForecastId(page)
+  const posts: string[] = []
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().includes('/feedback')) posts.push(r.url())
+  })
+
+  await page.goto(`/forecasts/${id}`)
+  await page.getByRole('button', { name: 'Решение диспетчера' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Решение диспетчера' })
+  await expect(dialog).toBeVisible()
+
+  // Сц. 2: решение не выбрано — «Сохранить» неактивна, подсказка под списком,
+  // и ни одного POST в сети.
+  const save = dialog.getByRole('button', { name: 'Сохранить' })
+  await expect(save).toBeDisabled()
+  await expect(dialog.getByText('Выберите решение')).toBeVisible()
+  await save.click({ force: true })
+  expect(posts).toHaveLength(0)
+
+  // Сц. 3: решение — только из закрытого списка из четырёх, свободный текст —
+  // только в комментарии (textarea), своего пункта «другое» в списке нет.
+  const decision = dialog.getByLabel('Решение')
+  await expect(decision.locator('option:not([value=""])')).toHaveText([
+    'Выезд бригады',
+    'Направить на проверку',
+    'Мониторинг ситуации',
+    'Ложное срабатывание',
+  ])
+
+  // «Ложное срабатывание» требует причину из справочника: пока её нет,
+  // сохранить нельзя. Причин ровно пять (039_feedback_reason_five.sql).
+  await decision.selectOption({ label: 'Ложное срабатывание' })
+  const reason = dialog.getByLabel('Причина')
+  await expect(reason.locator('option:not([value=""])')).toHaveCount(5)
+  await expect(save).toBeDisabled()
+
+  // Сохраняем не ложное: вердикт 0 портил бы статистику ложных на стенде.
+  await decision.selectOption({ label: 'Мониторинг ситуации' })
+  await expect(reason).toHaveCount(0)
+  const comment = `E2E US-09 ${new Date().toISOString()}`
+  await dialog.getByLabel('Комментарий').fill(comment)
+  await expect(save).toBeEnabled()
+
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/forecasts/${id}/feedback`) && r.request().method() === 'POST'),
+    save.click(),
+  ])
+  expect(resp.status()).toBe(201)
+  const saved = (await resp.json()) as { decision_code: string; decided_by: string; comment: string }
+  expect(saved.decision_code).toBe('monitor')
+  expect(saved.decided_by).toBe(DISPATCHER)
+  expect(saved.comment).toBe(comment)
+
+  // Сц. 1: у прогноза появилось решение — в карточке, с автором.
+  await expect(dialog).toBeHidden()
+  const last = page.getByTestId('last-decision')
+  await expect(last).toContainText('Мониторинг ситуации')
+  await expect(last).toContainText(DISPATCHER)
+
+  // Сц. 4: другой диспетчер (ОДС) видит то же решение, кто и когда.
+  const other = await page.request.get(`/api/forecasts/${id}`, { headers: { 'X-User-Login': 'ods1' } })
+  const detail = (await other.json()) as {
+    decision: { decision_code: string; decided_by: string; decided_at: string; comment: string } | null
+  }
+  expect(detail.decision?.decision_code).toBe('monitor')
+  expect(detail.decision?.decided_by).toBe(DISPATCHER)
+  expect(detail.decision?.comment).toBe(comment)
+  expect(detail.decision?.decided_at).toBeTruthy()
+})
+
+test('US-09 сц. 2 на сервере: POST без решения — 422, ложное без причины — 422, техник — 403', async ({
+  page,
+}) => {
+  const id = await oldestForecastId(page)
+  const url = `/api/forecasts/${id}/feedback`
+
+  const noDecision = await page.request.post(url, { data: { comment: 'без решения' } })
+  expect(noDecision.status()).toBe(422)
+
+  const unknown = await page.request.post(url, { data: { decision_code: 'другое' } })
+  expect(unknown.status()).toBe(422)
+
+  const falseNoReason = await page.request.post(url, { data: { decision_code: 'false_alarm' } })
+  expect(falseNoReason.status()).toBe(422)
+
+  const tech = await page.request.post(url, {
+    data: { decision_code: 'monitor' },
+    headers: { 'X-User-Login': 'tech1' },
+  })
+  expect(tech.status()).toBe(403)
+})
