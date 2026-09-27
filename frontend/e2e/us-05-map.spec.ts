@@ -280,3 +280,86 @@ test('US-05 сц. 5: риск различим без цвета', async ({ page
     expect.soft(разных, имя).toBeGreaterThanOrEqual(площадь * ПОРОГ)
   }
 })
+
+// Сценарии 6 и 7 — дерево объектов диспетчера слева от оси (план 5.9, MOS-101).
+// Узел «ДП объект Бета» (object_id 111) выбран нарочно: в нём 23 участка, и один из
+// них — 1490 «798:0» — единственный в парке на двух коллекторах; на оси он стоит
+// под Зитой (большинство каналов, УЧАСТКИ_КОЛЛЕКТОРА), а в узел Беты входит тремя
+// каналами. 23 — замер SQL на стенде 27.09.2026 (справочник каналов окончателен).
+interface ДеревоУзел {
+  object_id: number
+  name: string
+  channels: number
+  section_ids: number[]
+}
+interface ДеревоКоллектор {
+  object_id: number
+  name: string
+  nodes: ДеревоУзел[]
+}
+interface Участок {
+  section_id: number
+  collector: number
+  kinds?: string[]
+}
+
+test('Узел дерева сужает схему', async ({ page }) => {
+  const дерево = (await (await page.request.get('/api/objects/tree')).json()) as ДеревоКоллектор[]
+  expect(дерево).toHaveLength(16)
+  const бета = дерево.find((к) => к.name === 'объект Бета')!
+  const узел = бета.nodes.find((у) => у.object_id === 111)!
+  expect(узел.name).toBe('ДП объект Бета')
+  expect(узел.section_ids).toHaveLength(23)
+  expect(узел.section_ids).toContain(1490)
+
+  const участки = (await (await page.request.get('/data/sections.json')).json()) as Участок[]
+  const наОсиБеты = участки.filter((у) => у.collector === бета.object_id)
+  const узлаНаОси = наОсиБеты.filter((у) => узел.section_ids.includes(у.section_id))
+  expect(узлаНаОси).toHaveLength(22) // 23 минус 1490, который на оси Зиты
+
+  await page.goto('/map')
+  const tree = page.getByRole('navigation', { name: 'Дерево объектов' })
+  await tree.getByRole('button', { name: 'объект Бета', exact: true }).click()
+  const меток = page.locator('main svg[role="img"] g > title')
+  await expect(меток).toHaveCount(наОсиБеты.length)
+
+  const кнопкаУзла = tree.getByRole('button', { name: /^ДП объект Бета · 81 кан\./ })
+  await кнопкаУзла.click()
+  await expect(кнопкаУзла).toHaveAttribute('aria-pressed', 'true')
+  await expect(меток).toHaveCount(22)
+  await expect(page.getByText(`22 из ${наОсиБеты.length} участков`)).toBeVisible()
+
+  // Участок узла на оси другого коллектора — назван, со ссылкой на коллектор.
+  const чужой = page.getByTestId('off-axis')
+  await expect(чужой).toContainText('1490')
+  await expect(чужой).toContainText('объект Зита')
+
+  // Фильтр типа складывается с узлом, а не сбрасывает его.
+  const охраняемых = узлаНаОси.filter((у) => (у.kinds ?? []).includes('guardObject')).length
+  await page.getByLabel('Тип объекта').selectOption({ label: 'Охраняемый объект' })
+  await expect(меток).toHaveCount(охраняемых)
+  await expect(кнопкаУзла).toHaveAttribute('aria-pressed', 'true')
+  await page.getByLabel('Тип объекта').selectOption({ label: 'Все' })
+
+  // Повторный клик снимает отбор — снова все метки коллектора.
+  await кнопкаУзла.click()
+  await expect(кнопкаУзла).toHaveAttribute('aria-pressed', 'false')
+  await expect(меток).toHaveCount(наОсиБеты.length)
+
+  // Переход по ссылке на ось чужого коллектора.
+  await кнопкаУзла.click()
+  await чужой.getByRole('button', { name: 'объект Зита' }).click()
+  await expect(tree.getByRole('button', { name: 'объект Зита', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+})
+
+test('Карточка называет объект диспетчера', async ({ page }) => {
+  await page.goto('/objects/1490')
+  await expect(page.getByTestId('dispatcher-object')).toHaveText([
+    'Объект диспетчера: ДП объект Бета → объект Бета',
+    'Объект диспетчера: объект Фита → объект Зита',
+    'Объект диспетчера: ДП объект Зита → объект Зита',
+  ])
+})

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { имяУчастка } from '../../lib/format'
 import { isDense, riskColors, riskLabel, riskShape, type RiskClass } from './risk'
@@ -12,24 +13,21 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    префикса своя ось и свой масштаб — тот же viewport.ts, что раньше держал
    один масштаб на коллектор, теперь держит его на линию. */
 
-const AXIS_WIDTH = 1000
+// Масштаб: одна единица чертежа — 1,3 px экрана, всегда. Ширина чертежа не
+// постоянная, а ширина оси на экране, делённая на этот масштаб (ResizeObserver).
+// До MOS-101 viewBox был 1000 единиц на любую ширину, и значок сжимался вместе
+// с осью: дерево объектов слева отняло у оси ~280 px, значок «6 ед.» стал 81 px
+// площади вместо 121, и US-05 сц. 5 (различимость без цвета, порог 10 %) упал
+// с 17 % до 6 %. До дерева на окне 1280 масштаб был 1,24 (ось 1 240 px на 1000
+// единиц); 1,3 — с запасом над порогом сц. 5 (решение c0 на ревью).
+const PX_PER_UNIT = 1.3
 const AXIS_HEIGHT = 100
 const PADDING = 40
 const MIN_VIEW_FRACTION = 0.01
 
 // Значок состояния — одна функция на все размеры: густой режим (6), чип рядом
 // с номером (7) и легенда (index.tsx, 10). Форма — riskShape, цвет — riskColors.
-export function RiskMark({
-  cls,
-  cx,
-  cy,
-  size,
-}: {
-  cls: RiskClass
-  cx: number
-  cy: number
-  size: number
-}) {
+export function RiskMark({ cls, cx, cy, size }: { cls: RiskClass; cx: number; cy: number; size: number }) {
   const c = riskColors(cls)
   const h = size / 2
   const shape = riskShape(cls)
@@ -42,8 +40,7 @@ export function RiskMark({
         stroke-width={1}
       />
     )
-  if (shape === 'circle')
-    return <circle cx={cx} cy={cy} r={h} fill={c.fill} stroke={c.border} stroke-width={1} />
+  if (shape === 'circle') return <circle cx={cx} cy={cy} r={h} fill={c.fill} stroke={c.border} stroke-width={1} />
   // Вертикальная, а не горизонтальная: вдоль оси черта ложилась на саму линию
   // (MOS-50, находка 4d) и отличалась от куска оси только цветом.
   return <rect x={cx - size / 6} y={cy - h} width={size / 3} height={size} fill={c.text} />
@@ -58,14 +55,21 @@ interface AxisLineProps {
   onViewRangeChange: (v: ViewRange | null) => void
 }
 
-export function AxisLine({
-  prefix,
-  all,
-  visible,
-  riskBySection,
-  viewRange,
-  onViewRangeChange,
-}: AxisLineProps) {
+export function AxisLine({ prefix, all, visible, riskBySection, viewRange, onViewRangeChange }: AxisLineProps) {
+  // Ширина оси на экране, px. null — ещё не измерили: тогда рисуем пустую рамку,
+  // а не метки с x() от нулевой ширины (NaN и мигание первого кадра).
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [screenWidth, setScreenWidth] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    setScreenWidth(el.clientWidth)
+    const ro = new ResizeObserver(([e]) => setScreenWidth(e.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const AXIS_WIDTH = (screenWidth ?? 0) / PX_PER_UNIT
+
   const maxPicket = Math.max(1, ...all.map((s) => s.picket))
   const minViewWidth = Math.max(1, maxPicket * MIN_VIEW_FRACTION)
   const [viewStart, viewEnd] = viewRange ?? fullView(maxPicket)
@@ -89,7 +93,7 @@ export function AxisLine({
   const onWheel = (e: WheelEvent) => {
     e.preventDefault()
     const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
-    const svgX = ((e.clientX - rect.left) / rect.width) * AXIS_WIDTH
+    const svgX = (e.clientX - rect.left) / PX_PER_UNIT
     const center = viewStart + ((svgX - PADDING) / innerWidth) * viewWidth
     zoomBy(e.deltaY > 0 ? 1.4 : 1 / 1.4, center)
   }
@@ -98,8 +102,8 @@ export function AxisLine({
     <div class="flex flex-col gap-1">
       <div class="flex items-center gap-2 text-sm flex-wrap" style="color:var(--text-secondary)">
         <span>
-          Линия {prefix}, ПК{Math.round(viewStart)}–ПК{Math.round(viewEnd)} из ПК0–ПК{maxPicket} ·{' '}
-          {all.length} участков
+          Линия {prefix}, ПК{Math.round(viewStart)}–ПК{Math.round(viewEnd)} из ПК0–ПК{maxPicket}
+          {' '}· {all.length} участков
         </span>
         <button
           type="button"
@@ -149,13 +153,16 @@ export function AxisLine({
       </div>
 
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${AXIS_WIDTH} ${AXIS_HEIGHT}`}
         role="img"
         aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${all.length} участков`}
         class="w-full"
+        height={AXIS_HEIGHT * PX_PER_UNIT}
         style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
         onWheel={onWheel}
       >
+        {screenWidth != null && screenWidth > 0 && (<>
         <line
           x1={PADDING}
           y1={baselineY}
@@ -185,11 +192,7 @@ export function AxisLine({
           // risk.ts): значок 20×20 перекрыл бы соседей на этой оси.
           if (dense) {
             return (
-              <g
-                key={s.section_id}
-                style="cursor:pointer"
-                onClick={() => route(`/objects/${s.section_id}`)}
-              >
+              <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
                 <title>{title}</title>
                 {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
                     через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
@@ -202,11 +205,7 @@ export function AxisLine({
           // Личность (рамка с номером) и состояние (чип сбоку) — раздельно,
           // как на экране заказчика: номер читается при любом цвете чипа.
           return (
-            <g
-              key={s.section_id}
-              style="cursor:pointer"
-              onClick={() => route(`/objects/${s.section_id}`)}
-            >
+            <g key={s.section_id} style="cursor:pointer" onClick={() => route(`/objects/${s.section_id}`)}>
               <title>{title}</title>
               <rect
                 x={cx - 10}
@@ -218,13 +217,7 @@ export function AxisLine({
                 stroke="var(--border-strong)"
                 stroke-width={1.5}
               />
-              <text
-                x={cx}
-                y={baselineY + 4}
-                font-size="9"
-                text-anchor="middle"
-                fill="var(--text-primary)"
-              >
+              <text x={cx} y={baselineY + 4} font-size="9" text-anchor="middle" fill="var(--text-primary)">
                 {Math.round(s.picket)}
               </text>
               {/* Чип над правым углом рамки, не на кромке: на кромке черта сливалась с ней. */}
@@ -232,6 +225,7 @@ export function AxisLine({
             </g>
           )
         })}
+        </>)}
       </svg>
     </div>
   )
