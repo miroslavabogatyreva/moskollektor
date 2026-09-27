@@ -1,0 +1,19 @@
+# Private inputs, external artifacts and generated research output stay local.
+/data/
+/models/
+/artifacts/
+/docs/research/
+*.log
+*.parquet
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.csv
+*.tsv
+*.env
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

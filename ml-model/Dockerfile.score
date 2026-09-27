@@ -1,0 +1,32 @@
+# Образ `ml-score`: расчёт модели v3 на момент для worker (MOS-145).
+# Тот же код, что обучал модель; веса — из models/v3_collector_20260922, как у образа `ml`.
+#
+#   docker build -f Dockerfile.score -t moskollektor/ml-score:<версия модели> .
+#   docker run --rm -v <данные>:/app/data:ro -v <выход>:/out \
+#       moskollektor/ml-score:<версия> --as-of "2026-06-30 23:59:59" --out /out/score.json
+#
+# Данные (README поставки): data/02_interim/mk/parquet/j*.parquet и chan.parquet —
+# журнал и справочник; data/02_interim/mk/predictive_metrics.py — склейка отказов в
+# инциденты (бриф запрещает копировать его в src/ml). Отказы и инциденты расчёт
+# пересобирает по журналу (src/ml/v3_events.py); data/03_processed/v3_final_20260920/
+# нужен только для --check и --events frozen.
+FROM python:3.14-slim
+
+# libgomp1 — системная зависимость колеса LightGBM (OpenMP), как в образе `ml`.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements/ml-serving.txt requirements/ml-score.txt ./requirements/
+RUN pip install --no-cache-dir -r requirements/ml-serving.txt -r requirements/ml-score.txt
+
+COPY src/ml ./src/ml
+COPY autoresearch_v3/prepare.py autoresearch_v3/prepare_data.py autoresearch_v3/train.py \
+     ./autoresearch_v3/
+COPY scripts/ml_v3_score.py ./scripts/
+ARG MODEL_DIR=models/v3_collector_20260922
+COPY ${MODEL_DIR} ./models/v3_collector_20260922
+
+ENV PYTHONPATH=/app/src
+ENTRYPOINT ["python", "scripts/ml_v3_score.py"]

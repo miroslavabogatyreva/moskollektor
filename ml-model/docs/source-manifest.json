@@ -1,0 +1,151 @@
+{
+  "status": "draft_source_only",
+  "origin": "previous local acceptance-fixes candidate, 2026-09-22",
+  "candidate_horizon_h": 720,
+  "required_horizon_h": 24,
+  "replacement_task": "MOS-219",
+  "source_files": [
+    {
+      "path": "src/ml/__init__.py",
+      "sha256": "033b48dadbd895d50c5364bbd5b4c713203f63ac7b5c0a6fe9a6a93a887c7d1e"
+    },
+    {
+      "path": "src/ml/config.py",
+      "sha256": "41775692630f51fc2bdcf782c0479fbf665fea0554e848f55997b97ed02d6e5a"
+    },
+    {
+      "path": "src/ml/journal_vals.py",
+      "sha256": "2f04d3463f91c808d440f5ff9dfb821a8e12ddc58fb54f46fc124b1aa2eab731"
+    },
+    {
+      "path": "src/ml/daily.py",
+      "sha256": "8c8501f39ff9198392b0174020dffce927882e7ea32f849fb11da4f8eb6a13fd"
+    },
+    {
+      "path": "src/ml/grid.py",
+      "sha256": "7c752fd9d041ef7dc7fe650f4ea78b5b9527cad859df431f9fa29a8e14786a10"
+    },
+    {
+      "path": "src/ml/features_pfx.py",
+      "sha256": "89e4a2b05150aa2862dc1f3833f9e28d4c1a39daa4b99242bbe69492bdb289f3"
+    },
+    {
+      "path": "src/ml/labels.py",
+      "sha256": "3a5d069e6fa5999d98f46b19bb9b410e3a4b5f8722b6ff3b68a82a4e741d90fe"
+    },
+    {
+      "path": "src/ml/moments.py",
+      "sha256": "6752b13389f2c2c7bf7c0304a680433fe633e7fd7ab11f65dff279ac7f867ac4"
+    },
+    {
+      "path": "src/ml/failure_defs.py",
+      "sha256": "04b1ad2ddd00999ce6c1b1faf14412738609472e9b04c49bc5c955415a2d2eff"
+    },
+    {
+      "path": "src/ml/collector_identity.py",
+      "sha256": "4c47378710a0a89cee58c20bf4045cfcf33f484183ae926984488e8855c1272c"
+    },
+    {
+      "path": "src/ml/v3_events.py",
+      "sha256": "3ec2c0e8f224bc61ed257e5863802d2628e35711979ba63adc4ac798fb5c7e57"
+    },
+    {
+      "path": "src/ml/v3_score.py",
+      "sha256": "94b029e0d963ac3e1364310ac71d0478a94aca04a0396e9db7166cb693c41845"
+    },
+    {
+      "path": "src/ml/serving/__init__.py",
+      "sha256": "25e18c28ddb46c740a9bcb36c480caae2bc4403390ad3eddb3f3f75d3801636b"
+    },
+    {
+      "path": "src/ml/serving/app.py",
+      "sha256": "033be0a31c511122c56de0e1e805a4d5a0820119a05291f6909f15f4c8f0f67f"
+    },
+    {
+      "path": "src/ml/serving/model_store.py",
+      "sha256": "7e698b775db5bc73a858e0a7627f150deacde88c738451f9b635345ba99ed20d"
+    },
+    {
+      "path": "src/ml/serving/schemas.py",
+      "sha256": "06cd936486d90870ef492c17a7af9f21b4fb38d960891c8fc66ae817570e7aaa"
+    },
+    {
+      "path": "src/ml/serving/v3_bag.py",
+      "sha256": "a30b8e3c33c4c36c71765fb86667e3be9669d97f0672924806d1e8dcebc5ffe1"
+    },
+    {
+      "path": "scripts/ml_v3_score.py",
+      "sha256": "925059cb3acaf4c50d716663c60e41522ee7b0f9a973b4d5d097b2bc65f0089b"
+    },
+    {
+      "path": "scripts/ml_v3_collector_release.py",
+      "sha256": "525660b1a1da8be4f196a357d2fc02c7e37b124806eba9e1fe7b022ae2359d75"
+    },
+    {
+      "path": "scripts/ml_v3_export.py",
+      "sha256": "e54c50fd004daea72ccbc5755cb851d659a8bd7f492557415ce446f81a58990e"
+    },
+    {
+      "path": "scripts/ml_v3_holdout.py",
+      "sha256": "95d4f0c1dd6ef4de5c33cb2794bce47db0a2351abb4ab0d7b3a429e4720ac761"
+    },
+    {
+      "path": "autoresearch_v3/train.py",
+      "sha256": "3ec380d78ae9713ab40f766877020c17bb9266dec9875b02bc88c97972a01369"
+    },
+    {
+      "path": "autoresearch_v3/prepare.py",
+      "sha256": "f642f0b280ae0d1f2038a5ffb5bb999d6515954e2836167b2c547c19df3b36ee"
+    },
+    {
+      "path": "autoresearch_v3/prepare_data.py",
+      "sha256": "1a5ab5e4e7eae539716a1faad4415a2327707d755503d1d19e1e889fa0ced1d2"
+    },
+    {
+      "path": "requirements/ml-serving.txt",
+      "sha256": "a56e501284730cf34be11568e502d77c1f5717a3f82c63b55968cb0a1e3c5225"
+    },
+    {
+      "path": "requirements/ml-score.txt",
+      "sha256": "614cdb8445357ad479ec2d956e203c42faf08d813ff93da433ee9d9d642984a0"
+    },
+    {
+      "path": "requirements/ml-serving-licenses.md",
+      "sha256": "6cc2cffcdc3ee712cfbb652403b013a591b8315638f887834ee27fd9945dc80d"
+    },
+    {
+      "path": "tests/ml/conftest.py",
+      "sha256": "8f8e5e01bb4fc7032eccb04bd8c112650ccdc7e20be2a85731b9d9e332e90922"
+    },
+    {
+      "path": "tests/ml/test_v3_score.py",
+      "sha256": "4ba325a8f54e21071b394b51a6d414848b48e6f6dba6cbcf54ce691d460342f8",
+      "origin_sha256": "548acbc50ae5ea9083cd96a2db40211cc78742eb36131298e857cd9a39e8a252",
+      "adaptation": "Test injects a read error explicitly so error-handling coverage works without private journal files."
+    },
+    {
+      "path": "tests/ml/test_collector_release.py",
+      "sha256": "d801bcc557e016f977db34ce2d8a6537775d2bba709811e93f635521164b8f7a"
+    },
+    {
+      "path": "tests/ml/serving/test_contract.py",
+      "sha256": "bbbdc3b43d9c923dcff6b21bf191547959da4d49c1dcf88d010d4e6594736574"
+    },
+    {
+      "path": "tests/ml/serving/test_feature_order.py",
+      "sha256": "8aa4e1c2e9ff4339cc9cd20636718362741ebd27c4f7af3b5b5f735bba8e9cad"
+    },
+    {
+      "path": "tests/ml/serving/test_v3_contract.py",
+      "sha256": "f03eb4a8344ab81f6cf2d9df108f2ce6a94c055236278922bb3ec437bb5634e7"
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "0acbdad1b273e818e41407870d51ccf37faab553cc9d5f3c1252c6f4cf00d516"
+    },
+    {
+      "path": "Dockerfile.score",
+      "sha256": "249af8410abd7322b6182f9853cf3255da20eef4043b2bacb0477c85d4d64d9d"
+    }
+  ]
+}
