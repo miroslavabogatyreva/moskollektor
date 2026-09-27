@@ -241,6 +241,10 @@ test('US-12 сц. 5: событие ОДС появляется быстрее',
   await загрузка
   await expect(ж.getByLabel('Автообновление')).toBeChecked()
 
+  // Событие привязано к участку из области видимости диспетчера: событие ОДС без
+  // участка диспетчер района не видит, как и тревогу канала без участка, —
+  // его видит только диспетчер ОДС.
+  const [риск] = (await (await page.request.get('/api/risks')).json()) as { section_id: number }[]
   const текст = `E2E US-12 сц. 5 ${Date.now()}`
   const отправлено = Date.now()
   const r = await page.request.post('/api/ingest/ods-events', {
@@ -250,6 +254,7 @@ test('US-12 сц. 5: событие ОДС появляется быстрее',
         {
           source_id: текст,
           event_time: new Date().toISOString(),
+          section_id: риск.section_id,
           event_text: текст,
           event_type: 'Предупреждение',
         },
