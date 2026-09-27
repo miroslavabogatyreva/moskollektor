@@ -38,6 +38,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db import КРАЙ_ДАННЫХ
+from app.ingest.order_status import синхронизировать as синхронизировать_заявки
 from app.ingest.weather import забрать_погоду
 from app.worker import run
 
@@ -46,6 +47,10 @@ from app.worker import run
 # четырёх минутах худший случай — 240 с ожидания плюс 33,4 с расчёта = 273 с.
 INTERVAL_MIN = int(os.environ.get("SCHEDULER_INTERVAL_MIN", "4"))
 REFRESH_INTERVAL_MIN = int(os.environ.get("SCHEDULER_REFRESH_INTERVAL_MIN", "5"))
+# Десять минут: статусы заявок (Ф-87) — не потоковые данные с нормативом 300 с
+# (НФ-73 про них) и не экран с нормативом раз в минуту (НФ-89 про фронт), это
+# опрос эмулируемого хелпдеска, для него достаточно на порядок реже.
+ORDER_STATUS_INTERVAL_MIN = int(os.environ.get("ORDER_STATUS_INTERVAL_MIN", "10"))
 
 # Свой ключ для самопроверки, не боевой run.БЛОКИРОВКА (48217): нашла проверяющая
 # сессия 17.09.2026 — selfcheck брал боевой ключ и падал, если в этот момент шёл
@@ -184,6 +189,25 @@ async def тик_свёртка():
         await conn.close()
 
 
+async def тик_заявки():
+    """Ф-87, НФ-69, MOS-63: раз в ORDER_STATUS_INTERVAL_MIN минут опросить хелпдеск.
+
+    Без блокировки: это опрос эмулируемого внешнего источника, а не расчёт,
+    с полным прогоном не конфликтует. Отказ источника не роняет планировщик —
+    печатаем причину, следующий тик попробует снова.
+    """
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"], command_timeout=60)
+    try:
+        try:
+            n = await синхронизировать_заявки(conn)
+        except Exception as e:  # noqa: BLE001 — сеть, HTTP, пустой ответ — источник недоступен
+            print(f"заявки: источник статусов недоступен: {e!r}")
+            return
+        print(f"заявки: изменившихся статусов {n}")
+    finally:
+        await conn.close()
+
+
 async def _selfcheck():
     """Без модели и без боевого ключа: конкуренция, снятие и снятие после сбоя."""
     dsn = os.environ["DATABASE_URL"]
@@ -300,6 +324,7 @@ def _собрать_планировщик():
     scheduler = AsyncIOScheduler(timezone=os.environ.get("TZ", "Europe/Moscow"))
     расчёт_с = следующий_слот(INTERVAL_MIN)
     свёртка_с = следующий_слот(REFRESH_INTERVAL_MIN)
+    заявки_с = следующий_слот(ORDER_STATUS_INTERVAL_MIN)
     scheduler.add_job(
         тик_расчёт, IntervalTrigger(minutes=INTERVAL_MIN, start_date=расчёт_с), id="расчёт"
     )
@@ -318,17 +343,23 @@ def _собрать_планировщик():
         id="погода",
         next_run_time=datetime.now().astimezone(),
     )
-    return scheduler, расчёт_с, свёртка_с
+    scheduler.add_job(
+        тик_заявки,
+        IntervalTrigger(minutes=ORDER_STATUS_INTERVAL_MIN, start_date=заявки_с),
+        id="заявки",
+    )
+    return scheduler, расчёт_с, свёртка_с, заявки_с
 
 
 async def _serve():
     await _закрыть_оборванные_при_старте()
-    scheduler, расчёт_с, свёртка_с = _собрать_планировщик()
+    scheduler, расчёт_с, свёртка_с, заявки_с = _собрать_планировщик()
     scheduler.start()
     print(
         f"планировщик запущен: расчёт каждые {INTERVAL_MIN} мин "
         f"(первый в {расчёт_с:%H:%M}), свёртка каждые {REFRESH_INTERVAL_MIN} мин "
-        f"(первая в {свёртка_с:%H:%M}) — слоты выровнены по полуночи, а не по моменту "
+        f"(первая в {свёртка_с:%H:%M}), заявки каждые {ORDER_STATUS_INTERVAL_MIN} мин "
+        f"(первый в {заявки_с:%H:%M}) — слоты выровнены по полуночи, а не по моменту "
         f"запуска службы; погода раз в час, первый тик сразу при старте"
     )
     await asyncio.Event().wait()
@@ -372,7 +403,7 @@ def _selfcheck_слоты():
     # `next_run_time=` можно вписать формально, а задача при этом всё равно
     # встанет на час, если она попала не в тот add_job или потерялась при правке.
     до_сборки = datetime.now().astimezone()
-    планировщик, _, _ = _собрать_планировщик()
+    планировщик, _, _, _ = _собрать_планировщик()
     погода_job = планировщик.get_job("погода")
     # До scheduler.start() next_run_time вычисляется только для задания, которому
     # его передали явно (next_run_time=...); без этого атрибут вовсе не заведён —

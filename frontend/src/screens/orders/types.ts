@@ -91,6 +91,12 @@ export interface OrderDetail {
   warning_opened_at: string | null
   // Конец окна риска прогноза, а не предсказанный момент отказа (MOS-179)
   risk_window_end: string | null
+  // Статус из системы учёта заказчика (эмулятор хелпдеска, MOS-63, Ф-87).
+  // null, пока external_status_at не проставлен ingest'ом (app.ingest.order_status) —
+  // непустой external_status_at и есть отметка «пришёл извне, не от человека».
+  external_status: string | null
+  external_status_at: string | null
+  external_assignee: string | null
   object: OrderObject
   work_type: OrderWorkType
   work_order: OrderWorkOrder | null

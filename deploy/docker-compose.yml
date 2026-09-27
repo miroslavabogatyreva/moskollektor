@@ -157,6 +157,10 @@ services:
       # Open-Meteo на api (заказчик: «Предлагаем симулировать любые API», ОВ-49).
       # Живой источник — https://archive-api.open-meteo.com/v1/archive, код тот же.
       WEATHER_URL: ${WEATHER_URL:-http://api:8000/emu/open-meteo/v1/archive}
+      # Ф-87, НФ-69, MOS-63: раз во сколько минут и откуда брать статусы заявок.
+      # Умолчание — наш эмулятор хелпдеска на api (реальной интеграции не будет, ОВ-50).
+      ORDER_STATUS_INTERVAL_MIN: ${ORDER_STATUS_INTERVAL_MIN:-10}
+      ORDER_SYSTEM_URL: ${ORDER_SYSTEM_URL:-http://api:8000/emu/helpdesk/v1/tickets}
     volumes:
       - parquet:/srv/parquet
       - uploads:/srv/uploads

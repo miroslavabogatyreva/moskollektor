@@ -238,6 +238,9 @@ class OrderDetail(BaseModel):
     deadline_hours: float
     warning_opened_at: IsoDatetime | None
     risk_window_end: IsoDatetime | None
+    external_status: str | None
+    external_status_at: IsoDatetime | None
+    external_assignee: str | None
     object: OrderObject
     work_type: OrderWorkType
     work_order: OrderWorkOrder
