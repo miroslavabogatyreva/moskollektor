@@ -95,6 +95,16 @@ export function AlertBar({ login }: { login: string }) {
       )}
       <span class="num">вероятность {Math.round(alert.probability * 100)} %</span>
       <span class="num">горизонт {alert.horizon_h} ч</span>
+      {/* Ф-90: «за локацией стоит переход на карту» (MOS-245) — схема выберет
+          коллектор участка, приблизит линию к пикету и обведёт метку. */}
+      {alert.section_id != null && (
+        <a
+          href={`/map?section=${alert.section_id}`}
+          style="color:inherit; text-decoration:underline"
+        >
+          на схеме
+        </a>
+      )}
       <a href="/orders" class="ml-auto" style="color:inherit">
         все неквитированные
       </a>

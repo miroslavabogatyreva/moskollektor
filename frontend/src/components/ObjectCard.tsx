@@ -246,7 +246,7 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
         </h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
-          <code class="num">{data.smvu_key}</code>
+          <code class="num">{data.smvu_key}</code> · <a href={`/map?section=${data.section_id}`}>на схеме</a>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>
