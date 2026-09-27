@@ -151,7 +151,8 @@ test('US-09: технику кнопку решения не показывае�
   const page = await ctx.newPage()
   const id = await oldestForecastId(page)
   await page.goto(`/forecasts/${id}`)
-  await expect(page.getByTestId('last-decision')).toBeVisible()
+  // Якорь: права уже проверены, а не «ещё не ответили» (data-can-decide ставит ответ /api/auth/me).
+  await expect(page.getByTestId('last-decision')).toHaveAttribute('data-can-decide', 'false')
   await expect(page.getByRole('button', { name: 'Решение диспетчера' })).toHaveCount(0)
   await ctx.close()
 })

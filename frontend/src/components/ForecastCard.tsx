@@ -37,7 +37,9 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
   const decideButton = useRef<HTMLButtonElement>(null)
   // Кнопку решения видят только роли с правом forecasts.decide (миграция 052).
   // Сервер и так ответит технику 403 — это удобство, а не защита.
-  const [canDecide, setCanDecide] = useState(false)
+  // null — ответ /api/auth/me ещё не пришёл: E2E ждёт по data-can-decide именно
+  // ответа, иначе «кнопки нет» проверялось бы раньше, чем она могла появиться.
+  const [canDecide, setCanDecide] = useState<boolean | null>(null)
   useEffect(() => {
     fetchMe()
       .then((me) =>
@@ -134,7 +136,11 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         горизонт {data.horizon_h} ч
       </section>
 
-      <section data-testid="last-decision" class="text-sm flex flex-col gap-2 items-start">
+      <section
+        data-testid="last-decision"
+        data-can-decide={canDecide == null ? undefined : String(canDecide)}
+        class="text-sm flex flex-col gap-2 items-start"
+      >
         <h2 class="font-semibold" style="color:var(--text-muted)">
           Решение диспетчера
         </h2>
