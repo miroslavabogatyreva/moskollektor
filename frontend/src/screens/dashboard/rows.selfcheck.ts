@@ -31,7 +31,7 @@ assertEqual(словоРиска(null), 'класса нет', 'null — «кл�
 
 // Цвет: high красный из шкалы, normal зелёная рамка, «класса нет» — нейтраль
 // рамки, а НЕ --risk-nodata: тот занят под «нет связи с каналом».
-assertEqual(цветРиска('high'), 'var(--risk-critical)', 'high — критический')
+assertEqual(цветРиска('high'), 'var(--risk-critical-border)', 'high — граница критического')
 assertEqual(цветРиска('normal'), 'var(--risk-low-border)', 'normal — низкий')
 assertEqual(цветРиска(null), 'var(--border-subtle)', 'нет класса — нейтраль')
 assertEqual(цветРиска(null) === 'var(--risk-nodata)', false, 'нет класса ≠ нет связи')
