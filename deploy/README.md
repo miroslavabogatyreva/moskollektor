@@ -370,13 +370,24 @@ docker compose -f deploy/docker-compose.yml --profile app build api
 docker compose -f deploy/docker-compose.yml --profile app up -d api
 ```
 
-**Интерфейс — это статика, а не контейнер.** nginx монтирует `./nginx/html`
-на `/usr/share/nginx/html`, поэтому собранный фронт кладётся туда файлами:
+**Интерфейс — это статика, а не контейнер.** nginx монтирует `./nginx/app`
+на `/usr/share/nginx/app`, поэтому собранный фронт кладётся туда файлами:
 
 ```
 cd frontend && npm run build          # проверить бюджет: gzip -c dist/assets/*.js | wc -c < 153600
-rsync -a --delete frontend/dist/ root@СЕРВЕР:/srv/moskollektor/deploy/nginx/html/
+rsync -a --delete frontend/dist/ root@СЕРВЕР:/srv/moskollektor/deploy/nginx/app/
 ```
+
+**Приложение и заглушка лежат в разных каталогах (задача 1.11, MOS-246).**
+`deploy/nginx/app` в git нет, его заполняет только сборка. `deploy/nginx/html`
+держит git, там страница «Стенд поднят» из задачи 1.1. nginx отдаёт `app`,
+а заглушку — только пока `app` пуст: на свежей установке без сборки фронта
+корень отвечает «Стенд поднят», и healthcheck nginx зелёный. До 27.09.2026 оба
+жили в `html`, и любой разворот дерева из git (`git reset --hard`,
+`git checkout deploy/`, `git archive … deploy`) клал заглушку поверх приложения
+при коде 200. Что стенд отдаёт приложение, проверяет строка «М-03 стенд отдаёт
+приложение» в `delivery/check-all.sh`: в корне есть ссылка на бандл `index-`,
+заголовка заглушки нет.
 
 **Важно про порядок.** Каждая правка фронта требует повторить оба шага, иначе стенд
 покажет вчерашнюю версию, а комиссия — вчерашний интерфейс. На нашем стенде оба шага

@@ -197,13 +197,22 @@ ssh root@135.106.216.101 /srv/moskollektor/deploy/deploy.sh
 
 Скрипт берёт вершину `origin/master` и делает всё, что раньше делали руками по
 ловушкам ниже: собирает фронт в контейнере `node:26-alpine` (node на сервере нет),
-кладёт его в `deploy/nginx/html`, собирает `migrate api worker emulator-smvu`,
-накатывает миграции, перезапускает nginx, если менялся `deploy/nginx/`, и ждёт
+кладёт его в `deploy/nginx/app`, собирает `migrate api worker emulator-smvu`,
+накатывает миграции, пересоздаёт nginx, если в compose сменились его тома, и
+перезапускает, если менялся `deploy/nginx/`, и ждёт
 `healthy` у `api`. Что сейчас на стенде: `curl -sk https://135.106.216.101/version.txt`
 отдаёт хеш коммита, а `git -C /srv/moskollektor log -1` на сервере — его же.
 Откатывают через `git revert` в master и пуш, а не выкладкой старого коммита мимо git.
-`git status` на сервере показывает `M deploy/nginx/html/index.html` и неотслеживаемые
-журналы заливки — так и должно быть: в git по этому пути заглушка, а на стенде фронт.
+`git status` на сервере показывает неотслеживаемые журналы заливки, и так и должно
+быть. Собранный фронт лежит в `deploy/nginx/app`, этот каталог стоит в `.gitignore`
+и `git reset --hard` его не трогает (задача 1.11, MOS-246). До 27.09.2026 фронт лежал
+в `deploy/nginx/html` поверх заглушки, и `git status` показывал там
+`M deploy/nginx/html/index.html`. От тех выкладок в `deploy/nginx/html` остались
+неотслеживаемые `assets/`, `data/` и `version.txt`: nginx их больше не отдаёт,
+их можно удалить командой `git -C /srv/moskollektor clean -fd deploy/nginx/html`.
+**Первая выкладка после 1.11 один раз показывает заглушку около минуты:** reset
+кладёт её в `html`, а старый контейнер nginx смотрит туда, пока `deploy.sh` не
+соберёт фронт и не пересоздаст nginx с томом `app`.
 
 Ниже — как выкладывали до 27.09.2026 и о какие ловушки спотыкались. Каждая
 из них теперь закрыта строкой в `deploy/deploy.sh`.
@@ -212,7 +221,8 @@ ssh root@135.106.216.101 /srv/moskollektor/deploy/deploy.sh
 `/srv/moskollektor/backend` и `/srv/moskollektor/db`, потом
 `docker compose --profile app build api worker` и `up -d api worker` из
 `/srv/moskollektor/deploy`. Собранный интерфейс — `npm run build` на своей машине,
-затем `rsync -a --delete frontend/dist/ .../deploy/nginx/html/`. Две ловушки, на
+затем `rsync -a --delete frontend/dist/ .../deploy/nginx/html/` (с 27.09.2026 —
+`deploy/nginx/app/`, задача 1.11). Две ловушки, на
 которых я потерял время 16.09.2026. Первая: `rsync -a` переносит время файла
 с машины-источника, поэтому `ls -l` на сервере показывает возраст правки, а не
 возраст выкладки — проверять надо содержимым, `docker exec <контейнер> grep -c <новое

@@ -74,7 +74,11 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      # Заглушка «Стенд поднят» (в git) и собранный фронт (кладёт deploy.sh,
+      # в git его нет) — разные каталоги, задача 1.11. nginx отдаёт app,
+      # а заглушку — только пока app пуст.
       - ./nginx/html:/usr/share/nginx/html:ro
+      - ./nginx/app:/usr/share/nginx/app:ro
     healthcheck:
       # Адрес именно 127.0.0.1, а не localhost. В контейнере /etc/hosts отдаёт на имя
       # localhost два адреса, и wget из busybox берёт первым ::1, а nginx слушает

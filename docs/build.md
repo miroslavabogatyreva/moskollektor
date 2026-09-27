@@ -108,7 +108,7 @@ gzip -c dist/assets/*.js | wc -c    # 13954 — меньше 153600 (150×1024),
 в `docs/HLD.md` вводной и разд. 4.1, здесь не повторяю.
 
 **Собранное — файлы, не контейнер.** `frontend/dist/` копируется на сервер
-`rsync`-ом в том, который `nginx` монтирует на `/usr/share/nginx/html`
+`rsync`-ом в каталог `deploy/nginx/app`, который `nginx` монтирует на `/usr/share/nginx/app`
 (`deploy/README.md`, раздел «Интерфейс — это статика, а не контейнер»).
 Пересобрать и не выложить — самая частая ошибка: без обоих шагов подряд
 стенд показывает вчерашний интерфейс.
@@ -122,7 +122,7 @@ gzip -c dist/assets/*.js | wc -c    # 13954 — меньше 153600 (150×1024),
 
 ```
 docker exec moskollektor-nginx-1 grep -c "<строка-метка из новой правки>" \
-    /usr/share/nginx/html/assets/index-*.js
+    /usr/share/nginx/app/assets/index-*.js
 ```
 
 Ноль совпадений — старая сборка не заменилась; если файл лежит внутри

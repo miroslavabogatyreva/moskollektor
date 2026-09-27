@@ -13,11 +13,10 @@
 # управление новой версии скрипта через exec — правка deploy.sh действует
 # с той же выкладки, которой она приехала.
 #
-# ЗАГЛУШКА В deploy/nginx/html. В git там лежит index.html «Стенд поднят» (задача
-# 1.1), а на стенде по тому же пути собранный фронт — reset кладёт заглушку поверх
-# (ловушка задачи плана 1.11). Поэтому вторая стадия первым делом возвращает
-# прошлую сборку из frontend/dist: git её не отслеживает, она переживает reset.
-# sparse-checkout не годится: он удаляет файл из дерева, и сайт падает совсем.
+# ФРОНТ И ЗАГЛУШКА — РАЗНЫЕ КАТАЛОГИ (задача 1.11, MOS-246). Собранный фронт едет
+# в deploy/nginx/app, которого нет в git, поэтому reset его не трогает. Заглушка
+# «Стенд поднят» остаётся в deploy/nginx/html, в git, и nginx отдаёт её, только
+# пока app пуст. До 27.09.2026 оба жили в html, и reset клал заглушку поверх.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -30,15 +29,15 @@ if [ -z "${DEPLOY_STAGE2:-}" ]; then
   DEPLOY_STAGE2=1 DEPLOY_OLD=$old exec sh deploy/deploy.sh
 fi
 
-[ -d frontend/dist ] && rsync -a frontend/dist/ deploy/nginx/html/
 new=$(git rev-parse HEAD)
 echo "выкладка $DEPLOY_OLD -> $new"
 
 # Фронт. node на сервере нет, собираем в контейнере той же версии, что у нас.
 docker run --rm -v "$PWD":/src -w /src/frontend node:26-alpine \
   sh -c 'npm ci --no-audit --no-fund --loglevel=error && npm run build'
-rsync -a --delete-after frontend/dist/ deploy/nginx/html/
-echo "$new" > deploy/nginx/html/version.txt
+mkdir -p deploy/nginx/app
+rsync -a --delete-after frontend/dist/ deploy/nginx/app/
+echo "$new" > deploy/nginx/app/version.txt
 
 # Бэкенд. migrate собираем вместе с api: миграции вшиты в образ (пятая ловушка
 # в docs/server.md). Неизменённый образ compose не пересоздаёт.
@@ -47,8 +46,11 @@ docker compose --profile app build -q migrate api worker emulator-smvu
 docker compose --profile app run --rm migrate
 docker compose --profile app up -d api worker emulator-smvu
 
-# nginx.conf смонтирован файлом и держится за старый inode — после его правки
-# nginx нужен перезапуск, reload не поможет (вторая ловушка в docs/server.md).
+# up -d пересоздаёт nginx, если в compose сменились его тома (так приехал каталог
+# nginx/app), и ничего не делает, если не сменились. nginx.conf смонтирован файлом
+# и держится за старый inode — после его правки нужен ещё и перезапуск, reload
+# не поможет (вторая ловушка в docs/server.md).
+docker compose up -d nginx
 if [ "$DEPLOY_OLD" = none ] || ! git diff --quiet "$DEPLOY_OLD" "$new" -- nginx/; then
   docker compose restart nginx
 fi
