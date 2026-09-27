@@ -23,11 +23,26 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 
 _pool: asyncpg.Pool | None = None
 
+# Потолок одного запроса API — минута, столько же, сколько НФ-89 даёт экрану
+# на обновление: ответ позже минуты экрану уже не нужен. Без потолка пул
+# (10 соединений) однажды занялся целиком: 27.09.2026 после прогона всех E2E
+# против стенда все методы /api/* висели дольше 25 минут, отвечал только /health
+# без базы, и вылечить это мог только перезапуск контейнера api. С потолком
+# зависший запрос отваливается сам и отдаёт соединение обратно.
+# statement_timeout режет запрос на сервере, command_timeout — ожидание
+# на клиенте, если сервер не ответит вовсе.
+ПОТОЛОК_ЗАПРОСА_С = 60
+
 
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], init=_init_conn)
+        _pool = await asyncpg.create_pool(
+            os.environ["DATABASE_URL"],
+            init=_init_conn,
+            command_timeout=ПОТОЛОК_ЗАПРОСА_С,
+            server_settings={"statement_timeout": f"{ПОТОЛОК_ЗАПРОСА_С}s"},
+        )
     return _pool
 
 
