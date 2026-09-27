@@ -18,6 +18,7 @@ export interface Decision {
   reason_code: string | null
   reason_name: string | null
   comment: string | null
+  verified_externally: boolean
   decided_by: string
   decided_at: string
 }
@@ -44,7 +45,11 @@ export function VerdictDialog({
   const [decision, setDecision] = useState('')
   const [reason, setReason] = useState('')
   const [comment, setComment] = useState('')
+  const [verified, setVerified] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Две разные беды — две разные надписи: справочник не загрузился (выбирать не из
+  // чего) и сохранение не прошло (выбор есть, сервер отказал).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -55,7 +60,7 @@ export function VerdictDialog({
         return r.json()
       })
       .then(setOptions)
-      .catch((e) => setError(errorMessage(e)))
+      .catch((e) => setLoadError(errorMessage(e)))
   }, [])
 
   const needsReason = decision === 'false_alarm'
@@ -74,6 +79,7 @@ export function VerdictDialog({
           decision_code: decision,
           reason_code: needsReason ? reason : null,
           comment: comment.trim() || null,
+          verified_externally: verified,
         }),
       })
       if (!r.ok) {
@@ -83,7 +89,11 @@ export function VerdictDialog({
           typeof body?.detail === 'string' ? body.detail : `${r.status} ${r.statusText}`,
         )
       }
-      onSaved((await r.json()) as Decision)
+      const saved = (await r.json()) as Decision
+      onSaved(saved)
+      // Сначала штатный close(): пока <dialog> модальный, остальная страница инертна,
+      // и вернуть фокус на кнопку нельзя. Событие close снимет диалог (onClose).
+      ref.current?.close()
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -117,6 +127,7 @@ export function VerdictDialog({
             class="px-2 py-1 rounded"
             style={FIELD}
             name="decision_code"
+            aria-describedby={!decision ? 'verdict-hint' : undefined}
             value={decision}
             onChange={(e) => setDecision((e.target as HTMLSelectElement).value)}
           >
@@ -136,6 +147,7 @@ export function VerdictDialog({
               class="px-2 py-1 rounded"
               style={FIELD}
               name="reason_code"
+              aria-describedby={!reason ? 'verdict-hint' : undefined}
               value={reason}
               onChange={(e) => setReason((e.target as HTMLSelectElement).value)}
             >
@@ -150,7 +162,7 @@ export function VerdictDialog({
         )}
 
         {hint && (
-          <p role="status" style="color:var(--text-muted)">
+          <p id="verdict-hint" role="status" style="color:var(--text-muted)">
             {hint}
           </p>
         )}
@@ -162,11 +174,26 @@ export function VerdictDialog({
             class="px-2 py-1 rounded"
             style={FIELD}
             name="comment"
+            maxLength={2000}
             value={comment}
             onInput={(e) => setComment((e.target as HTMLTextAreaElement).value)}
           />
         </label>
 
+        {/* Шаг 4 сценария ТЗ разд. 12 — камер нет, отметка вместо них (HLD разд. 11.6, Ф-91). */}
+        <label class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="verified_externally"
+            checked={verified}
+            onChange={(e) => setVerified((e.target as HTMLInputElement).checked)}
+          />
+          Проверено по внешним источникам
+        </label>
+
+        {loadError && (
+          <p style="color:var(--state-error)">Не удалось загрузить справочник: {loadError}</p>
+        )}
         {error && <p style="color:var(--state-error)">Не удалось сохранить: {error}</p>}
 
         <div class="flex gap-2 justify-end">

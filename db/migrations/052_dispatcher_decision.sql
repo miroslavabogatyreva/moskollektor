@@ -41,6 +41,11 @@ ALTER TABLE pred.feedback
     ADD CONSTRAINT feedback_decision_code_fk
     FOREIGN KEY (decision_code) REFERENCES ref.dispatcher_decision(code);
 
+-- Отметка «Проверено по внешним источникам» — шаг 4 сценария ТЗ разд. 12
+-- («при необходимости использует внешние источники, например камеры»). Интеграции
+-- с камерами нет и не будет, HLD разд. 11.6 закрывает шаг чекбоксом (Ф-91).
+ALTER TABLE pred.feedback ADD COLUMN verified_externally boolean NOT NULL DEFAULT false;
+
 COMMENT ON COLUMN pred.feedback.decision_code IS
     'Решение диспетчера (MOS-55, Ф-92); verdict из него выводится: false_alarm → 0, прочие → 1';
 

@@ -15,7 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from pydantic import BaseModel, PlainSerializer
+from pydantic import BaseModel, Field, PlainSerializer
 
 # pydantic-core по умолчанию пишет UTC-дату с суффиксом Z ("...20:59:59Z"),
 # а jsonable_encoder (путь без response_model, которым отвечали эти методы
@@ -97,6 +97,7 @@ class ForecastDecision(BaseModel):
     reason_code: str | None
     reason_name: str | None
     comment: str | None
+    verified_externally: bool
     decided_by: str
     decided_at: IsoDatetime
 
@@ -104,7 +105,11 @@ class ForecastDecision(BaseModel):
 class FeedbackIn(BaseModel):
     decision_code: str
     reason_code: str | None = None
-    comment: str | None = None
+    # Потолок длины — от записки в журнал размером с роман: комментарий читают
+    # в карточке и в выгрузке для Николая, 2000 знаков — полстраницы текста.
+    comment: str | None = Field(None, max_length=2000)
+    # «Проверено по внешним источникам» — шаг 4 сценария ТЗ разд. 12 (HLD разд. 11.6, Ф-91).
+    verified_externally: bool = False
 
 
 class ForecastDetail(BaseModel):
