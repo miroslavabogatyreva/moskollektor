@@ -30,6 +30,7 @@
 """
 
 import asyncio
+from datetime import datetime, timedelta
 
 from app.mlclient import client
 from app.worker import score_v3
@@ -155,8 +156,25 @@ async def участки_префиксов(conn) -> dict[str, list[tuple[int, s
     return итог
 
 
+# Нижняя граница открытий из alerts[] (MOS-182): срез последнего удачного прогона,
+# но не раньше as_of − horizon_h. Первый прогон после выкладки иначе завёл бы
+# заявки на все открытия с policy_from — апрельские бригадам не нужны.
+ПРОШЛЫЙ_СРЕЗ = """
+SELECT max(as_of) FROM pred.run
+ WHERE status = 'done' AND run_id <> $1 AND as_of <= $2
+"""
+
+
+async def нижняя_граница(conn, run_id: int, as_of: datetime, horizon_h: int) -> datetime:
+    """С какого момента брать открытия из alerts[]: всё, что раньше, видел прошлый прогон."""
+    прошлый = await conn.fetchval(ПРОШЛЫЙ_СРЕЗ, run_id, as_of)
+    самое_раннее = as_of - timedelta(hours=horizon_h)
+    return max(прошлый, самое_раннее) if прошлый else самое_раннее
+
+
 async def собрать(
-    conn, путь_файла: str, run_id: int, horizon_h: int, направление: str, факторов: int
+    conn, путь_файла: str, run_id: int, horizon_h: int, направление: str, факторов: int,
+    as_of: datetime,
 ) -> dict:
     """Всё, что нужно `publish.записать`, плюс диагностика для журнала прогона.
 
@@ -223,7 +241,10 @@ async def собрать(
     # Предупреждения модели по префиксам и участки, на которые они ведут. Префикс без
     # участков в справочнике остаётся в списке с пустыми участками: order_rules
     # назовёт его вслух, а не потеряет молча.
-    открытые, без_момента = score_v3.предупреждения(данные)
+    # Открытия — и открытые к срезу, и закрытые между обновлениями файла (MOS-182).
+    _, без_момента = score_v3.предупреждения(данные)
+    граница = await нижняя_граница(conn, run_id, as_of, horizon_h)
+    открытые = score_v3.открытия(данные, граница)
     по_префиксу = await участки_префиксов(conn)
     for п in открытые:
         п["участки"] = по_префиксу.get(п["pfx"], [])
@@ -237,6 +258,8 @@ async def собрать(
         "коллекторов": len(коллекторы),
         "участков": len(участки),
         "предупреждений": len(открытые) + len(без_момента),
+        "закрытых": sum(1 for п in открытые if п["закрыто"]),
+        "граница": граница,
         "срез": данные["as_of"],
         "модель": данные["model_version"],
         "порог_модели": данные.get("alert_threshold"),
