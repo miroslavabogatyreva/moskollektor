@@ -36,4 +36,7 @@ fi
   (cd frontend && npm ci --no-audit --no-fund >/dev/null 2>&1) ||
   echo "cloud-setup: npm ci во frontend/ упал"
 
+# Хук идёт параллельно со стартом сессии: первые ~30 с зависимостей ещё нет.
+# По этому файлу облачный агент понимает, что можно запускать тесты (CLAUDE.md).
+touch .venv/.cloud-setup-done
 exit 0
