@@ -1897,7 +1897,7 @@ Precision, Recall, медиана упреждения, ложных на 1000 �
 | `nginx` | `nginx:1.31-alpine` | собранный фронт из каталога `deploy/nginx/app`, заглушка «Стенд поднят» из `deploy/nginx/html` (отдаётся, пока `app` пуст; задача 1.11), конфиг ~~, том `tiles`~~ (том не монтируется с 15.09.2026, см. разд. 4) | мы | 30–50 МБ |
 | `api` | `python:3.14-slim` | FastAPI, uvicorn, asyncpg | мы | 150–250 МБ |
 | `worker` | **тот же образ** | APScheduler, стадии расчёта, загрузчики, DuckDB | мы | 400–800 МБ в пике |
-| `db` | `postgis/postgis:18-3.6` | PostgreSQL 18 + PostGIS 3.6 | готовый | 4 ГБ |
+| `db` | `postgis/postgis:18-3.6` | PostgreSQL 18 + PostGIS 3.6; правила доступа — `deploy/db/pg_hba.conf` через `hba_file`, без `trust` по сети (задача 1.6) | готовый | 4 ГБ |
 | `ml` | их выбор | модель и обёртка | **ML-команда** | 250–400 МБ |
 | `emulator-smvu` | тот же, что `api` | эмулятор СМВУ (MOS-37): раз в минуту шлёт в `POST /api/ingest/readings` показания архива со сдвигом +364 дня; остановить поток — `docker compose stop emulator-smvu` | мы | 50–80 МБ |
 | `migrate` | тот же, что `api` | накат миграций и сидов из `db/seed/`, живёт секунды | мы | — |

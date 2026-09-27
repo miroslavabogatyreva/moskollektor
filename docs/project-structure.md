@@ -157,7 +157,7 @@ moskollektor/
 │                        по ним пишутся экран заявок и GET /api/orders;
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
-├── deploy/         16   стенд: docker-compose, nginx, сертификат, проверка TLS
+├── deploy/         18   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
 ├── code/           63   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
@@ -241,7 +241,9 @@ frontend/src/screens/{dashboard, map, log, orders}
 frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на историю
                     из docs/user-stories.md, тест на сценарий; конфигурация
                     frontend/playwright.config.ts, запуск npm run e2e
-deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, backup.sh
+deploy/             README.md, docker-compose, nginx, .env.example, make-cert.sh, check-tls.sh, check-db-access.sh, backup.sh
+deploy/db/          pg_hba.conf — правила доступа к базе без trust по сети (задача 1.6)
+deploy/nginx/app/   собранный фронт на стенде, в git не идёт; заглушка — deploy/nginx/html (задача 1.11)
 deploy/ldap/        демонстрационный каталог LDAP (MOS-39, НФ-76): Dockerfile,
                     slapd.conf, bootstrap.ldif (4 учётки, роли, область видимости),
                     entrypoint.sh, block-user.sh — профиль compose ldap

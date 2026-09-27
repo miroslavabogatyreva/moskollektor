@@ -43,12 +43,20 @@ services:
     # а не жёсткий предел — он растёт с числом лидеров и хеш-узлов в плане.
     # Хост даёт 5,9 ГБ на /dev/shm (df -h, 23.09.2026), 1 ГиБ — шестая доля.
     shm_size: 1024m
+    # Свой pg_hba.conf вместо того, что пишет initdb (задача 1.6, MOS-82): без
+    # trust на 127.0.0.1 и ::1. Через hba_file, а не файлом в PGDATA: так правило
+    # приезжает из git и на кластер, заведённый раньше. Разбор — в самом файле.
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Пусто — compose отказывается поднимать стенд и называет переменную. В образце
+      # .env пароль пустой нарочно: до 27.09.2026 там стояла рабочая заглушка, и
+      # забытый пароль поднимал базу с паролем, известным всему git (задача 1.6).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
       TZ: ${TZ}
     volumes:
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       # В PostgreSQL 18 каталог данных переехал: PGDATA теперь
       # /var/lib/postgresql/18/docker, а VOLUME объявлен на /var/lib/postgresql.
       # Смонтировать том на .../data, как делали до 17-й ветки, — значит отдать
