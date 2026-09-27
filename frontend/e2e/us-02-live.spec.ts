@@ -17,8 +17,10 @@ for (const [экран, путь, метод] of [
     await page.goto(путь)
     await первый
     const шапка = page.getByRole('banner')
+    // Время ставит свежо() после разбора ответа, а не в момент его прихода:
+    // /api/risks весит 435 КБ, и чтение шапки сразу после ответа опережало его.
+    await expect(шапка, 'в шапке видно время последнего обновления').toContainText(времяОбновления)
     const было = (await шапка.textContent())?.match(времяОбновления)?.[1]
-    expect(было, 'в шапке видно время последнего обновления').toBeTruthy()
 
     const повтор = page.waitForRequest((r) => r.url().includes(метод))
     await page.clock.runFor(60_000)
@@ -37,8 +39,8 @@ test('US-02 сц. 2: после ошибки опроса время в шапк
   await page.goto('/dashboard')
   await первый
   const шапка = page.getByRole('banner')
+  await expect(шапка).toContainText(времяОбновления)
   const было = (await шапка.textContent())?.match(времяОбновления)?.[1]
-  expect(было).toBeTruthy()
 
   await page.route('**/api/risks', (route) => route.fulfill({ status: 500, body: 'boom' }))
   const повтор = page.waitForResponse((r) => r.url().includes('/api/risks'))
