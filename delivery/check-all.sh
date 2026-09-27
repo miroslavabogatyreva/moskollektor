@@ -246,6 +246,11 @@ if [ -n "${EMPTY_DATABASE_URL:-}" ]; then
 else
   skip_msg "Ф-85" "погода и эмулятор Open-Meteo — задайте EMPTY_DATABASE_URL (пустая база, см. code/check_weather.py)"
 fi
+# Первый забор погоды сразу при старте worker, а не на круглом часе (MOS-237):
+# самопроверка собирает настоящий планировщик без базы и читает next_run_time
+# задачи «погода». Внутри «блокировка: механизм» она тоже есть, но та строка
+# стоит под DATABASE_URL — без базы Ф-85 тогда не проверялась бы вовсе.
+run "Ф-85"          "погода: первый тик сразу при старте" env PYTHONPATH=backend "$PY" -c "from app.worker.scheduler import _selfcheck_слоты; _selfcheck_слоты()"
 
 echo
 echo "=== лицензии ==="
