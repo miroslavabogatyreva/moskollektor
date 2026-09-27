@@ -244,6 +244,24 @@ async def справочники(conn) -> dict[str, dict]:
     return итог
 
 
+# Действующий наряд-допуск на участке (US-13): срок идёт сейчас и наряд не закрыт.
+# Участок связан с местом наряда через ref.object_xref.permit_location_id (005).
+ДЕЙСТВУЮЩИЕ_НАРЯДЫ = """
+SELECT DISTINCT x.section_id
+  FROM permit.permit p
+  JOIN ref.object_xref x ON x.permit_location_id = p.location_id
+ WHERE p.closed_at IS NULL AND now() >= p.valid_from AND now() < p.valid_to
+   AND x.section_id = ANY($1::int[])
+"""
+
+
+async def в_работах(conn, участки: list[int]) -> set[int]:
+    """Участки из списка, на которых сейчас открыт наряд-допуск."""
+    if not участки:
+        return set()
+    return {r["section_id"] for r in await conn.fetch(ДЕЙСТВУЮЩИЕ_НАРЯДЫ, участки)}
+
+
 async def _сколько_худших(conn) -> int:
     """Сколько худших участков коллектора получают заявку. 0 — правило выключено."""
     значение = await conn.fetchval(
@@ -397,6 +415,10 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure",
             отобрано = худшие_по_коллектору(отобрано, await _веса(conn), сколько)
     else:
         отобрано = [к for к in кандидаты if к["section_id"] in план]
+    # Участок в работах (US-13 сц. 2): открыт наряд-допуск — заявку не заводим.
+    # Потеря связи во время работ — не отказ, и бригаду к своим же рабочим не шлют.
+    занятые = await в_работах(conn, [к["section_id"] for к in отобрано])
+    отобрано = [к for к in отобрано if к["section_id"] not in занятые]
 
     заведено = 0
     async with conn.transaction():
@@ -439,7 +461,8 @@ async def завести(conn, run_id: int, direction: str = "sensor_failure",
         "отобрано": len(отобрано),
         "заявок": заведено,
         "повторов": len(отобрано) - заведено,
-        "без_строки_журнала": 0 if план is None else len(план) - len(отобрано),
+        "без_строки_журнала": 0 if план is None else len(план) - len(отобрано) - len(занятые),
+        "в_работах": len(занятые),
     }
 
 

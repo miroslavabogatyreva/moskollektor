@@ -65,6 +65,15 @@ interface CurrentRisk {
   computed_at: string // время расчёта текущего риска (US-06 сц. 4)
 }
 
+// Действующий наряд-допуск (US-13): участок «в работах».
+interface OpenPermit {
+  id: number
+  number: string
+  work_type_name: string
+  valid_from: string
+  valid_to: string
+}
+
 interface ObjectDetail {
   section_id: number
   smvu_key: string
@@ -72,6 +81,7 @@ interface ObjectDetail {
   last_reading_at: string | null
   channels: Channel[]
   current_risk: CurrentRisk | null
+  open_permits?: OpenPermit[]
   recent_forecasts: RecentForecast[]
   // Узлы дерева диспетчера участка (MOS-101, 5.9). Опционально: бандл может
   // доехать до стенда раньше API, и старый ответ этого поля не несёт.
@@ -267,6 +277,20 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
           </p>
         ))}
       </div>
+
+      {/* Участок в работах (US-13 сц. 1): открыт наряд-допуск — потеря связи во время
+          работ не отказ, и бригаду к своим же рабочим не шлют. */}
+      {(data.open_permits ?? []).map((p) => (
+        <p
+          key={p.id}
+          data-testid="in-works"
+          class="text-sm px-3 py-2 rounded"
+          style="background:var(--bg-surface); border-left:3px solid var(--state-warning)"
+        >
+          <b>Объект в работах:</b> наряд-допуск {p.number}, {p.work_type_name}, срок с{' '}
+          {formatDateTime(p.valid_from)} до {formatDateTime(p.valid_to)}
+        </p>
+      ))}
 
       {/* Уровень риска — сразу под шапкой (US-06, НФ-71): вероятность, объяснение
           и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
