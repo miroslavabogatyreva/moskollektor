@@ -262,6 +262,11 @@ git ls-tree -r origin/master --name-only -- code/ | grep -E '^code/(check_.*\.py
 worker раз в час берёт погоду; пусто — эмулятор Open-Meteo на `api`, его хватает для
 приёмки Ф-85. Проверка: `curl -sk -H "X-User-Login: dispatcher1"
 https://135.106.216.101/api/weather` — `stale` должен быть `false` после ближайшего :00.
+С 27.09.2026 (MOS-37) ещё одна: `INGEST_TOKEN` (`openssl rand -hex 32`) — без неё
+приём потока отвечает 503, а служба `emulator-smvu` пишет в журнал «отправка не
+прошла». Остановить поток СМВУ — `docker compose stop emulator-smvu`, запустить —
+`docker compose --profile app up -d emulator-smvu`. Поток кладёт в `smvu.reading`
+копии архива с временем «сейчас»; край данных и расчёт от этого не меняются.
 Ручной прогон на срез — так же, как раньше: `docker compose --profile app
 run --rm worker python -m app.worker.run --as-of ...`.
 
