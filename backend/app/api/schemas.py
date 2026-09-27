@@ -165,6 +165,13 @@ class ObjectRecentForecast(BaseModel):
     computed_at: IsoDatetime
 
 
+class DispatcherObject(BaseModel):
+    node_id: int
+    node_name: str
+    collector_id: int
+    collector_name: str
+
+
 class ObjectDetail(BaseModel):
     section_id: int
     smvu_key: str
@@ -173,6 +180,23 @@ class ObjectDetail(BaseModel):
     channels: list[ObjectChannel]
     current_risk: ObjectCurrentRisk | None
     recent_forecasts: list[ObjectRecentForecast]
+    # Узлы дерева диспетчера, где у участка есть активный канал (MOS-101, 5.9):
+    # у 564 участков из 3 173 их больше одного, поэтому список, а не поле.
+    dispatcher_objects: list[DispatcherObject]
+
+
+class TreeNode(BaseModel):
+    object_id: int
+    name: str
+    kind: str
+    channels: int
+    section_ids: list[int]
+
+
+class TreeCollector(BaseModel):
+    object_id: int
+    name: str
+    nodes: list[TreeNode]
 
 
 class ObjectReading(BaseModel):
