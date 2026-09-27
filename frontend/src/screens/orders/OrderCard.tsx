@@ -1,8 +1,8 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
-import { fetchOrder } from './api'
-import { PRIORITY_LABEL, type OrderDetail } from './types'
+import { fetchOrder, fetchTopChannel } from './api'
+import { PRIORITY_LABEL, type OrderDetail, type TopChannel } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 
 /* Карточка заявки — задачи 6.6 и 6.7 (MOS-61, MOS-62). Форма ответа —
@@ -20,6 +20,27 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
   const [data, setData] = useState<OrderDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Канал, который проверять (US-22 сц. 1): чаще других каналов участка терял связь.
+  // undefined — ещё грузится, null — каналов у участка нет, 'ошибка' — не загрузился:
+  // карточка заявки открывается и без него.
+  const [канал, setКанал] = useState<TopChannel | null | 'ошибка' | undefined>(undefined)
+
+  useEffect(() => {
+    const sid = data?.object.section_id
+    if (sid == null) return
+    let отменено = false
+    setКанал(undefined)
+    fetchTopChannel(sid)
+      .then((к) => {
+        if (!отменено) setКанал(к)
+      })
+      .catch(() => {
+        if (!отменено) setКанал('ошибка')
+      })
+    return () => {
+      отменено = true
+    }
+  }, [data?.object.section_id])
 
   useEffect(() => {
     if (!orderId) return
@@ -32,7 +53,7 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
     setError(null)
     fetchOrder(orderId)
       .then((d) => {
-        if (!отменено) (d ? setData(d) : setNotFound(true))
+        if (!отменено) d ? setData(d) : setNotFound(true)
       })
       .catch((e) => {
         if (!отменено) setError(errorMessage(e))
@@ -79,7 +100,22 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
         <Field label="Объект">
           {data.object.name} <span class="num">· {data.object.smvu_key}</span>
         </Field>
-        <Field label="Вид работ">{data.work_type.activity_type_name}</Field>
+        <Field label="Канал">
+          <ChannelLine канал={канал} sectionId={data.object.section_id} />
+        </Field>
+        {/* Вид работ расчёт выбирает по классу критичности участка
+            (backend/app/domain/order_rules.py, ВИД_РАБОТ) — этот показатель и стоит
+            рядом, с причиной класса и вероятностью, из-за которой заявка заведена
+            (US-22 сц. 2, Ф-73). */}
+        <Field label="Вид работ">
+          {data.work_type.activity_type_name}
+          <div style="color:var(--text-muted)">
+            выбран по классу критичности участка «{data.object.criticality_code}»:{' '}
+            {data.object.criticality_reason}; вероятность потери связи за{' '}
+            <span class="num">{data.forecast.horizon_h}</span> ч —{' '}
+            <span class="num">{data.forecast.probability.toFixed(3).replace('.', ',')}</span>
+          </div>
+        </Field>
         <Field label="Срок выполнения">
           {formatDateTime(data.due_at)}{' '}
           <span style="color:var(--text-muted)">
@@ -134,6 +170,42 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
         </a>
       </section>
     </main>
+  )
+}
+
+function ChannelLine({
+  канал,
+  sectionId,
+}: {
+  канал: TopChannel | null | 'ошибка' | undefined
+  sectionId: number
+}) {
+  if (канал === undefined) return <span style="color:var(--text-muted)">Загрузка…</span>
+  if (канал === 'ошибка') {
+    return <span style="color:var(--text-muted)">не удалось загрузить каналы участка</span>
+  }
+  if (канал === null || канал.faults_cnt === 0) {
+    return <span>каналы участка связь не теряли — проверять участок целиком</span>
+  }
+  return (
+    <>
+      {канал.name.trim()} · {канал.sensor_kind}{' '}
+      <span style="color:var(--text-muted)">
+        ({канал.system_kind}) · чаще других каналов участка терял связь:{' '}
+        <span class="num">{канал.faults_cnt}</span> раз
+        {канал.last_fault_at && <>, последний {formatDateTime(канал.last_fault_at)}</>}
+      </span>{' '}
+      <a
+        href={`/objects/${sectionId}?channel=${канал.channel_id}`}
+        onClick={(e) => {
+          e.preventDefault()
+          route(`/objects/${sectionId}?channel=${канал.channel_id}`)
+        }}
+        style="color:var(--link)"
+      >
+        История канала на участке
+      </a>
+    </>
   )
 }
 
