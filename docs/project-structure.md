@@ -123,8 +123,8 @@ moskollektor/
 │   │                          диспетчера и pred.feedback.decision_code (MOS-55)
 │   │                          053_mos184_duplicate_orders — удаляет автозаявки
 │   │                          сверх трёх на предупреждение, схему не меняет
-│   │                          055_permit_emulator — право permits.write для
-│   │                          эмулятора нарядов-допусков (US-13)
+│   │                          054_ods_event — события журнала ОДС от эмулятора,
+│   │                          maint.ods_event (US-12 сц. 5)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости.
