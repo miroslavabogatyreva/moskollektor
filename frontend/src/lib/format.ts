@@ -13,3 +13,14 @@ export function formatDateTime(iso: string): string {
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
+
+// Имя участка — одно на все экраны (US-14, НФ-71, MOS-243). Правило сервера
+// слово в слово: asset.func_location.name = 'Коллектор ' || префикс smvu_key ||
+// ', пикет ' || пикет (db/migrations/010_orders.sql:155), его отдают заявки полем
+// object_name. Собираем из smvu_key, а не из collector файла sections.json: после
+// MOS-181 collector — номер коллектора дерева заказчика (16 значений), не префикс
+// тега, и дашборд звал участок 2300 «Коллектор 15» вместо «Коллектор 884».
+export function имяУчастка(smvuKey: string): string {
+  const [коллектор, пикет] = smvuKey.split(':')
+  return `Коллектор ${коллектор}, пикет ${пикет}`
+}

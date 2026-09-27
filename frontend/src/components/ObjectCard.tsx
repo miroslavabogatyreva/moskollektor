@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { apiFetch } from '../lib/api'
 import { DIRECTION_LABEL, type Direction } from '../lib/direction'
-import { errorMessage, formatDateTime } from '../lib/format'
+import { errorMessage, formatDateTime, имяУчастка } from '../lib/format'
 import { rowLink } from '../lib/a11y'
 import {
   axisTicks,
@@ -233,10 +233,11 @@ export function ObjectCard({ sectionId }: { sectionId?: string } & Record<string
     <main class="p-5 flex flex-col gap-5">
       <div>
         <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Участок {data.section_id}
+          {имяУчастка(data.smvu_key)}
         </h1>
         <p style="color:var(--text-secondary)">
-          Ключ СМВУ <code class="num">{data.smvu_key}</code>
+          Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
+          <code class="num">{data.smvu_key}</code>
           {data.inventory_no && (
             <>
               , инвентарный номер <span class="num">{data.inventory_no}</span>

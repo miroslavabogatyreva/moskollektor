@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
-import { errorMessage } from '../../lib/format'
+import { errorMessage, имяУчастка } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { usePoll, свежо } from '../../lib/poll'
 
@@ -11,8 +11,9 @@ import { usePoll, свежо } from '../../lib/poll'
    вероятность, горизонт: это поля pred.forecast (db/migrations/004_events.sql),
    а не девятиколоночная таблица из Ф-33/Ф-34/Ф-35 — та часть III, у нас её нет
    в согласовании, и под вердикт с причиной в схеме пока нет таблицы.
-   Объект показан как section_id: подтягивать smvu_key из sections.json
-   незачем для журнала. Клик по строке ведёт на /forecasts/:forecastId
+   Объект назван так же, как на остальных экранах — «Коллектор 884, пикет 730»
+   (US-14, НФ-71, MOS-243): smvu_key берём из /data/sections.json, того же файла,
+   что читают дашборд и схема; до его загрузки — номер участка. Клик по строке ведёт на /forecasts/:forecastId
    (ForecastCard, 6.6, MOS-61) — строка это один прогноз, а не участок.
    Объект и направление фильтруются в браузере в пределах текущей страницы —
    сервер фильтрует только по дате, широкого поиска по всему журналу это не даёт. */
@@ -43,6 +44,7 @@ export function LogScreen(_props: Record<string, unknown>) {
   const [dateTo, setDateTo] = useState(сегодня)
   const [objectQuery, setObjectQuery] = useState('')
   const [direction, setDirection] = useState<Direction | ''>('')
+  const [ключи, setКлючи] = useState<Map<number, string>>(new Map())
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'computed_at',
     dir: 'desc',
@@ -69,6 +71,24 @@ export function LogScreen(_props: Record<string, unknown>) {
     return () => ac.abort()
   }, [dateFrom, dateTo, offset, tick])
 
+  useEffect(() => {
+    // Справочник статический и один на экран — его не перезапрашивает опрос.
+    const ac = new AbortController()
+    fetch('/data/sections.json', { signal: ac.signal })
+      .then((r) => (r.ok ? (r.json() as Promise<{ section_id: number; smvu_key: string }[]>) : []))
+      .then((all) => setКлючи(new Map(all.map((x) => [x.section_id, x.smvu_key]))))
+      // Не загрузился — журнал остаётся с номерами участков, а не падает.
+      .catch((e) => {
+        if (e?.name !== 'AbortError') console.error('sections.json:', errorMessage(e))
+      })
+    return () => ac.abort()
+  }, [])
+
+  const имя = (id: number) => {
+    const ключ = ключи.get(id)
+    return ключ ? имяУчастка(ключ) : `Участок ${id}`
+  }
+
   function изменитьДату(setter: (v: string) => void, value: string) {
     setter(value)
     setOffset(0)
@@ -77,7 +97,10 @@ export function LogScreen(_props: Record<string, unknown>) {
   const filtered = useMemo(() => {
     if (!items) return []
     return items
-      .filter((r) => !objectQuery || String(r.section_id).includes(objectQuery.trim()))
+      .filter((r) => {
+        const q = objectQuery.trim()
+        return !q || String(r.section_id).includes(q) || имя(r.section_id).includes(q)
+      })
       .filter((r) => !direction || r.direction === direction)
       .sort((a, b) => {
         const [x, y] = [a[sort.key], b[sort.key]]
@@ -87,7 +110,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             : String(x).localeCompare(String(y))
         return sort.dir === 'asc' ? cmp : -cmp
       })
-  }, [items, objectQuery, direction, sort])
+  }, [items, objectQuery, direction, sort, ключи])
 
   function toggleSort(key: SortKey) {
     setSort((s) =>
@@ -125,11 +148,10 @@ export function LogScreen(_props: Record<string, unknown>) {
           />
         </label>
         <label class="flex flex-col gap-1">
-          Объект (section_id)
+          Объект
           <input
             type="text"
-            inputMode="numeric"
-            placeholder="например, 401"
+            placeholder="например, 401 или Коллектор 889"
             value={objectQuery}
             onInput={(e) => setObjectQuery((e.target as HTMLInputElement).value)}
             class="px-2 py-1 rounded text-sm"
@@ -192,7 +214,7 @@ export function LogScreen(_props: Record<string, unknown>) {
               style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
             >
               <td class="px-2 py-2 num">{new Date(r.computed_at).toLocaleString('ru-RU')}</td>
-              <td class="px-2 py-2 num">{r.section_id}</td>
+              <td class="px-2 py-2">{имя(r.section_id)}</td>
               <td class="px-2 py-2">{DIRECTION_LABEL[r.direction]}</td>
               <td class="px-2 py-2 num">{r.probability.toFixed(2)}</td>
               <td class="px-2 py-2 num">{r.horizon_h} ч</td>

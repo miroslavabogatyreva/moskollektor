@@ -2,6 +2,7 @@
 // MOS-127, задача 5.16, приёмка М-04. Чистая логика без DOM, проверяется
 // node-скриптом (rows.selfcheck.ts), как lag.ts и risk.ts на соседнем экране.
 
+import { имяУчастка } from '../../lib/format.ts'
 import type { RiskClass } from './types'
 
 // ИМЯ ОБЪЕКТА. `GET /api/risks` отдаёт только `section_id` — число вида 2477,
@@ -28,7 +29,7 @@ export function имяОбъекта(section: SectionRef | undefined, sectionId:
   // Справочник не доехал или участка в нём нет — показываем номер, а не пустоту.
   // Пустая ячейка в столбце «Объект» читается как «объекта нет», а он есть.
   if (!section) return `Участок ${sectionId}`
-  return `Коллектор ${section.collector}, пикет ${section.picket}`
+  return имяУчастка(section.smvu_key)
 }
 
 export function указатель(sections: SectionRef[]): Map<number, SectionRef> {
