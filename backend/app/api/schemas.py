@@ -60,6 +60,8 @@ class DataStatus(BaseModel):
     as_of: IsoDatetime | None
     computed_at: IsoDatetime | None
     lag_days: float | None
+    sections_scored: int
+    sections_total: int
 
 
 class WeatherStatus(BaseModel):

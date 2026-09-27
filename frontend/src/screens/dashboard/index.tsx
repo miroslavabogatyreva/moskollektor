@@ -92,7 +92,18 @@ export function DashboardScreen(_props: Record<string, unknown>) {
 
       {stats && (
         <div class="grid gap-3" style="grid-template-columns:repeat(4,minmax(0,1fr))">
-          <Tile label="Участков в расчёте" value={String(stats.total)} />
+          <Tile
+            label="Участков в расчёте"
+            value={String(stats.total)}
+            sub={
+              status ? `посчитано ${status.sections_scored} из ${status.sections_total}` : undefined
+            }
+            warn={
+              status && status.sections_scored < status.sections_total
+                ? 'посчитаны не все участки: у остальных прошлый прогноз или прогноза нет'
+                : undefined
+            }
+          />
           <Tile
             label="Устаревших расчётов"
             value={String(stats.stale)}
