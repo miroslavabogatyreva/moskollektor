@@ -46,7 +46,23 @@ services:
     # Свой pg_hba.conf вместо того, что пишет initdb (задача 1.6, MOS-82): без
     # trust на 127.0.0.1 и ::1. Через hba_file, а не файлом в PGDATA: так правило
     # приезжает из git и на кластер, заведённый раньше. Разбор — в самом файле.
-    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    #
+    # Архив журнала (задача 1.18, НФ-39): каждый заполненный сегмент WAL база
+    # сама сжимает и кладёт в том backups, а archive_timeout выгоняет сегмент
+    # не реже раза в 15 минут — отсюда потеря не больше 15 минут при норме в час.
+    # Копирование через .tmp и mv: оборванная запись не оставит битый файл
+    # с правильным именем, а test ! -f не даст перезаписать уже лежащий.
+    # Копии кластера снимает служба backup ниже (deploy/backup.sh).
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=900
+      - -c
+      - archive_command=f=/backups/wal/%f.zst; test ! -f $$f && zstd -q -f -o $$f.tmp %p && mv $$f.tmp $$f
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -72,6 +88,34 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  # Резервные копии (задачи 1.2, 1.9, 1.18; НФ-39, НФ-78). Раз в сутки в BACKUP_AT
+  # снимает копию кластера pg_basebackup в том backups и хранит BACKUP_KEEP
+  # последних вместе с архивом WAL от самой старой. Образ тот же, что у db:
+  # pg_basebackup обязан быть той же ветки, что сервер. Не под профилем app —
+  # копии нужны и стенду без приложения. Устройство и режимы — deploy/backup.sh,
+  # восстановление — docs/restore.md.
+  backup:
+    image: postgis/postgis:18-3.6
+    platform: linux/amd64
+    # Режим — команда: `docker compose run --rm backup --restore latest` подставит
+    # свой вместо --loop, не трогая точку входа (docs/restore.md).
+    entrypoint: ["sh", "/backup.sh"]
+    command: ["--loop"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
+      TZ: ${TZ}
+      BACKUP_AT: ${BACKUP_AT:-02:00}
+      BACKUP_KEEP: ${BACKUP_KEEP:-2}
+    volumes:
+      - backups:/backups
+      - ./backup.sh:/backup.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:

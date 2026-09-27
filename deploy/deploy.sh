@@ -42,10 +42,11 @@ echo "$new" > deploy/nginx/app/version.txt
 # Бэкенд. migrate собираем вместе с api: миграции вшиты в образ (пятая ловушка
 # в docs/server.md). Неизменённый образ compose не пересоздаёт.
 cd deploy
-# db пересоздаётся, только если в compose сменились его настройки (так приехал
-# свой pg_hba.conf, задача 1.6), иначе ничего не делает. --wait — ждать healthy:
-# migrate ниже без живой базы упадёт.
-docker compose up -d --wait db
+# db пересоздаётся, только если в compose сменились его настройки (так приехали
+# свой pg_hba.conf, задача 1.6, и архив WAL, задача 1.18), иначе ничего не делает.
+# --wait — ждать healthy: migrate ниже без живой базы упадёт. backup — копии
+# по расписанию (задача 1.2), он живёт без профиля app.
+docker compose up -d --wait db backup
 docker compose --profile app build -q migrate api worker emulator-smvu
 docker compose --profile app run --rm migrate
 docker compose --profile app up -d api worker emulator-smvu
