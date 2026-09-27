@@ -243,6 +243,15 @@ async def list_forecasts(
         """,
         from_, to_exclusive, участки, limit, offset,
     )
+    # Последнее решение по каждой строке страницы (US-08, US-09 сц. 4): журнал
+    # показывает, что прогноз разобран, кем и когда, и отметку о проверке.
+    # Один запрос на страницу, а не на строку: DISTINCT ON по индексу
+    # feedback_forecast_idx (forecast_id, decided_at DESC).
+    решения = {
+        r["forecast_id"]: dict(r)
+        for r in await conn.fetch(
+            РЕШЕНИЕ_СПИСКОМ, [r["forecast_id"] for r in rows])
+    }
     return {
         "total": total,
         "items": [
@@ -256,6 +265,7 @@ async def list_forecasts(
                 "as_of": r["as_of"],
                 "computed_at": r["computed_at"],
                 "write_reason": r["write_reason"],
+                "decision": решения.get(r["forecast_id"]),
             }
             for r in rows
         ],
@@ -307,6 +317,18 @@ async def get_forecast(
       FROM pred.feedback fb
       JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
       LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+"""
+# Последнее решение сразу по многим прогнозам — страница журнала.
+РЕШЕНИЕ_СПИСКОМ = """
+    SELECT DISTINCT ON (fb.forecast_id) fb.forecast_id,
+           fb.feedback_id, fb.decision_code, d.name AS decision_name,
+           fb.reason_code, r.name AS reason_name, fb.comment,
+           fb.verified_externally, fb.decided_by, fb.decided_at
+      FROM pred.feedback fb
+      JOIN ref.dispatcher_decision d ON d.code = fb.decision_code
+      LEFT JOIN ref.feedback_reason r ON r.code = fb.reason_code
+     WHERE fb.forecast_id = ANY($1::bigint[])
+     ORDER BY fb.forecast_id, fb.decided_at DESC, fb.feedback_id DESC
 """
 ПОСЛЕДНЕЕ_РЕШЕНИЕ = РЕШЕНИЕ + """
      WHERE fb.forecast_id = $1

@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.schemas import ObjectChannelList, ObjectDetail, ObjectReading, TreeCollector
 from app.auth.deps import require, видимые_участки, проверить_участок
+from app.api.permits import ДЕЙСТВУЮЩИЕ
 from app.db import get_conn
 
 router = APIRouter(prefix="/api")
@@ -168,8 +169,12 @@ async def get_object(
         section_id,
     )
 
+    # Действующие наряды-допуски участка (US-13 сц. 1): «объект в работах» и срок.
+    permits = await conn.fetch(ДЕЙСТВУЮЩИЕ, section_id)
+
     return {
         **dict(passport),
+        "open_permits": [dict(p) for p in permits],
         "channels": [dict(c) for c in channels],
         "dispatcher_objects": [dict(d) for d in dispatcher_objects],
         "current_risk": dict(current_risk) if current_risk else None,
