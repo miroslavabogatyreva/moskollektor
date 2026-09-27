@@ -4,6 +4,7 @@ import { fetchForecasts } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
 import { errorMessage } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
+import { usePoll, свежо } from '../../lib/poll'
 
 /* Журнал прогнозов — задача 5.4 (MOS-51), постраничность — 4.13 (MOS-117).
    Данные читаются из GET /api/forecasts. Колонки — время, объект, направление,
@@ -47,6 +48,8 @@ export function LogScreen(_props: Record<string, unknown>) {
     dir: 'desc',
   })
 
+  // Та же страница перезапрашивается раз в минуту от общего опроса (НФ-89, MOS-123).
+  const { tick } = usePoll()
   useEffect(() => {
     // AbortController, а не флажок (как в ForecastCard.tsx/ObjectCard.tsx):
     // здесь недостаточно погасить устаревший ответ в состоянии, запрос ушедшей
@@ -58,12 +61,13 @@ export function LogScreen(_props: Record<string, unknown>) {
       .then((r) => {
         setItems(r.items)
         setTotal(r.total)
+        свежо()
       })
       .catch((e) => {
         if (e?.name !== 'AbortError') setError(errorMessage(e))
       })
     return () => ac.abort()
-  }, [dateFrom, dateTo, offset])
+  }, [dateFrom, dateTo, offset, tick])
 
   function изменитьДату(setter: (v: string) => void, value: string) {
     setter(value)

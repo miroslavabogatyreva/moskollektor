@@ -96,7 +96,7 @@ moskollektor/
 │   │                          в git не идут, лежат у Славы в `~/Downloads`
 │   └── books/                разбор литературы, 80 находок с номерами страниц;
 │                              сами PDF с 15.09.2026 на сервере, в git не идут
-├── db/             49   миграции базы — первый продуктовый каталог
+├── db/             50   миграции базы — первый продуктовый каталог
 │   ├── migrations/           001_assets … 046_synthetic_geometry, по возрастанию.
 │   │                          010_orders — справочники ТОиР, синтетический реестр
 │   │                          объектов из ref.object_xref и уникальность автозаявки;
@@ -116,6 +116,8 @@ moskollektor/
 │   │                          051_order_external_status — статус заявки из
 │   │                          эмулятора хелпдеска, три колонки maint.notification
 │   │                          (MOS-63)
+│   │                          052_dispatcher_decision — справочник решений
+│   │                          диспетчера и pred.feedback.decision_code (MOS-55)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
 │                              rbac — разрешения ролей, тестовые учётки dispatcher1,
 │                              ods1, tech1, admin1 и их область видимости.

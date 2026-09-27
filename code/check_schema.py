@@ -163,6 +163,13 @@ RE_FUNC = re.compile(r'CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(' + NAME + r')\s
 RE_ALTER_FK = re.compile(
     r'ALTER\s+TABLE\s+(' + NAME + r')\s+ADD\s+(?:CONSTRAINT\s+[a-z_]+\s+)?FOREIGN\s+KEY\s*'
     r'\(([a-z_]+)\)\s*REFERENCES\s+(' + NAME + r')\s*\(\s*([a-z_]+)\s*\)', re.S)
+# Колонка, добавленная позже CREATE TABLE. Без неё тип такой колонки неизвестен
+# («?»), и ключ из ADD CONSTRAINT на неё проваливает сверку типов (052, MOS-55).
+# ponytail: ловит только первую колонку ALTER; несколько ADD COLUMN через запятую
+# в одном ALTER — дописать, когда такой ключ появится.
+RE_ADD_COL = re.compile(
+    r'ALTER\s+TABLE\s+(' + NAME + r')\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+    r'([a-z_]+)\s+((?:character varying|double precision|[a-z_]+))', re.S)
 RE_COL = re.compile(r'^([a-z_]+)\s+((?:character varying|double precision|[a-z_]+)(?:\s*\([^)]*\))?)')
 RE_PARTITION = re.compile(r'PARTITION\s+BY\s+(?:RANGE|LIST|HASH)\s*\(\s*([a-z_]+)\s*\)')
 
@@ -317,6 +324,11 @@ def scan(root):
             for col, tgt, tcol in refs:
                 links.append((t, col, tgt, tcol, name))
                 events.append((pos + 1, "ref", (t, tgt)))
+        for t, col, typ in RE_ADD_COL.findall(sql):
+            if t in tables:
+                # Отдельно от cols: правило «похоже на ключ» по ним не гоняем —
+                # добавило бы находки в чужих миграциях, которых задача не касалась.
+                tables[t][0].setdefault("added", {}).setdefault(col, typ)
         for m in RE_ALTER_FK.finditer(sql):
             t, col, tgt, tcol = m.groups()
             links.append((t, col, tgt, tcol, name))
@@ -384,7 +396,8 @@ def check(root=MIGRATIONS):
         if tcol not in dst["cols"]:
             problems.append(f"{t}.{col} -> {tgt}.{tcol}: такой колонки нет")
             continue
-        a, b = family(src["cols"].get(col, "?")), family(dst["cols"][tcol])
+        a = family(src["cols"].get(col) or src.get("added", {}).get(col, "?"))
+        b = family(dst["cols"][tcol])
         if a != b:
             problems.append(f"типы не совпадают: {t}.{col} {a} -> {tgt}.{tcol} {b}")
 

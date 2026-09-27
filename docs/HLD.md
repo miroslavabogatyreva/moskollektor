@@ -335,7 +335,9 @@ selfcheck конкурировал с настоящим часовым прог
 | `GET /api/weather` | последний забранный час погоды и время последнего успешного забора одной строкой: `observed_at`, `temp_c`, `humidity_pct`, `precip_mm`, `pressure_hpa`, `source`, `fetched_at`, `stale`. `stale = true`, когда успешного забора не было больше часа или таблица `ext.weather_hourly` пуста. Источник — наш эмулятор Open-Meteo (`/emu/open-meteo/v1/archive`, наружу nginx его не отдаёт), разд. 11.3 (MOS-36) | `risks.read` | 27.09.2026 локально на PostgreSQL 16 (pgserver): 25 часов до среза 02.06.2026 00:30, час 00:00 совпал с архивом — 12,2 °C, 72 %, 0 мм, 995,5 гПа; источник остановлен — `stale = true`, планировщик не упал | Ф-85 |
 | `POST /api/ingest/readings` | приём потока СМВУ пачкой `{readings: [{journal_id, channel_id, read_time, is_alarm, value}]}`, от 1 до 5000 строк, `read_time` обязательно с поясом (иначе 422). Ответ `{batch_id, received, accepted, unknown_channel, duplicates}`. Пачка — строка `load.batch` с `tool = 'api'` и показания в `smvu.reading`; канала нет в `smvu.channel` — строку не берём, заглушку не заводим; повтор — `duplicates`. Шлёт эмулятор СМВУ (служба `emulator-smvu`, архив со сдвигом +364 дня). В `audit.user_action` не пишется (разд. 3.5). **Свёртку `feat.channel_daily` не трогает:** край данных остаётся краем архива, в расчёт поток не идёт (MOS-37) | токен `Authorization: Bearer INGEST_TOKEN`, не кука; токен не задан — 503, чужой — 401 | 27.09.2026 `code/check_stream.py` на PostgreSQL 16 (pgserver): 2 из 2 показаний архива ушли через 364 дня в партицию месяца, повтор — 2 дубля, чужой канал не взят | Ф-82 |
 | `GET /api/forecasts` | журнал прогнозов `{total, items[]}`. Параметры `from`, `to`, `limit`, `offset`. `from`/`to` — даты, обе границы включительны; `limit` — умолчание 200, потолок 1000; `total` — число совпадений по фильтру без обрезки страницей. В строке две даты разными полями: `as_of` — срез данных, `computed_at` — время работы расчёта (MOS-118), и `write_reason` — почему строка попала в журнал (MOS-147) | `forecasts.read` | 200 | М-06, М-16 |
-| `GET /api/forecasts/{id}` | прогноз плюс массив `order_ids` — заявки, которые он породил. `as_of` и `computed_at` отдаются разными полями, это разные моменты | `forecasts.read` | 200 | М-12 |
+| `GET /api/forecasts/{id}` | прогноз плюс массив `order_ids` — заявки, которые он породил. `as_of` и `computed_at` отдаются разными полями, это разные моменты. С 27.09.2026 (MOS-55) поле `decision` — последнее решение диспетчера (`decision_code`, `decision_name`, `reason_code`, `reason_name`, `comment`, `verified_externally`, `decided_by`, `decided_at`), `null`, пока прогноз не разобран | `forecasts.read` | 200 | М-12 |
+| `GET /api/dispatcher-decisions` | два справочника для диалога решения: `decisions` — четыре кода `ref.dispatcher_decision` в порядке `sort_order`, `reasons` — пять причин `ref.feedback_reason` (MOS-55) | `forecasts.read` | не проверено — 052 ещё не на стенде | Ф-92 |
+| `POST /api/forecasts/{id}/feedback` | решение диспетчера `{decision_code, reason_code?, comment?, verified_externally?}` → новая строка `pred.feedback`, ответ 201 — именно записанная строка (по `feedback_id`), тем же объектом, что поле `decision` карточки. `decided_by` — из сессии, не из тела. `verdict` выводится: `false_alarm` → 0, прочие → 1; для `false_alarm` причина обязательна. 422 — нет `decision_code`, код не из справочника, ложное без причины, причина при неложном решении, комментарий длиннее 2000 знаков. Решение и причина ложатся в `audit.user_action.details` (Ф-53) | `forecasts.decide` — только `dispatcher` и `ods_dispatcher` (миграция 052), техник получает 403 | не проверено — 052 ещё не на стенде | Ф-92, Ф-75 |
 | `GET /api/orders` | список заявок `{schema_version, total, items[]}`, параметры `limit` и `offset`; в строке — объект, вид работ, срок, `deadline_hours` (срок заявки в часах от обнаружения, `due_at − reported_at`), статус, код приоритета. **С 22.09.2026 (037, MOS-179) поля `lead_hours` нет** | `orders.read` | 200 | М-09, М-16 |
 | `GET /api/orders/{id}` | карточка заявки: объект, вид работ, заказ ТОиР, приоритет с нормативом `response_hours`, `deadline_hours`, `warning_opened_at` (открытие предупреждения модели, `null` на прежнем пути), `risk_window_end` (конец окна риска), вложенный `forecast` с `forecast_id`, обоснование. **`forecast.predicted_failure_at` и `forecast.lead_hours` убраны.** **С 27.09.2026 (MOS-63) три поля: `external_status`, `external_status_at`, `external_assignee`** — статус заявки в эмулируемой системе учёта заказчика (Ф-87), `null` пока `app.ingest.order_status` не опросил хелпдеск ни разу | `orders.read` | 200 | М-11, М-12, М-13, Ф-87 |
 | `GET /api/objects/{id}` | карточка объекта: `smvu_key`, инвентарный номер, момент последнего показания | `objects.read` | 200 | М-08 |
@@ -345,9 +347,9 @@ selfcheck конкурировал с настоящим часовым прог
 | `GET /api/settings` | все строки `ref.app_setting`, счёт не фиксирован — каждая новая настройка добавляет строку: горизонт, пороги Precision/Recall, риска и автозаявок, политика записи журнала, окно и сглаживание веса участка | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-44 |
 | `PUT /api/settings/{key}` | новое значение; старое и новое ложатся в `audit.user_action.details` тем же рядом, что пишет промежуточный слой на каждый запрос. Правило проверки — у каждого ключа (`_RULES` в `backend/app/api/settings.py`); ключ без правила отвечает 422 «нет правила проверки», а не 500, как до MOS-159 отвечали 10 ключей из 16 | только администратор | **422** под `admin1` на заведомо неверном значении, **403** под `dispatcher1` | НФ-44 |
 | `GET /api/audit` | журнал действий `{total, items[]}`. Параметры `from`, `to`, `login` (точное совпадение логина, MOS-124, 27.09.2026), `limit`, `offset`. `from`/`to` — моменты времени (`datetime`), а не даты | только администратор | 200 под `admin1`, **403 под `dispatcher1`** | НФ-77 |
-| `GET /api/notifications` | уведомления от прогноза (`maint.notification`, `source_system='forecast'`) — вероятность, горизонт, локация (Ф-90) `{total, items[]}`. Параметры `acked` (true/false, без него — все), `limit`/`offset` | `notifications.read` | не проверено — 044 (MOS-107) ещё не на стенде | Ф-90 |
+| `GET /api/notifications` | уведомления от прогноза (`maint.notification`, `source_system='forecast'`) — вероятность, горизонт, локация (Ф-90) `{total, items[]}`; у записи есть `section_id` для перехода на карточку `/objects/{section_id}` (MOS-53, 27.09.2026). Параметры `acked` (true/false, без него — все), `limit`/`offset` | `notifications.read` | не проверено — 044 (MOS-107) ещё не на стенде | Ф-90 |
 | `POST /api/notifications/{id}/ack` | квитирование (Q6.9): пишет `acked_by`/`acked_at`; повторный вызов не перезаписывает первую отметку (`UPDATE … WHERE acked_at IS NULL`, гонка решается на уровне строки) | `notifications.ack` | не проверено — 044 ещё не на стенде | — |
-| `GET /api/alerts/stream` | SSE, разбор в разд. 4.3 ниже. Опрос раз в 5 с, пинг раз в 20 с при тишине, `Last-Event-ID` — курсор по `id`. Соединение из пула берётся на каждый опрос и сразу освобождается — не держится на весь поток | `notifications.read` | не проверено — 044 ещё не на стенде | Ф-88 |
+| `GET /api/alerts/stream` | SSE, разбор в разд. 4.3 ниже. Опрос раз в 5 с, пинг раз в 20 с при тишине, `Last-Event-ID` — курсор по `id`. Событие несёт те же поля, что запись списка, включая `section_id` (MOS-53); слушает его полоса уведомлений `frontend/src/components/AlertBar.tsx`. Соединение из пула берётся на каждый опрос и сразу освобождается — не держится на весь поток | `notifications.read` | не проверено — 044 ещё не на стенде | Ф-88 |
 | `GET /api/tech-events` | журнал технологических событий по форме Приложения 2 ТЗ ДЖКХ: пять колонок, `from`/`to` (потолок 31 сутки, иначе 422), фильтр по `sensor_kind`/`event_type`/`object`/`value_text`, `sort`/`order`. Разбор правила отбора строк и потолка диапазона — в шапке `backend/app/api/tech_events.py` | `tech_events.read` | не проверено — 044 ещё не на стенде | Ф-89 |
 | `GET /docs`, `GET /openapi.json` | описание методов, генерирует сам FastAPI. Обратите внимание: без префикса `/api` | всем, заголовок не нужен | 200 без заголовка | М-17 |
 
@@ -684,7 +686,7 @@ OPC UA часть 11 (Historical Access), где рядом стоят `Exceptio
 | `GET /forecasts?from=&to=&cursor=` | `GET /api/forecasts?from=&to=&limit=&offset=` |
 | `GET /notifications` | `GET /api/orders` |
 | `GET /dashboard` | ничего. Дашборд собирается несколькими вызовами, батча одним методом нет |
-| `POST /forecasts/{id}/feedback` | ничего, метода нет |
+| `POST /forecasts/{id}/feedback` | `POST /api/forecasts/{id}/feedback` с 27.09.2026 (MOS-55): тело — решение из справочника, а не голый `verdict` |
 | `POST /notifications/{id}/approve` | ничего, метода нет |
 | `GET /geo/sections?bbox=&z=` | ничего, метода нет (разд. 11.7 держит эту строку открытой) |
 | `GET /stream` | ничего, потока SSE нет (разд. 4.3 — план, не факт) |
@@ -1366,6 +1368,11 @@ CREATE TABLE ref.object_xref (
                             заявки из эмулятора хелпдеска заказчика. Номер 051,
                             не 050: 050 и 041…043 зарезервированы под PR
                             Николая (MOS-184) (строка плана 6.8, MOS-63)
+052_dispatcher_decision.sql ref.dispatcher_decision — четыре решения
+                            диспетчера из ТЗ разд. 12; колонка
+                            pred.feedback.decision_code; право
+                            forecasts.decide для dispatcher и ods_dispatcher
+                            (строка плана 5.8, MOS-55)
 ```
 
 Номер 022, а не 019: номера 019, 020 и 021 розданы вперёд в `docs/plan.md`,
@@ -1861,7 +1868,7 @@ Precision, Recall, медиана упреждения, ложных на 1000 �
 
 ```
 диспетчер жмёт «Ложная» + причина
-  → POST /api/forecasts/{id}/feedback → INSERT INTO pred.feedback   (метода нет, разд. 3.4)
+  → POST /api/forecasts/{id}/feedback → INSERT INTO pred.feedback   (MOS-55, разд. 3.4)
   → ночью 03:30 pred.v_training_labels уезжает в /data/parquet/labels/2026-09.parquet
      (section_id, direction, forecast_id, run_id, probability, factors,
       verdict, reason_code, decided_at, model_version)
@@ -2254,12 +2261,15 @@ Alembic не беру: схемы написаны руками, с тригге
 ### 8.3. Диспетчер нажал «Ложная»
 
 ```
-1. Клик в журнале. Открывается диалог (Radix Dialog) с обязательным выбором причины
-   из закрытого списка: отказ датчика, плановые работы, погода, ремонт соседней
-   сети, неизвестно. «Сохранить» неактивна, пока причина не выбрана (Ф-35).
-   Свободный ввод недоступен: свободный текст в этом поле убивает статистику.
-2. POST /api/forecasts/{id}/feedback (метода нет, разд. 3.4)
-   {"verdict": 0, "reason_code": "planned_works", "comment": "сварка на пикете 14"}
+1. Кнопка «Решение диспетчера» в карточке прогноза (frontend/src/components/
+   ForecastCard.tsx) открывает VerdictDialog.tsx — нативный <dialog>. Решение —
+   из четырёх кодов ref.dispatcher_decision; при «Ложном срабатывании» ещё и
+   причина из пяти: отказ датчика, плановые работы, погода, ремонт соседней
+   сети, неизвестно. «Сохранить» неактивна, пока не выбрано (Ф-92, Ф-35).
+   Свободный ввод — только в комментарии: свободный текст в решении убивает статистику.
+2. POST /api/forecasts/{id}/feedback (MOS-55, разд. 3.4)
+   {"decision_code": "false_alarm", "reason_code": "planned_works", "comment": "сварка на пикете 14"}
+   verdict сервер выводит сам: false_alarm → 0, прочие решения → 1.
 3. INSERT INTO pred.feedback (…, decided_by = текущий пользователь).
    Вставка, а не обновление: ошибочный вердикт исправляется новой строкой.
 4. Меняется три вещи сразу: строка журнала получает вердикт ответом на тот же POST
@@ -2825,16 +2835,18 @@ Open-Meteo по лицензии CC BY 4.0). Адрес задаёт `WEATHER_UR
 экспертизы «соответствие рекомендаций сервиса реальным рекомендациям», и сверять будет
 не с чем.
 
+Сделано 27.09.2026 миграцией `db/migrations/052_dispatcher_decision.sql` (MOS-55):
+
 ```sql
-CREATE TABLE ref.decision (
-    code     text PRIMARY KEY,
-    name_ru  text NOT NULL,
-    sort_ord smallint NOT NULL
+CREATE TABLE ref.dispatcher_decision (
+    code       text     PRIMARY KEY,
+    name       text     NOT NULL,
+    sort_order smallint NOT NULL UNIQUE
 );
 -- значения дословно из ТЗ разд. 12, менять только с заказчиком:
--- brigade_dispatch «Выезд бригады», brigade_check «Направление бригады на проверку»,
--- monitoring «Мониторинг ситуации», false_alarm «Ложное срабатывание»
-ALTER TABLE pred.feedback ADD COLUMN decision_code text REFERENCES ref.decision(code);
+-- crew_dispatch «Выезд бригады», send_check «Направление бригады на проверку»,
+-- monitor «Мониторинг ситуации», false_alarm «Ложное срабатывание»
+ALTER TABLE pred.feedback ADD COLUMN decision_code text;  -- + FK на ref.dispatcher_decision(code)
 ```
 
 В диалоге вердикта два поля. Первое — решение из справочника, обязательное всегда.
@@ -2846,7 +2858,9 @@ ALTER TABLE pred.feedback ADD COLUMN decision_code text REFERENCES ref.decision(
 камеры наблюдения») закрываем одним чекбоксом «Проверено по внешним источникам»
 и полем `verified_externally boolean` в `pred.feedback`. Интеграцию с камерами
 не строим: ТЗ её не требует, а чекбокс дешевле на три порядка и закрывает шаг
-протоколом.
+протоколом. Сделано 27.09.2026 в той же миграции 052 (MOS-55): колонка
+`NOT NULL DEFAULT false`, поле в теле `POST /api/forecasts/{id}/feedback`,
+чекбокс в `VerdictDialog.tsx`, отметка в блоке последнего решения карточки прогноза.
 
 ### 11.7. Форматы обмена: где живёт каждый из шести
 
