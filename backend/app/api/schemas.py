@@ -120,6 +120,16 @@ class ForecastOutcome(BaseModel):
     decided_at: IsoDatetime
 
 
+class OutcomeSummary(BaseModel):
+    # US-20: пять исходов за период; каждый прогноз ровно в одном, total — их сумма.
+    confirmed: int
+    false_alarm: int
+    not_checked: int
+    horizon_expired: int
+    open: int
+    total: int
+
+
 class OutcomeIn(BaseModel):
     # Три исхода (ref.forecast_outcome) и пять причин у «ложной» — Ф-34, Ф-35.
     outcome_code: str
