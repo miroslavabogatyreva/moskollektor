@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { isDense, riskColors, riskLabel, riskShape, type RiskClass } from './risk'
 import type { Section } from './types'
@@ -11,7 +12,14 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    префикса своя ось и свой масштаб — тот же viewport.ts, что раньше держал
    один масштаб на коллектор, теперь держит его на линию. */
 
-const AXIS_WIDTH = 1000
+// Масштаб: одна единица чертежа — 1,3 px экрана, всегда. Ширина чертежа не
+// постоянная, а ширина оси на экране, делённая на этот масштаб (ResizeObserver).
+// До MOS-101 viewBox был 1000 единиц на любую ширину, и значок сжимался вместе
+// с осью: дерево объектов слева отняло у оси ~280 px, значок «6 ед.» стал 81 px
+// площади вместо 121, и US-05 сц. 5 (различимость без цвета, порог 10 %) упал
+// с 17 % до 6 %. До дерева на окне 1280 масштаб был 1,24 (ось 1 240 px на 1000
+// единиц); 1,3 — с запасом над порогом сц. 5 (решение c0 на ревью).
+const PX_PER_UNIT = 1.3
 const AXIS_HEIGHT = 100
 const PADDING = 40
 const MIN_VIEW_FRACTION = 0.01
@@ -49,6 +57,20 @@ interface AxisLineProps {
 }
 
 export function AxisLine({ prefix, all, visible, riskBySection, selected, viewRange, onViewRangeChange }: AxisLineProps) {
+  // Ширина оси на экране, px. null — ещё не измерили: тогда рисуем пустую рамку,
+  // а не метки с x() от нулевой ширины (NaN и мигание первого кадра).
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [screenWidth, setScreenWidth] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = svgRef.current
+    if (!el) return
+    setScreenWidth(el.clientWidth)
+    const ro = new ResizeObserver(([e]) => setScreenWidth(e.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const AXIS_WIDTH = (screenWidth ?? 0) / PX_PER_UNIT
+
   const maxPicket = Math.max(1, ...all.map((s) => s.picket))
   const minViewWidth = Math.max(1, maxPicket * MIN_VIEW_FRACTION)
   const [viewStart, viewEnd] = viewRange ?? fullView(maxPicket)
@@ -72,7 +94,7 @@ export function AxisLine({ prefix, all, visible, riskBySection, selected, viewRa
   const onWheel = (e: WheelEvent) => {
     e.preventDefault()
     const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
-    const svgX = ((e.clientX - rect.left) / rect.width) * AXIS_WIDTH
+    const svgX = (e.clientX - rect.left) / PX_PER_UNIT
     const center = viewStart + ((svgX - PADDING) / innerWidth) * viewWidth
     zoomBy(e.deltaY > 0 ? 1.4 : 1 / 1.4, center)
   }
@@ -132,13 +154,16 @@ export function AxisLine({ prefix, all, visible, riskBySection, selected, viewRa
       </div>
 
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${AXIS_WIDTH} ${AXIS_HEIGHT}`}
         role="img"
         aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${all.length} участков`}
         class="w-full"
+        height={AXIS_HEIGHT * PX_PER_UNIT}
         style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
         onWheel={onWheel}
       >
+        {screenWidth != null && screenWidth > 0 && (<>
         <line
           x1={PADDING}
           y1={baselineY}
@@ -208,6 +233,7 @@ export function AxisLine({ prefix, all, visible, riskBySection, selected, viewRa
             </g>
           )
         })}
+        </>)}
       </svg>
     </div>
   )

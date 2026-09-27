@@ -8,4 +8,7 @@ export const ROUTES = [
   { path: '/map', label: 'Карта объектов' },
   { path: '/log', label: 'Журнал прогнозов' },
   { path: '/orders', label: 'Заявки' },
+  // Общий журнал технологических событий по форме Приложения 2 (Ф-89, MOS-54);
+  // право tech_events.read есть у всех четырёх ролей (045_notification_ack.sql).
+  { path: '/tech-events', label: 'Журнал событий' },
 ] as const
