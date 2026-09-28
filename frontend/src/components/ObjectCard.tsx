@@ -499,10 +499,7 @@ export function ObjectCard({
         )}
       </section>
 
-      <TechEventsTable
-        sectionId={data.section_id}
-        sensorKinds={[...new Set(data.channels.map((c) => c.sensor_kind))].sort()}
-      />
+      <TechEventsTable sectionId={data.section_id} />
 
       <section class="card">
         <h2 class="card-title mb-1">Показания датчиков</h2>
