@@ -16,7 +16,9 @@ docs/HLD.md разд. 3.4 (таблица переводов терминов р
 «GET /sections/{id} → GET /api/objects/{id}» — заводить второе имя для того
 же участка значило бы переигрывать это решение.
 """
+import json
 from datetime import date, timedelta
+from typing import Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,11 +29,12 @@ from app.api.schemas import (
     ObjectDetail,
     ObjectReading,
     SensorRisk,
+    SensorRiskSummary,
     TreeCollector,
 )
 from app.auth.deps import require, видимые_участки, проверить_участок
 from app.api.permits import ДЕЙСТВУЮЩИЕ
-from app.db import КРАЙ_ДАННЫХ, get_conn
+from app.db import get_conn
 from app.domain import sensor_risk
 
 router = APIRouter(prefix="/api")
@@ -363,99 +366,170 @@ async def list_channel_episodes(
     return {"channel": dict(канал), "total": len(items), "items": items}
 
 
+# Балл по датчикам (MOS-253): строки pred.sensor_risk последнего среза с узлом
+# и коллектором канала. Коллектор — узел уровня 2 дерева: сам узел канала или его
+# родитель, так же, как у GET /api/objects/tree. $1 — synthetic: при false балл
+# и уровень — реальная часть (score_real, level_real). $2 — участки роли.
+ДАТЧИКИ = """
+WITH s AS (
+  SELECT r.channel_id, r.as_of, r.reasons, c.name, c.sensor_kind, c.picket, c.section_id,
+         c.object_id AS node_id,
+         CASE WHEN n.level = 2 THEN n.object_id WHEN p.level = 2 THEN p.object_id END
+             AS collector_id,
+         round((r.score_real + CASE WHEN $1 THEN r.score_synth ELSE 0 END)::numeric, 3)
+             AS score,
+         CASE WHEN $1 THEN r.level_full ELSE r.level_real END AS level
+    FROM pred.sensor_risk r
+    JOIN smvu.channel c USING (channel_id)
+    LEFT JOIN smvu.object_tree n ON n.object_id = c.object_id
+    LEFT JOIN smvu.object_tree p ON p.object_id = n.parent_id
+   WHERE r.as_of = (SELECT max(as_of) FROM pred.sensor_risk)
+     AND ($2::int[] IS NULL OR c.section_id = ANY($2))
+)
+"""
+
+
+async def _узел(conn, object_id, уровень=None):
+    if object_id is None:
+        return None
+    name = await conn.fetchval(
+        "SELECT name FROM smvu.object_tree WHERE object_id = $1 AND ($2::int IS NULL OR level = $2)",
+        object_id, уровень,
+    )
+    if name is None:
+        raise HTTPException(404, "коллектор не найден" if уровень else "узел не найден")
+    return name
+
+
 @router.get("/sensor-risk", response_model=SensorRisk)
 async def get_sensor_risk(
-    node: int = Query(5657, description="узел smvu.object_tree; по умолчанию демо-узел «объект Каппа ДУ»"),
+    synthetic: int = Query(1, ge=0, le=1, description="1 — балл с синтетическим паспортом, 0 — только реальные отказы"),
+    node: int | None = Query(None, description="узел smvu.object_tree (5657 — «объект Каппа ДУ»)"),
+    collector: int | None = Query(None, description="коллектор — узел уровня 2 smvu.object_tree"),
+    channel: int | None = Query(None, description="один канал smvu.channel (экран /map?channel=, MOS-255)"),
+    level: Literal["high", "watch", "normal"] | None = Query(None),
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
     conn: asyncpg.Connection = Depends(get_conn),
     user=Depends(require("objects.read")),
 ):
-    """Балл риска по каждому датчику узла (демо 28.09.2026). Формула и окна ППР —
-    app.domain.sensor_risk. Паспорт оборудования СИНТЕТИЧЕСКИЙ (db/seed/sensor_demo.sql),
-    отказы настоящие — те же, что у таблицы «Отказы по каналам» карточки
-    (smvu.model_failure_event от нижней границы pred.weight_window()).
+    """Балл риска по каждому датчику (MOS-253, эпик MOS-248). Балл считает worker
+    после прогноза (app.worker.sensor_scores → pred.sensor_risk), метод только читает
+    последний срез — тот же as_of, что у GET /api/risks. Формула — app.domain.sensor_risk.
 
-    В ответ идут только каналы с синтетическим паспортом: у узла без синтетики
-    items пустой, synthetic=false. Область видимости — как у дерева: каналы
-    невидимых роли участков выпадают молча. `node` необязателен (умолчание 5657),
-    чтобы delivery/check-api-contract.py звал метод без подстановки.
+    `synthetic=1` (по умолчанию): балл = score_real + score_synth, уровень level_full,
+    причины всех видов, `equipment` — синтетический паспорт. `synthetic=0`: балл =
+    score_real, уровень level_real, причин вида synthetic нет, `equipment` = null —
+    паспорт выдуман, и без синтетики его показывать нечем.
 
-    as_of — срез текущего прогноза (max(as_of) в pred.forecast_current), пока
-    прогноза нет — край данных; отказы позже среза балл не видит.
+    Область видимости — как у GET /api/risks: каналы участков вне роли выпадают
+    молча, канал без участка видит только тот, кто видит всё. `channel` — один канал
+    для экрана /map?channel= (MOS-255): канал вне роли, несуществующий и без строки
+    в срезе одинаково дают пустой items, а не 404, — иначе по разнице ответов
+    диспетчер узнал бы, есть ли чужой канал (тот же довод, что у проверить_участок).
+    У элемента есть node_id, collector_id и picket, по ним экран выбирает коллектор
+    и пикет. Сортировка — балл по
+    убыванию, затем channel_id. Тик ещё не считал — as_of = null и items пустой.
     """
-    name = await conn.fetchval("SELECT name FROM smvu.object_tree WHERE object_id = $1", node)
-    if name is None:
-        raise HTTPException(404, "узел не найден")
-    at = await conn.fetchval(
-        f"SELECT coalesce((SELECT max(as_of) FROM pred.forecast_current), ({КРАЙ_ДАННЫХ}), now())"
+    syn = bool(synthetic)
+    node_name = await _узел(conn, node)
+    collector_name = await _узел(conn, collector, 2)
+    участки = await видимые_участки(user, conn)
+    фильтр = """
+     WHERE ($3::int IS NULL OR node_id = $3) AND ($4::int IS NULL OR collector_id = $4)
+       AND ($5::text IS NULL OR level = $5) AND ($6::int IS NULL OR channel_id = $6)"""
+    аргументы = (syn, участки, node, collector, level, channel)
+    total = await conn.fetchval(ДАТЧИКИ + "SELECT count(*) FROM s" + фильтр, *аргументы)
+    rows = await conn.fetch(
+        ДАТЧИКИ + "SELECT * FROM s" + фильтр
+        + " ORDER BY score DESC, channel_id LIMIT $7 OFFSET $8",
+        *аргументы, limit, offset,
     )
-    chans = await conn.fetch(
-        """
-        SELECT c.channel_id, c.name, c.sensor_kind, c.picket, c.section_id,
-               e.id AS eq_id, e.equipment_no, m.name AS manufacturer, e.model_no,
-               e.in_service_from, e.service_life_years
-          FROM smvu.channel c
-          JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $2
-          LEFT JOIN ref.manufacturer m ON m.id = e.manufacturer_id
-         WHERE c.object_id = $1 AND c.is_active
-           AND ($3::int[] IS NULL OR c.section_id = ANY($3))
-        """,
-        node, sensor_risk.SRC, await видимые_участки(user, conn),
-    )
-    points: dict[int, dict] = {}
-    for r in await conn.fetch(
-        """
-        SELECT p.equipment_id, p.id, ch.code,
-               timezone('Europe/Moscow', ms.measured_at)::date AS d, ms.is_out_of_limit
-          FROM asset.measuring_point p
-          JOIN ref.characteristic ch ON ch.id = p.characteristic_id
-          LEFT JOIN asset.measurement ms ON ms.point_id = p.id
-         WHERE p.equipment_id = ANY($1)
-         ORDER BY ms.measured_at
-        """,
-        [c["eq_id"] for c in chans],
-    ):
-        p = points.setdefault(r["id"], {
-            "eq": r["equipment_id"],
-            "kind": "calib" if r["code"] == "SYN_CALIB_ERR" else "motohours",
-            "readings": [],
-        })
-        if r["d"] is not None:
-            p["readings"].append((r["d"], not r["is_out_of_limit"]))
-    starts: dict[int, list] = {}
-    for r in await conn.fetch(
-        """
-        SELECT e.channel_id, e.started_at
-          FROM smvu.model_failure_event e
-         CROSS JOIN pred.weight_window() w
-         WHERE e.channel_id = ANY($1)
-           AND timezone('Europe/Moscow', e.started_at)::date >= w.date_from
-        """,
-        [c["channel_id"] for c in chans],
-    ):
-        starts.setdefault(r["channel_id"], []).append(r["started_at"])
-
+    as_of = await conn.fetchval("SELECT max(as_of) FROM pred.sensor_risk")
+    паспорта = {}
+    if syn and rows:
+        for r in await conn.fetch(
+            """
+            SELECT c.channel_id, e.equipment_no, m.name AS manufacturer, e.model_no,
+                   e.in_service_from, e.service_life_years,
+                   lc.d AS last_check_at, lc.ok AS last_check_ok
+              FROM smvu.channel c
+              JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $2
+              LEFT JOIN ref.manufacturer m ON m.id = e.manufacturer_id
+              LEFT JOIN LATERAL (
+                SELECT timezone('Europe/Moscow', ms.measured_at)::date AS d,
+                       NOT ms.is_out_of_limit AS ok
+                  FROM asset.measuring_point p
+                  JOIN asset.measurement ms ON ms.point_id = p.id
+                 WHERE p.equipment_id = e.id
+                   AND timezone('Europe/Moscow', ms.measured_at)::date
+                       <= timezone('Europe/Moscow', $3::timestamptz)::date
+                 ORDER BY ms.measured_at DESC LIMIT 1
+              ) lc ON true
+             WHERE c.channel_id = ANY($1)
+            """,
+            [r["channel_id"] for r in rows], sensor_risk.SRC, as_of,
+        ):
+            паспорта[r["channel_id"]] = {k: v for k, v in r.items() if k != "channel_id"}
     items = []
-    for c in chans:
-        pts = [p for p in points.values() if p["eq"] == c["eq_id"]]
-        done = sorted((d, ok) for p in pts for d, ok in p["readings"] if d <= at.astimezone(sensor_risk.MSK).date())
-        eq = {"in_service": c["in_service_from"], "life": c["service_life_years"], "points": pts}
+    for r in rows:
+        reasons = r["reasons"]  # пул API декодирует jsonb сам (app.db), голое соединение — нет
+        if isinstance(reasons, str):
+            reasons = json.loads(reasons)
+        if not syn:
+            reasons = [x for x in reasons if x["kind"] != "synthetic"]
         items.append({
-            **{k: c[k] for k in ("channel_id", "name", "sensor_kind", "picket", "section_id")},
-            **sensor_risk.score(
-                starts.get(c["channel_id"], []), eq, at,
-                sensor_risk.plan_windows(node, c["sensor_kind"]),
-            ),
-            "equipment": {
-                **{k: c[k] for k in (
-                    "equipment_no", "manufacturer", "model_no", "in_service_from",
-                    "service_life_years",
-                )},
-                "last_check_at": done[-1][0] if done else None,
-                "last_check_ok": done[-1][1] if done else None,
-            },
+            **{k: r[k] for k in (
+                "channel_id", "name", "sensor_kind", "picket", "section_id",
+                "node_id", "collector_id", "level",
+            )},
+            "score": float(r["score"]),
+            "reasons": reasons,
+            "equipment": паспорта.get(r["channel_id"]),
         })
-    items.sort(key=lambda i: (-i["score"], i["channel_id"]))
-    return {"node": node, "node_name": name, "as_of": at, "synthetic": bool(items), "items": items}
+    return {
+        "synthetic": syn, "as_of": as_of, "node": node, "node_name": node_name,
+        "collector": collector, "collector_name": collector_name,
+        "total": total, "limit": limit, "offset": offset, "items": items,
+    }
+
+
+@router.get("/sensor-risk/summary", response_model=SensorRiskSummary)
+async def get_sensor_risk_summary(
+    synthetic: int = Query(1, ge=0, le=1),
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("objects.read")),
+):
+    """Плитки дашборда по датчикам (MOS-253): сколько датчиков на каждом уровне,
+    у скольких коллекторов есть хоть один датчик high и пять коллекторов с наибольшим
+    числом high. Тот же срез, та же область видимости и тот же смысл `synthetic`,
+    что у GET /api/sensor-risk."""
+    syn = bool(synthetic)
+    участки = await видимые_участки(user, conn)
+    счёт = await conn.fetchrow(
+        ДАТЧИКИ + """
+        SELECT count(*) FILTER (WHERE level = 'high') AS high,
+               count(*) FILTER (WHERE level = 'watch') AS watch,
+               count(*) FILTER (WHERE level = 'normal') AS normal
+          FROM s""",
+        syn, участки,
+    )
+    коллекторы = await conn.fetch(
+        ДАТЧИКИ + """
+        SELECT s.collector_id, t.name, count(*) AS high
+          FROM s JOIN smvu.object_tree t ON t.object_id = s.collector_id
+         WHERE s.level = 'high'
+         GROUP BY s.collector_id, t.name
+         ORDER BY high DESC, s.collector_id""",
+        syn, участки,
+    )
+    return {
+        "synthetic": syn,
+        "as_of": await conn.fetchval("SELECT max(as_of) FROM pred.sensor_risk"),
+        **dict(счёт),
+        "collectors_with_high": len(коллекторы),
+        "top_collectors": [dict(r) for r in коллекторы[:5]],
+    }
 
 
 def _selfcheck():

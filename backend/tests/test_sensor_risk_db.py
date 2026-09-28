@@ -1,0 +1,386 @@
+"""Прогноз по датчикам на настоящей базе: сид паспорта (SL.1, MOS-250), тик
+pred.sensor_risk (SL.3, MOS-252) и методы GET /api/sensor-risk (SL.4, MOS-253).
+
+Одноразовая база, как у test_warning_selection.py, тот же ключ::
+
+    MOS184_TEST_DSN=postgresql://postgres@127.0.0.1:5432/postgres \\
+      python -m pytest backend/tests/test_sensor_risk_db.py -v
+
+Без переменной тесты пропускаются, а не зеленеют впустую. Каналы выдуманные:
+11 500 штук — столько активных каналов на стенде, — все 19 видов датчиков,
+два коллектора по узлу, плюс заглушка и выключенный канал, которым паспорт
+не положен. Время сида и тика тест печатает: это время локальной машины,
+а не стенда.
+"""
+
+import asyncio
+import os
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+
+import pytest
+from app.api import objects
+from app.domain import sensor_risk
+from app.migrate import CREATE_JOURNAL
+from app.worker import sensor_scores
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "code"))
+import synth_sensor_level
+
+КАНАЛОВ = 11_500
+AS_OF = "2026-06-30 23:59:59+03"
+ADMIN = {"login": "admin", "roles": ["admin"]}
+DISP = {"login": "disp_kappa", "roles": ["dispatcher"]}  # видит только коллектор 15
+
+
+def _в_базе(dsn, тело):
+    import asyncpg
+
+    async def main():
+        conn = await asyncpg.connect(dsn)
+        try:
+            return await тело(conn)
+        finally:
+            await conn.close()
+
+    return asyncio.run(main())
+
+
+@pytest.fixture(scope="module")
+def database():
+    raw = os.environ.get("MOS184_TEST_DSN")
+    if not raw:
+        pytest.skip("requires isolated local PostGIS via MOS184_TEST_DSN")
+    parsed = urlsplit(raw)
+    assert parsed.hostname in {"127.0.0.1", "localhost", "::1"}, (
+        "local test server only"
+    )
+    name = "sensor_test_" + uuid4().hex
+    dsn = urlunsplit(parsed._replace(path="/" + name))
+    import asyncpg
+
+    async def create():
+        admin = await asyncpg.connect(raw)
+        try:
+            await admin.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            await admin.close()
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(CREATE_JOURNAL)
+            for path in sorted((ROOT / "db/migrations").glob("*.sql")):
+                async with conn.transaction():
+                    await conn.execute(path.read_text())
+            # Чистая установка до заливки: сид молчит и ничего не пишет.
+            await conn.execute(synth_sensor_level.SEED_SQL.read_text())
+            assert await conn.fetchval("SELECT count(*) FROM asset.equipment") == 0
+            await conn.execute("""
+                INSERT INTO smvu.object_tree (object_id, level, parent_id, kind, name) VALUES
+                  (1, 1, NULL, 'district', 'Район'),
+                  (15, 2, 1, 'guardObject', 'объект Каппа'),
+                  (16, 2, 1, 'guardObject', 'объект Лямбда'),
+                  (5657, 3, 15, 'controlHouse', 'объект Каппа ДУ'),
+                  (5700, 3, 16, 'controlHouse', 'объект Лямбда ДУ');
+                INSERT INTO ref.object_xref (section_id, smvu_key)
+                SELECT g, 'test:' || g FROM generate_series(1, 40) g;
+                INSERT INTO ref.app_user (login, full_name) VALUES ('disp_kappa', 'Диспетчер Каппы');
+                INSERT INTO ref.user_scope (login, object_id) VALUES ('disp_kappa', 15);
+            """)
+            # Каналы: первая половина — узел 5657 (участки 1…20), вторая — 5700 (21…40).
+            await conn.execute(
+                """
+                INSERT INTO smvu.channel (channel_id, system_kind, sensor_kind, tag, name,
+                                          picket, section_id, object_id)
+                SELECT 266000 + i, NULL, k.sensor_kind, 'test-' || i, 'ДТ ' || i || ' ПК' || (i % 900),
+                       i % 900, CASE WHEN i < $1 / 2 THEN 1 + i % 20 ELSE 21 + i % 20 END,
+                       CASE WHEN i < $1 / 2 THEN 5657 ELSE 5700 END
+                  FROM generate_series(0, $1 - 1) i
+                  JOIN (SELECT sensor_kind, row_number() OVER (ORDER BY sensor_kind) - 1 AS n
+                          FROM smvu.sensor_kind) k ON k.n = i % 19;
+                -- неизвестный вид, заглушка, выключенный канал
+                UPDATE smvu.channel SET sensor_kind = NULL WHERE channel_id = 266001;
+                INSERT INTO smvu.channel (channel_id, tag, is_stub) VALUES (999001, 'stub', true);
+                UPDATE smvu.channel SET is_active = false WHERE channel_id = 266002;
+            """.replace("$1", str(КАНАЛОВ))
+            )
+            # Отказы: газ узла 5657 — в окне ППР 04.06.2026 (не отказ), каждый 7-й
+            # канал — свежий отказ 29.06, каждый 11-й — отказ позже среза (не видим).
+            await conn.execute("""
+                INSERT INTO smvu.model_failure_episode
+                       (channel_id, section_id, started_at, ended_at, fault_value, model_version)
+                SELECT c.channel_id, c.section_id, s.t, s.t + interval '3 hours',
+                       'Неисправен', 'lgbm-v3-bag-2026.09.21'
+                  FROM smvu.channel c
+                  JOIN (VALUES (timestamptz '2026-06-04 09:30+03', 'ppr'),
+                               (timestamptz '2026-06-29 10:00+03', 'fresh'),
+                               (timestamptz '2026-07-10 10:00+03', 'future')) AS s(t, what)
+                    ON (s.what = 'ppr' AND c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик')
+                    OR (s.what = 'fresh' AND c.channel_id % 7 = 0)
+                    OR (s.what = 'future' AND c.channel_id % 11 = 0)
+                 WHERE c.is_active AND NOT c.is_stub;
+            """)
+            t0 = time.monotonic()
+            async with conn.transaction():
+                await conn.execute(synth_sensor_level.SEED_SQL.read_text())
+            print(
+                f"\nсид на {КАНАЛОВ} каналах: {time.monotonic() - t0:.1f} с (локально)"
+            )
+            run = await conn.fetchval(
+                "INSERT INTO pred.run (model_version, as_of, status) VALUES ('t', $1::text::timestamptz, 'done')"
+                " RETURNING run_id",
+                AS_OF,
+            )
+            await conn.execute(
+                """
+                INSERT INTO pred.forecast_current (section_id, run_id, as_of, horizon_h,
+                                                   probability, risk_rank, factors)
+                SELECT section_id, $1, $2::text::timestamptz, 24, 0.1, section_id, '[]'
+                  FROM ref.object_xref""",
+                run,
+                AS_OF,
+            )
+        finally:
+            await conn.close()
+
+    async def remove():
+        admin = await asyncpg.connect(raw)
+        try:
+            await admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+        finally:
+            await admin.close()
+
+    try:
+        asyncio.run(create())
+        yield dsn
+    finally:
+        asyncio.run(remove())
+
+
+def test_seed_passport_everywhere_deterministic_and_blind(database):
+    """SL.1: паспорт у каждого активного канала, всех видов, повтор не трогает,
+    отказы на паспорт не влияют (check_on_db откатывает всё за собой)."""
+
+    async def тело(conn):
+        активных = await conn.fetchval(
+            "SELECT count(*) FROM smvu.channel WHERE is_active AND NOT is_stub"
+        )
+        assert активных == КАНАЛОВ - 1
+        assert await synth_sensor_level.check_on_db(conn) == активных
+        без = await conn.fetchval("""
+            SELECT count(*) FROM smvu.channel c
+              LEFT JOIN asset.equipment e ON e.id = c.equipment_id
+             WHERE c.is_active AND NOT c.is_stub AND e.source_system IS DISTINCT FROM 'synthetic-demo'""")
+        assert без == 0
+        # заглушка и выключенный канал паспорта не получили
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM smvu.channel WHERE channel_id IN (999001, 266002) "
+                "AND equipment_id IS NOT NULL"
+            )
+            == 0
+        )
+        виды = await conn.fetchval("""
+            SELECT count(DISTINCT k.code) FROM asset.equipment e
+              JOIN ref.object_kind k ON k.id = e.object_kind_id
+             WHERE e.source_system = 'synthetic-demo'""")
+        assert виды == 20, виды  # 19 видов выгрузки и «прочий» у канала без вида
+        проверок = await conn.fetchrow("""
+            SELECT count(DISTINCT p.id) AS points, count(*) AS readings
+              FROM asset.measuring_point p JOIN asset.measurement m ON m.point_id = p.id""")
+        assert проверок["points"] > 0 and проверок["readings"] > проверок["points"]
+        # газ узла 5657 поверен в день вывоза из ОМ по графику ППР
+        assert await conn.fetchval("""
+            SELECT bool_and(d = date '2026-06-18') FROM (
+              SELECT max(timezone('Europe/Moscow', m.measured_at)::date) AS d
+                FROM smvu.channel c JOIN asset.measuring_point p ON p.equipment_id = c.equipment_id
+                JOIN asset.measurement m ON m.point_id = p.id
+               WHERE c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик'
+               GROUP BY c.channel_id) x""")
+
+    _в_базе(database, тело)
+
+
+def test_tick_writes_every_channel_on_forecast_as_of(database):
+    """SL.3: строка на каждый активный канал, срез — как у /api/risks, формула — одна."""
+
+    async def тело(conn):
+        t0 = time.monotonic()
+        итог = await sensor_scores.посчитать(conn)
+        print(f"\nтик: {итог}, {time.monotonic() - t0:.1f} с (локально)")
+        assert итог["status"] == "ok" and итог["rows"] == КАНАЛОВ - 1, итог
+        срез = await conn.fetchval("SELECT max(as_of) FROM pred.forecast_current")
+        assert await conn.fetchval(
+            "SELECT array_agg(DISTINCT as_of) FROM pred.sensor_risk"
+        ) == [срез]
+        # повторный тик на том же срезе переписывает срез, а не удваивает
+        assert (await sensor_scores.посчитать(conn))["rows"] == КАНАЛОВ - 1
+        assert (
+            await conn.fetchval("SELECT count(*) FROM pred.sensor_risk") == КАНАЛОВ - 1
+        )
+        # занято — выходит сразу
+        other = await conn.fetchval("SELECT pg_backend_pid()")
+        import asyncpg
+
+        держатель = await asyncpg.connect(database)
+        try:
+            await держатель.fetchval(
+                "SELECT pg_advisory_lock($1)", sensor_scores.БЛОКИРОВКА
+            )
+            assert (await sensor_scores.посчитать(conn)) == {"status": "занято"}
+        finally:
+            await держатель.close()
+        assert other
+        # формула одна: строка совпадает с sensor_risk.split() на тех же входах
+        строки = {r[0]: r for r in await sensor_scores.баллы(conn, срез)}
+        for r in await conn.fetch("SELECT * FROM pred.sensor_risk"):
+            s = строки[r["channel_id"]]
+            assert (
+                round(r["score_real"], 3),
+                round(r["score_synth"], 3),
+                r["level_real"],
+                r["level_full"],
+            ) == (s[2], s[3], s[4], s[5])
+        # ППР: газ 5657 без свежего отказа — причина plan, реальной части нет
+        ппр = await conn.fetchrow("""
+            SELECT r.* FROM pred.sensor_risk r JOIN smvu.channel c USING (channel_id)
+             WHERE c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик'
+               AND c.channel_id % 7 <> 0 LIMIT 1""")
+        assert ппр["score_real"] == 0
+        assert "plan" in {x["kind"] for x in __import__("json").loads(ппр["reasons"])}
+        # отказ позже среза не виден, свежий — виден
+        свежий = await conn.fetchval(
+            "SELECT min(score_real) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+        )
+        assert свежий > 0.4
+        будущий = await conn.fetchval(
+            "SELECT max(score_real) FROM pred.sensor_risk "
+            "WHERE channel_id % 11 = 0 AND channel_id % 7 <> 0 AND channel_id NOT IN "
+            "(SELECT channel_id FROM smvu.channel WHERE object_id = 5657 AND sensor_kind = 'Газовый датчик')"
+        )
+        assert будущий == 0
+
+    _в_базе(database, тело)
+
+
+async def _список(conn, user, **kw):
+    параметры = dict(
+        synthetic=1, node=None, collector=None, channel=None, level=None, limit=500, offset=0
+    )
+    параметры.update(kw)
+    return await objects.get_sensor_risk(**параметры, conn=conn, user=user)
+
+
+def test_api_reads_table_with_filters_and_scope(database):
+    """SL.4: synthetic=0|1, node, collector, level, limit/offset, роль, summary."""
+
+    async def тело(conn):
+        if not await conn.fetchval("SELECT count(*) FROM pred.sensor_risk"):
+            await sensor_scores.посчитать(conn)
+        полный = await _список(conn, ADMIN, limit=5000)
+        assert полный["synthetic"] is True and полный["total"] == КАНАЛОВ - 1
+        баллы = [i["score"] for i in полный["items"]]
+        assert баллы == sorted(баллы, reverse=True)
+        assert all(i["equipment"] for i in полный["items"])
+        assert any(
+            r["kind"] == "synthetic" for i in полный["items"] for r in i["reasons"]
+        )
+
+        реальный = await _список(conn, ADMIN, synthetic=0, limit=5000)
+        assert реальный["synthetic"] is False
+        assert all(i["equipment"] is None for i in реальный["items"])
+        assert not any(
+            r["kind"] == "synthetic" for i in реальный["items"] for r in i["reasons"]
+        )
+        по_таблице = dict(
+            await conn.fetch(
+                "SELECT channel_id, round(score_real::numeric, 3) FROM pred.sensor_risk"
+            )
+        )
+        assert all(
+            i["score"] == float(по_таблице[i["channel_id"]]) for i in реальный["items"]
+        )
+        assert sum(i["score"] for i in реальный["items"]) < sum(баллы)
+
+        узел = await _список(conn, ADMIN, node=5657)
+        assert узел["node_name"] == "объект Каппа ДУ"
+        assert узел["total"] == КАНАЛОВ // 2 - 1 and len(узел["items"]) == 500
+        assert {i["node_id"] for i in узел["items"]} == {5657}
+        assert {i["collector_id"] for i in узел["items"]} == {15}
+        # фронт SensorDemo зовёт node=5657 и читает эти поля
+        i = узел["items"][0]
+        assert {
+            "channel_id",
+            "name",
+            "sensor_kind",
+            "picket",
+            "section_id",
+            "score",
+            "level",
+            "reasons",
+            "equipment",
+        } <= i.keys()
+
+        лямбда = await _список(conn, ADMIN, collector=16, level="high")
+        assert лямбда["collector_name"] == "объект Лямбда"
+        assert лямбда["total"] > 0
+        assert all(
+            i["level"] == "high" and i["collector_id"] == 16 for i in лямбда["items"]
+        )
+
+        стр1 = await _список(conn, ADMIN, limit=10, offset=0)
+        стр2 = await _список(conn, ADMIN, limit=10, offset=10)
+        assert [i["channel_id"] for i in стр1["items"] + стр2["items"]] == [
+            i["channel_id"] for i in полный["items"][:20]
+        ]
+        assert (await _список(conn, ADMIN, offset=10**6))["total"] == КАНАЛОВ - 1
+
+        свой = await _список(conn, DISP, limit=5000)
+        assert свой["total"] == КАНАЛОВ // 2 - 1
+        assert {i["collector_id"] for i in свой["items"]} == {15}
+
+        # channel (MOS-255): один элемент с узлом, коллектором и пикетом; вместе с
+        # synthetic=0; чужой канал роли и несуществующий — одинаково пустой items
+        for syn in (0, 1):
+            один = await _список(conn, ADMIN, channel=266003, synthetic=syn)
+            assert один["total"] == 1 and [i["channel_id"] for i in один["items"]] == [266003]
+            i = один["items"][0]
+            assert (i["node_id"], i["collector_id"]) == (5657, 15) and i["picket"] == 3
+            assert (i["equipment"] is None) is (syn == 0)
+        чужой = await _список(conn, DISP, channel=266000 + КАНАЛОВ - 3)
+        assert чужой["total"] == 0 and чужой["items"] == []
+        assert (await _список(conn, DISP, channel=266003))["total"] == 1
+        assert (await _список(conn, ADMIN, channel=424242))["items"] == []
+
+        with pytest.raises(objects.HTTPException) as e:
+            await _список(conn, ADMIN, node=424242)
+        assert e.value.status_code == 404
+        with pytest.raises(objects.HTTPException):
+            await _список(conn, ADMIN, collector=5657)  # узел, а не коллектор
+
+        for syn in (0, 1):
+            сводка = await objects.get_sensor_risk_summary(
+                synthetic=syn, conn=conn, user=ADMIN
+            )
+            assert сводка["synthetic"] is bool(syn)
+            assert сводка["high"] + сводка["watch"] + сводка["normal"] == КАНАЛОВ - 1
+            высоких = sum(
+                1
+                for i in (полный if syn else реальный)["items"]
+                if i["level"] == "high"
+            )
+            assert сводка["high"] == высоких
+            assert сводка["collectors_with_high"] == 2
+            assert [c["collector_id"] for c in сводка["top_collectors"]] and sum(
+                c["high"] for c in сводка["top_collectors"]
+            ) == высоких
+        сводка = await objects.get_sensor_risk_summary(
+            synthetic=1, conn=conn, user=DISP
+        )
+        assert [c["collector_id"] for c in сводка["top_collectors"]] == [15]
+        assert sensor_risk.SRC == "synthetic-demo"
+
+    _в_базе(database, тело)
