@@ -32,7 +32,7 @@ def список(conn, monkeypatch, **период):
     monkeypatch.setattr(orders, "видимые_участки", видит_всё)
     return asyncio.run(
         orders.list_orders(
-            limit=200, offset=0, conn=conn, user={"login": "disp2"}, **период
+            limit=200, offset=0, conn=conn, user={"login": "disp2"}, **{"q": None, **период}
         )
     )
 
@@ -55,3 +55,16 @@ def test_without_period_nothing_is_cut(monkeypatch):
     conn = Соединение()
     список(conn, monkeypatch, due_from=None, due_to=None)
     assert all(args[1:3] == (None, None) for _, args in conn.вызовы)
+
+
+def test_search_by_number_goes_to_count_and_page_alike(monkeypatch):
+    """Поиск по номеру заявки: одна строка q и в числе, и в странице, пробелы
+    по краям отрезаны; пустая строка — поиска нет."""
+    conn = Соединение()
+    список(conn, monkeypatch, due_from=None, due_to=None, q=" AF0001061588 ")
+    assert [args[3] for _, args in conn.вызовы] == ["AF0001061588"] * 2
+    for sql, _ in conn.вызовы:
+        assert "n.id::text = $4" in sql and "wo.order_no ILIKE" in sql
+    conn = Соединение()
+    список(conn, monkeypatch, due_from=None, due_to=None, q="  ")
+    assert [args[3] for _, args in conn.вызовы] == [None, None]

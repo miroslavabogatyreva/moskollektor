@@ -90,6 +90,8 @@ function OrdersTab() {
   const [error, setError] = useState<string | null>(null)
   const [dueFrom, setDueFrom] = useState('')
   const [dueTo, setDueTo] = useState('')
+  // Поиск по номеру: id заявки целиком или часть номера AF…/AW… (параметр q).
+  const [q, setQ] = useState('')
   // Та же страница — раз в минуту от общего опроса (НФ-89, MOS-123). Вкладка
   // «Неквитированные» не опрашивается: она копит страницы «Показать ещё»,
   // и перезапрос первой страницы выбросил бы подгруженные.
@@ -100,7 +102,7 @@ function OrdersTab() {
     // в зависимостях перезапускает эффект на каждое «дальше», и ответ
     // прошлой страницы, пришедший позже нового, клал чужие строки в таблицу.
     let отменено = false
-    fetchOrders(offset, dueFrom, dueTo)
+    fetchOrders(offset, dueFrom, dueTo, q)
       .then((r) => {
         if (!отменено) {
           setItems(r.items)
@@ -114,7 +116,7 @@ function OrdersTab() {
     return () => {
       отменено = true
     }
-  }, [offset, tick, dueFrom, dueTo])
+  }, [offset, tick, dueFrom, dueTo, q])
 
   function период(from: string, to: string) {
     setDueFrom(from)
@@ -130,6 +132,21 @@ function OrdersTab() {
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
 
       <div class="flex flex-wrap items-end gap-3 text-sm mb-3" style="color:var(--text-secondary)">
+        <label class="flex flex-col gap-1">
+          Номер заявки
+          <input
+            type="search"
+            value={q}
+            placeholder="7562 или AF0001061588"
+            onInput={(e) => {
+              setQ((e.target as HTMLInputElement).value)
+              setOffset(0)
+            }}
+            maxLength={40}
+            class="px-2 py-1 rounded text-sm"
+            style={стильПоля}
+          />
+        </label>
         <label class="flex flex-col gap-1">
           Срок с
           <input
@@ -170,7 +187,8 @@ function OrdersTab() {
         )}
         {items !== null && (
           <span data-testid="orders-count">
-            {dueFrom || dueTo ? 'заявок в периоде' : 'заявок'}: {total}
+            {q.trim() ? 'найдено заявок' : dueFrom || dueTo ? 'заявок в периоде' : 'заявок'}:{' '}
+            {total}
           </span>
         )}
       </div>

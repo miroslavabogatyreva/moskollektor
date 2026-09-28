@@ -26,11 +26,13 @@ export async function fetchOrders(
   offset = 0,
   dueFrom = '',
   dueTo = '',
+  q = '',
 ): Promise<OrderListResponse> {
   const p = new URLSearchParams()
   if (offset) p.set('offset', String(offset))
   if (dueFrom) p.set('due_from', dueFrom)
   if (dueTo) p.set('due_to', dueTo)
+  if (q.trim()) p.set('q', q.trim())
   const qs = p.toString()
   const r = await apiFetch(`/api/orders${qs ? `?${qs}` : ''}`)
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
