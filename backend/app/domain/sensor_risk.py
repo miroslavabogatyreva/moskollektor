@@ -38,8 +38,19 @@ CAP = 365  # сутки: давность больше года — «давно
 # Источники — docs/proof/2026-09-28-sensor-model/simulation.md.
 INTERVAL = {"calib": 365, "motohours": 182}
 
-REAL = ["r1", "r30", "n7", "n30", "n90", "nb_picket", "nb_coll"]
-SYNTH = ["life", "check", "overdue"]
+# fresh — отказ канала начался меньше FRESH_H часов назад. Модель журнала при fresh = 1
+# отключает остальные признаки и вид датчика (ключ "gate" в sensor_model.json): все
+# такие каналы получают одну вероятность, и на моменте «через час после отказа»
+# модель повторяет правило «канал отказал час назад». Без этого история канала
+# переставляла свежие отказы, и на окне выбора хуже случайного.
+FRESH_H = 2
+REAL = ["fresh", "r1", "r30", "n7", "n30", "n90", "nb_picket", "nb_coll"]
+# Признаки модели симулированных отказов: паспорт и предвестник. Предвестник —
+# синтетическое «предупреждение прибора» (app.domain.failure_sim): число их у канала
+# с возрастом в [0, 1), [1, 2), [2, 3) и [3, 5) сут. Истинный он или ложный,
+# модель не знает.
+PRE_BINS = [(0, 1), (1, 2), (2, 3), (3, 5)]
+SIM = ["life", "check", "overdue", "pre0", "pre1", "pre2", "pre3"]
 
 # Окна планового демонтажа — maint.ppr_window (миграция 060, сид db/seed/ppr_2026.sql).
 # В признаки не идут эпизоды окон match = 'sure': Объект 14 = Каппа ДУ (5657)
@@ -78,12 +89,13 @@ def in_plan(s, plan):
     return next((w for w in plan if w["from"] <= s <= w["to"]), None)
 
 
-def features(starts, at, eq=None, nb=(0, 0)):
+def features(starts, at, eq=None, nb=(0, 0), pre=()):
     """Признаки строки «канал × срез». starts — начала отказов канала без эпизодов
     ППР (datetime с поясом); nb — (отказов соседей на том же пикете, на том же
     коллекторе) за 7 сут до at, без самого канала; eq — синтетический паспорт
     {"in_service": date, "life": лет, "points": [{"kind", "readings": [(date, …)]}]}
-    или None. Отдаёт {имя: число} и служебные поля для текста причин."""
+    или None; pre — моменты синтетических предвестников канала (datetime).
+    Отдаёт {имя: число} и служебные поля для текста причин."""
     past = [s for s in starts if s <= at]
     last = max(past, default=None)
     days = min((at - last).total_seconds() / 86400, CAP) if last else CAP
@@ -92,6 +104,7 @@ def features(starts, at, eq=None, nb=(0, 0)):
         return sum(1 for s in past if (at - s).total_seconds() < d * 86400)
 
     x = {
+        "fresh": float(days * 24 < FRESH_H),
         "r1": math.exp(-days),
         "r30": math.exp(-days / 30),
         "n7": math.log1p(n(7)),
@@ -117,6 +130,10 @@ def features(starts, at, eq=None, nb=(0, 0)):
             x["check"] = min(since / iv, 3.0)
             x["overdue"] = float(since > iv)
             x["_check"] = (p["kind"], since, iv, bool(done))
+        ages = [(at - t).total_seconds() / 86400 for t in pre if t <= at]
+        for k, (lo, hi) in enumerate(PRE_BINS):
+            x[f"pre{k}"] = math.log1p(sum(1 for a in ages if lo <= a < hi))
+        x["_pre"] = min(ages, default=None)
     return x
 
 
@@ -131,8 +148,23 @@ def model():
 
 
 def _logit(m, x, kind):
+    gate = m.get("gate")
+    if gate and x.get(gate):
+        return m["intercept"] + m["coef"][gate]
     z = m["intercept"] + m["kind"].get(kind or "", 0.0)
     return z + sum(w * x[k] for k, w in m["coef"].items())
+
+
+RANK = {"normal": 0, "watch": 1, "high": 2}
+GROUPS = {
+    "recent": ["fresh", "r1", "r30"],
+    "count": ["n7", "n30", "n90"],
+    "picket": ["nb_picket"],
+    "coll": ["nb_coll"],
+    "life": ["life"],
+    "check": ["check", "overdue"],
+    "pre": ["pre0", "pre1", "pre2", "pre3"],
+}
 
 
 def level(p, m):
@@ -140,70 +172,77 @@ def level(p, m):
     return "high" if p >= t["high"] else "watch" if p >= t["watch"] else "normal"
 
 
-def _reasons(m, x, kind):
-    """Причины — вклад признаков. Вклад группы в логит — Σ w·(x − x₀), где x₀ —
-    канал без отказов и с новым паспортом. Разницу вероятностей p − p₀ делим между
-    группами с положительным вкладом пропорционально вкладу: сумма весов причин
-    равна тому, на сколько балл выше, чем у здорового канала того же вида."""
-    base = m["baseline"]
+def _text(g, x, pf_days):
+    if g == "recent":
+        return (
+            f"последний отказ канала {x['_days']:.0f} сут назад "
+            f"({x['_last'].astimezone(MSK):%d.%m.%Y})"
+            if x["_days"] >= 1
+            else f"канал отказал {x['_days'] * 24:.0f} ч назад "
+            f"({x['_last'].astimezone(MSK):%d.%m.%Y %H:%M})"
+        )
+    if g == "count":
+        return "отказов дольше 1 ч за 7 / 30 / 90 сут: {} / {} / {}".format(*x["_n"])
+    if g == "picket":
+        return f"отказов соседних датчиков на том же пикете за 7 сут: {x['_nb'][0]}"
+    if g == "coll":
+        return f"отказов других датчиков на том же коллекторе за 7 сут: {x['_nb'][1]}"
+    if g == "life":
+        age, life = x["_life"]
+        return f"выработано {age / life:.0%} срока службы ({age:.1f} из {life} лет)"
+    if g == "pre":
+        return (
+            f"предупреждение прибора {x['_pre'] * 24:.0f} ч назад — симуляция: "
+            f"предвестник за {pf_days:g} сут до отказа"
+        )
+    what, since, iv, done = x["_check"]
+    what = "поверки" if what == "calib" else "ТО"
+    over = f", просрочено на {since - iv} сут" if since > iv else ""
+    return (
+        f"с последней {what} {since} сут при интервале {iv}{over}"
+        if done
+        else f"{what} не было ни разу"
+    )
+
+
+def _part(m, x, kind, scale=1.0, pf_days=0):
+    """Вероятность одной модели и её причины. Вклад группы в логит — Σ w·x (x₀ = 0:
+    канал без отказов, с новым паспортом и без предвестника). Разницу p − p₀ делим
+    между группами с положительным вкладом пропорционально вкладу и умножаем на
+    scale: сумма весов — насколько вероятность выше, чем у здорового канала того же
+    вида."""
     z = _logit(m, x, kind)
-    z0 = _logit(m, {**x, **base}, kind)
+    z0 = _logit(m, {k: 0.0 for k in m["coef"]}, kind)
     p, p0 = 1 / (1 + math.exp(-z)), 1 / (1 + math.exp(-z0))
-    groups = {
-        "recent": ["r1", "r30"],
-        "count": ["n7", "n30", "n90"],
-        "picket": ["nb_picket"],
-        "coll": ["nb_coll"],
-        "life": ["life"],
-        "check": ["check", "overdue"],
-    }
-    вклад = {
-        g: sum(m["coef"][k] * (x[k] - base[k]) for k in ks if k in m["coef"])
-        for g, ks in groups.items()
-    }
+    if m.get("gate") and x.get(m["gate"]):
+        вклад = {"recent": 1.0}  # свежий отказ: остальные признаки отключены
+    else:
+        вклад = {
+            g: sum(m["coef"][k] * x[k] for k in ks if k in m["coef"])
+            for g, ks in GROUPS.items()
+            if any(k in m["coef"] for k in ks)
+        }
     плюс = sum(v for v in вклад.values() if v > 0)
     out = []
     for g, v in вклад.items():
         if v <= 0 or p <= p0:
             continue
-        w = round((p - p0) * v / плюс, 6)
-        if w <= 0:
-            continue
-        if g == "recent":
-            text = (
-                f"последний отказ канала {x['_days']:.0f} сут назад "
-                f"({x['_last'].astimezone(MSK):%d.%m.%Y})"
-            )
-        elif g == "count":
-            text = "отказов дольше 1 ч за 7 / 30 / 90 сут: {} / {} / {}".format(*x["_n"])
-        elif g == "picket":
-            text = f"отказов соседних датчиков на том же пикете за 7 сут: {x['_nb'][0]}"
-        elif g == "coll":
-            text = f"отказов других датчиков на том же коллекторе за 7 сут: {x['_nb'][1]}"
-        elif g == "life":
-            age, life = x["_life"]
-            text = f"выработано {age / life:.0%} срока службы ({age:.1f} из {life} лет)"
-        else:
-            what, since, iv, done = x["_check"]
-            what = "поверки" if what == "calib" else "ТО"
-            over = f", просрочено на {since - iv} сут" if since > iv else ""
-            text = (
-                f"с последней {what} {since} сут при интервале {iv}{over}"
-                if done
-                else f"{what} не было ни разу"
-            )
-        kind_ = "synthetic" if g in ("life", "check") else "real"
-        out.append({"text": text, "weight": w, "kind": kind_})
-    return round(p, 6), out
+        w = round(scale * (p - p0) * v / плюс, 6)
+        if w > 0:
+            kind_ = "synthetic" if g in ("life", "check", "pre") else "real"
+            out.append({"text": _text(g, x, pf_days), "weight": w, "kind": kind_})
+    return p, out
 
 
-def score(starts, eq, at, plan=(), nb=(0, 0), kind=None, mode=None):
-    """Вероятность, уровень и причины одного канала. mode — "real" или
-    "synthetic"; по умолчанию synthetic, если есть паспорт. starts — все начала
-    отказов канала: эпизоды в окне ППР (plan) выбрасываются здесь и дают причину
-    plan с весом 0. nb — отказы соседей за 7 сут (уже без ППР)."""
+def score(starts, eq, at, plan=(), nb=(0, 0), kind=None, mode=None, pre=()):
+    """Вероятность, уровень и причины одного канала. mode — "real" (модель журнала)
+    или "synthetic": 1 − (1 − p_real)(1 − p_sim), где p_sim — модель симулированных
+    отказов по паспорту и синтетическому предвестнику pre; уровень — выше из двух.
+    По умолчанию synthetic, если есть паспорт. starts — все начала отказов канала:
+    эпизоды в окне ППР (plan) выбрасываются здесь и дают причину plan с весом 0.
+    nb — отказы соседей за 7 сут (уже без ППР)."""
     mode = mode or ("synthetic" if eq else "real")
-    m = model()["modes"][mode]
+    M = model()["modes"]
     faults, plan_reasons = [], []
     for s in starts:
         if s > at:
@@ -213,21 +252,26 @@ def score(starts, eq, at, plan=(), nb=(0, 0), kind=None, mode=None):
             faults.append(s)
         elif not any(r["text"] == w["text"] for r in plan_reasons):
             plan_reasons.append({"text": w["text"], "weight": 0.0, "kind": "plan"})
-    x = features(faults, at, eq if mode == "synthetic" else None, nb)
-    if mode == "synthetic" and not eq:
-        x.update({"life": 0.0, "check": 0.0, "overdue": 0.0})
-    p, reasons = _reasons(m, x, kind)
+    x = features(faults, at, eq if mode == "synthetic" else None, nb, pre)
+    p, reasons = _part(M["real"], x, kind)
+    lvl = level(p, M["real"])
+    if mode == "synthetic" and eq:
+        ms = M["sim"]
+        ps, rs = _part(ms, x, kind, scale=1 - p, pf_days=ms["pf_days"])
+        p = 1 - (1 - p) * (1 - ps)
+        reasons += rs
+        lvl = max(lvl, level(ps, ms), key=RANK.get)
     reasons = sorted(reasons + plan_reasons, key=lambda r: -r["weight"])
-    return {"score": p, "level": level(p, m), "reasons": reasons}
+    return {"score": round(p, 6), "level": lvl, "reasons": reasons}
 
 
-def split(starts, eq, at, plan=(), nb=(0, 0), kind=None):
-    """Строка pred.sensor_risk: score_real — вероятность модели без синтетики,
-    score_synth — насколько модель «с синтетикой» дала больше (может быть
-    отрицательной, миграция 061); reasons — причины модели с синтетикой,
+def split(starts, eq, at, plan=(), nb=(0, 0), kind=None, pre=()):
+    """Строка pred.sensor_risk: score_real — вероятность модели журнала,
+    score_synth — сколько добавила модель паспорта и предвестника (сейчас ≥ 0,
+    CHECK снят миграцией 061); reasons — причины режима «с синтетикой»,
     reasons_real — без неё."""
     real = score(starts, None, at, plan, nb, kind, "real")
-    full = score(starts, eq, at, plan, nb, kind, "synthetic")
+    full = score(starts, eq, at, plan, nb, kind, "synthetic", pre)
     return {
         "score_real": real["score"],
         "score_synth": round(full["score"] - real["score"], 6),
@@ -240,9 +284,9 @@ def split(starts, eq, at, plan=(), nb=(0, 0), kind=None):
 
 def _selfcheck():
     M = model()
-    assert set(M["modes"]) == {"real", "synthetic"}, M.keys()
+    assert set(M["modes"]) == {"real", "sim"}, M.keys()
     assert set(M["modes"]["real"]["coef"]) == set(REAL)
-    assert set(M["modes"]["synthetic"]["coef"]) == set(REAL + SYNTH)
+    assert set(M["modes"]["sim"]["coef"]) == set(SIM)
     at = datetime(2026, 6, 22, 21, tzinfo=MSK)
     eq = {
         "in_service": date(2015, 3, 1),
@@ -323,6 +367,17 @@ def _selfcheck():
     assert round(sp["score_real"] + sp["score_synth"], 6) == full["score"], (sp, full)
     assert sp["level_full"] == full["level"] and sp["reasons"] == full["reasons"]
     assert not any(x["kind"] == "synthetic" for x in sp["reasons_real"])
+    # предвестник полуторасуточной давности поднимает режим с синтетикой и даёт
+    # причину synthetic; режим без синтетики его не видит
+    pre = [at - timedelta(hours=36)]
+    сп = split([], eq, at, kind=gas, pre=pre)
+    без = split([], eq, at, kind=gas)
+    assert сп["score_synth"] > без["score_synth"] and сп["score_real"] == без["score_real"]
+    assert any(
+        r["kind"] == "synthetic" and "предупреждение прибора 36 ч" in r["text"]
+        for r in сп["reasons"]
+    ), сп["reasons"]
+    assert сп["reasons_real"] == без["reasons_real"]
     print("sensor_risk selfcheck ok")
 
 

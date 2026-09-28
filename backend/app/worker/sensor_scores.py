@@ -27,7 +27,7 @@ import time
 from collections import Counter
 from datetime import timedelta
 
-from app.domain import sensor_risk
+from app.domain import failure_sim, sensor_risk
 
 БЛОКИРОВКА = 48219
 # Сколько срезов держим: сутки до текущего. Всё новее текущего удаляем — при
@@ -38,9 +38,10 @@ from app.domain import sensor_risk
 
 КАНАЛЫ = """
 SELECT c.channel_id, c.object_id, c.sensor_kind, c.collector, c.picket,
-       e.id AS eq_id, e.in_service_from, e.service_life_years
+       e.id AS eq_id, e.in_service_from, e.service_life_years, k.code AS object_kind
   FROM smvu.channel c
   LEFT JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $1
+  LEFT JOIN ref.object_kind k ON k.id = e.object_kind_id
  WHERE c.is_active AND NOT c.is_stub
 """
 # Последняя проверка каждой точки измерения не позже даты среза: score() берёт
@@ -55,6 +56,38 @@ SELECT p.equipment_id, ch.code,
   LEFT JOIN asset.measurement ms ON ms.point_id = p.id
  GROUP BY p.id, p.equipment_id, ch.code
 """
+# Все даты проверок синтетического паспорта: генератору симуляции нужна просрочка
+# на каждые сутки окна предвестника, а не только последняя проверка.
+ДАТЫ_ПРОВЕРОК = """
+SELECT p.equipment_id, array_agg(timezone('Europe/Moscow', ms.measured_at)::date
+                                 ORDER BY ms.measured_at) AS dates
+  FROM asset.measuring_point p
+  JOIN asset.equipment e ON e.id = p.equipment_id AND e.source_system = $1
+  JOIN asset.measurement ms ON ms.point_id = p.id
+ GROUP BY p.equipment_id
+"""
+# Предвестник смотрим на 5 сут назад: столько покрывают признаки pre0…pre3.
+ОКНО_ПРЕДВЕСТНИКА = 5
+
+
+def предвестники(channel_id, eq, object_kind, даты, день, at):
+    """Синтетические «предупреждения прибора» канала за 5 сут до среза — тот же
+    генератор app.domain.failure_sim, на котором училась модель; реальные отказы
+    он не читает. Нет паспорта или вида — предвестников нет."""
+    if not eq or object_kind not in failure_sim.PARAMS:
+        return []
+    beta, eta, iv, mult = failure_sim.params_of(
+        {"object_kind": object_kind, "life": eq["life"]}
+    )
+    m = sensor_risk.model()["modes"]["sim"]
+    _, pre = failure_sim.channel(
+        channel_id, eq["in_service"], beta, eta,
+        день - timedelta(days=ОКНО_ПРЕДВЕСТНИКА), день, даты, iv, mult,
+        pf_days=m["pf_days"], false_ratio=m["false_ratio"],
+    )
+    return [t for t, _ in pre if t <= at]
+
+
 # Отказы всех каналов, а не только активных: соседей на пикете и коллекторе
 # модель училась считать по всем отказам группы (docs/proof/2026-09-28-sensor-model).
 ОТКАЗЫ = """
@@ -78,6 +111,7 @@ async def баллы(conn, at) -> list[tuple]:
                 "readings": [(r["last"],)] if r["last"] else [],
             }
         )
+    даты = dict(await conn.fetch(ДАТЫ_ПРОВЕРОК, sensor_risk.SRC))
     окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
     starts: dict[int, list] = {}
     # Соседи: отказы за 7 сут до среза по коллектору и по паре (коллектор, пикет),
@@ -117,6 +151,9 @@ async def баллы(conn, at) -> list[tuple]:
             окна.get((c["object_id"], c["sensor_kind"]), ()),
             nb,
             c["sensor_kind"],
+            предвестники(
+                c["channel_id"], eq, c["object_kind"], даты.get(c["eq_id"], []), день, at
+            ),
         )
         строки.append(
             (

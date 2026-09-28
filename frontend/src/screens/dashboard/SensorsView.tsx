@@ -7,6 +7,7 @@ import { errorMessage } from '../../lib/format'
 import { свежо } from '../../lib/poll'
 import {
   главнаяПричина,
+  процент,
   sensorRiskUrl,
   сПараметром,
   страница,
@@ -200,7 +201,7 @@ export function SensorTable({
                       <td class="px-2 py-1.5">
                         <SensorBadge level={s.level} />
                       </td>
-                      <td class="px-2 py-2 num">{s.score.toFixed(2)}</td>
+                      <td class="px-2 py-2 num">{процент(s.score)}</td>
                       <td class="px-2 py-2">
                         {s.name}{' '}
                         <span class="num" style="color:var(--text-muted)">

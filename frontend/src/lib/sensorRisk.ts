@@ -65,6 +65,20 @@ export interface SensorSummary {
   top_collectors: { collector_id: number; name: string; high: number }[]
 }
 
+// Балл датчика — вероятность отказа (SL.10, MOS-263), обычно доли процента: экран
+// пишет её в процентах с одним знаком, 0,0073 → «0,7 %». Меньше 0,05 % — «< 0,1 %»,
+// чтобы ненулевой риск не выглядел нулём; ровно 0 — «0 %».
+const процентФормат = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+})
+export const процент = (p: number): string =>
+  p <= 0 ? '0 %' : p < 0.0005 ? '< 0,1 %' : `${процентФормат.format(p * 100)} %`
+
+// Длина полоски причины — её доля в балле датчика, не больше полной ширины.
+export const доляПричины = (weight: number, score: number): number =>
+  score > 0 ? Math.min(Math.max(weight / score, 0), 1) : 0
+
 // «расчёт на 30.06.2026 23:59» или «расчёта ещё не было», если срезов нет.
 export const срезРасчёта = (as_of: string | null, fmt: (v: string) => string): string =>
   as_of ? `расчёт на ${fmt(as_of)}` : 'расчёта ещё не было'

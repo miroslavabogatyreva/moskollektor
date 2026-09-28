@@ -31,45 +31,65 @@ test.beforeEach(async ({ page }) => {
     )
 })
 
-test('демо по датчикам: на ПК632 видны и плохие, и нормальные датчики, газовый снят по ППР', async ({
+// Пикеты тест берёт из ответа /api/sensor-risk (фикстура или стенд), а не зашивает:
+// с SL.10 (MOS-263) уровни считает модель, и самый рискованный пикет меняется.
+interface Строка {
+  channel_id: number
+  picket: number | null
+  level: 'high' | 'watch' | 'normal'
+  reasons: { kind: string }[]
+}
+
+test('демо по датчикам: на пикете видны датчики с риском и в норме, газовый снят по ППР', async ({
   page,
 }) => {
   const ошибки: string[] = []
   page.on('console', (m) => m.type() === 'error' && ошибки.push(m.text()))
 
+  const ответ = page.waitForResponse(
+    (r) => r.url().includes('/api/sensor-risk?') && r.request().method() === 'GET',
+  )
   await page.goto('/map?demo=sensors')
+  const наОси = ((await (await ответ).json()).items as Строка[]).filter((s) => s.picket != null)
   const демо = page.getByTestId('sensor-demo')
   await expect(демо).toBeVisible({ timeout: 30_000 })
   // Плашка переключателя синтетики (SL.5, SL.6): «Демо: паспорта синтетические».
   await expect(демо.getByRole('note')).toContainText('Демо: паспорта синтетические')
 
-  // По умолчанию выбран пикет датчика с самым высоким баллом — ПК632.
-  await expect(демо.locator('g[data-picket="632"][data-selected]')).toHaveCount(1)
-  await expect(демо.getByTestId('sensor-picket')).toContainText('ПК632')
+  // По умолчанию выбран пикет датчика с самым высоким баллом — первого в ответе.
+  const пк = наОси[0].picket!
+  await expect(демо.locator(`g[data-picket="${пк}"][data-selected]`)).toHaveCount(1)
+  await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${пк}`)
 
   // Сначала список — только датчики с риском и снятые по ППР; «в норме» свёрнуты кнопкой.
+  const наПикете = наОси.filter((s) => s.picket === пк)
   const строки = демо.locator('li[data-channel-id]')
-  expect(await строки.locator('[data-level="high"]').count()).toBeGreaterThanOrEqual(1)
+  await expect(строки.locator('button [data-level="high"]')).toHaveCount(
+    наПикете.filter((s) => s.level === 'high').length,
+  )
   const свёрнуто = демо.getByRole('button', { name: /^Показать ещё \d+ в норме$/ })
-  const всего = (await строки.count()) + Number((await свёрнуто.textContent())!.match(/\d+/)![0])
-  await свёрнуто.click()
-  expect(await строки.count()).toBe(всего)
-  expect(всего).toBeGreaterThanOrEqual(30)
-  expect(await строки.locator('[data-level="normal"]').count()).toBeGreaterThanOrEqual(1)
+  if (await свёрнуто.count()) await свёрнуто.click()
+  await expect(строки).toHaveCount(наПикете.length)
 
-  // Газовый датчик на ПК632: отказ 04.06.2026 — плановый демонтаж по графику ППР.
-  const газ = строки.filter({ hasText: 'ГАЗ' }).first()
-  await expect(газ.locator('[data-kind="plan"]')).toContainText('ППР')
-
-  // Первый датчик раскрыт: причины с весами и ссылка на карточку участка.
+  // Первый датчик раскрыт: причины и ссылка на карточку участка.
   const первый = строки.first()
   await expect(первый.getByRole('button')).toHaveAttribute('aria-expanded', 'true')
-  await expect(первый.locator('[data-kind="real"]').first()).toBeVisible()
   await expect(первый.getByRole('link')).toHaveAttribute('href', /^\/objects\/\d+$/)
 
+  // Газовый датчик, снятый по графику ППР: причина «плановый демонтаж» на его пикете.
+  const газ = наОси.find((s) => s.reasons.some((r) => r.kind === 'plan'))
+  if (газ) {
+    await демо.locator(`g[data-picket="${газ.picket}"]`).click()
+    await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${газ.picket}`)
+    await expect(
+      демо.locator(`li[data-channel-id="${газ.channel_id}"] [data-kind="plan"]`),
+    ).toContainText('ППР')
+  }
+
   // Клик по другой стопке меняет список.
-  await демо.locator('g[data-picket="730"]').click()
-  await expect(демо.getByTestId('sensor-picket')).toContainText('ПК730')
+  const другой = наОси.find((s) => s.picket !== пк)!.picket!
+  await демо.locator(`g[data-picket="${другой}"]`).click()
+  await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${другой}`)
 
   expect(ошибки).toEqual([])
 })

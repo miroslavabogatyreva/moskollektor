@@ -1,33 +1,44 @@
 """Модель до датчика: обучение, выбор горизонта и порога, замер. SL.10 (MOS-263).
 
-Повтор из корня репозитория (около 10 минут на 4 ядрах):
+Повтор из корня репозитория (около 15 минут на 4 ядрах; симуляция считается внутри):
 
-    python3 code/failure_sim.py --data docs/proof/2026-09-28-sensor-model/data \\
-        --out docs/proof/2026-09-28-sensor-model/sim_failures.csv
     uv run --no-project --with numpy==2.3.3 --with pandas==2.3.3 \\
         --with scikit-learn==1.7.2 \\
         python3 docs/proof/2026-09-28-sensor-model/train_sensor_model.py
 
-Порядок (дополнение 2 к MOS-263):
-  1. Строка — «канал × сутки», срез 21:00 МСК, 11 485 активных каналов.
-     Метка горизонта N — отказ канала в (срез, срез + N ч], N ∈ {12, 24, 36, 48}.
-  2. Учим на срезах 2022-04-01…2025-12-31, смотрим Precision/Recall на срезах
-     2026-01-01…2026-03-31 (окно выбора). Там же выбираем горизонт, порог уровня
-     high (лучший F1) и watch (вдесятеро больше предупреждений, чем у high), и N суток у правила недавности.
-  3. Один раз переучиваем выбранный горизонт на 2022-04-01…2026-03-31 и считаем
-     числа на 2026-04-01…2026-06-30. По этому окну ничего не выбираем.
-  Режима два, архитектура одна (логистическая регрессия): real — реальные признаки
-  и реальные отказы; synthetic — плюс синтетический паспорт, к отказам добавлены
-  симулированные code/failure_sim.py («симулированный мир»).
-  Метрики — evaluate_alerts() из code/predictive_metrics.py, объект — канал,
-  окно зачёта [0, N] ч.
+Моменты решения (доработка 28.09 вечер, п. 1). Как у модели коллектора v3
+(ml-model/src/ml/moments.py), моментов два вида:
+  tick  — 21:00 МСК каждых суток;
+  rearm — через 1 ч после начала реального отказа канала: раньше система не знает,
+          что эпизод станет отказом (отказ — эпизод дольше часа);
+  rearm соседа — через 1 ч после отказа другого канала того же пикета; берётся,
+          только если на окне выбора с ним лучше (решает скрипт, см. run.json).
+Выдача — «одно открытое предупреждение», как у v3: предупреждение по каналу открыто
+H часов или до первого отказа канала, и пока оно открыто, новое не выдаётся (one_open()).
+Свежий отказ (fresh — начался меньше 2 ч назад) у модели журнала отключает остальные
+признаки: на моментах rearm модель повторяет правило «канал отказал час назад».
+Признаки считаются на момент решения. Метка горизонта N — отказ канала в (t, t + N ч].
 
-Пишет: backend/app/domain/sensor_model.json (коэффициенты выбранного варианта)
-и docs/proof/2026-09-28-sensor-model/run.json (все числа для metrics.md).
+Модели две, обе — логистическая регрессия:
+  real — признаки журнала, реальные отказы; это режим «без синтетики»;
+  sim  — признаки синтетического паспорта и синтетического предвестника, метка —
+         только симулированные отказы (app.domain.failure_sim), моменты — tick и
+         через 1 ч после предвестника. Метрики — отдельно, на симулированных отказах.
+Режим «с синтетикой» на экране: 1 − (1 − p_real)(1 − p_sim).
+
+Порядок (дополнение 2 к MOS-263): учим на 2022-04-01…2025-12-31, выбираем горизонт
+(12/24/36/48 ч), порог high (лучший F1) и watch (вдесятеро больше предупреждений)
+на 2026-01-01…2026-03-31, один раз переучиваем выбранное на 2022-04-01…2026-03-31
+и считаем числа на 2026-04-01…2026-06-30. Метрики — evaluate_alerts() из
+code/predictive_metrics.py, объект — канал, окно зачёта [0, N] ч.
+
+Пишет backend/app/domain/sensor_model.json, docs/proof/2026-09-28-sensor-model/run.json,
+sim_failures.csv и sim_failures_precursors.csv.
 """
 
 import bisect
 import json
+import math
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -41,27 +52,29 @@ ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 sys.path[:0] = [str(ROOT / "code"), str(ROOT / "backend")]
-from app.domain import sensor_risk
+from app.domain import failure_sim, sensor_risk
 from predictive_metrics import evaluate_alerts
 
 MSK = timezone(timedelta(hours=3))
 HORIZONS = [12, 24, 36, 48]
 DAY0, DAYN = date(2022, 4, 1), date(2026, 6, 30)
-TRAIN = (date(2022, 4, 1), date(2026, 1, 1))  # срезы до этой даты, метка внутри
+TRAIN = (date(2022, 4, 1), date(2026, 1, 1))  # [начало, конец) окна
 SELECT = (date(2026, 1, 1), date(2026, 4, 1))
 REFIT = (date(2022, 4, 1), date(2026, 4, 1))
 TEST = (date(2026, 4, 1), date(2026, 7, 1))
-NEG_SHARE = 0.1  # доля отрицательных строк в обучении, вес 1/доля
-RECENCY = [1, 2, 3, 7, 14, 30]
+NEG_SHARE = 0.1  # доля отрицательных строк-tick в обучении, вес 1/доля
+CONFIRM = 3600  # rearm через час после начала отказа
+SENS = [(1.0, 1.0), (4.0, 1.0), (2.0, 0.5), (2.0, 3.0)]  # чувствительность (P-F, ложных)
 T0 = time.monotonic()
+rng = np.random.default_rng(263)
 
 
 def log(*a):
     print(f"[{time.monotonic() - T0:6.0f} c]", *a, flush=True)
 
 
-def sec(ts):
-    return ts.astype("int64") // 10**9
+def ts(d, h=0):
+    return int(datetime(d.year, d.month, d.day, h, tzinfo=MSK).timestamp())
 
 
 # ------------------------------------------------------------------ данные
@@ -70,245 +83,196 @@ act = ch[(ch.is_active == "t") & (ch.is_stub == "f")].reset_index(drop=True)
 C = len(act)
 assert C == 11_485, C
 cid = act.channel_id.to_numpy()
-pos = {c: i for i, c in enumerate(cid)}
+pos = {int(c): i for i, c in enumerate(cid)}
 kinds = sorted(act.sensor_kind.dropna().unique())
+KIND = np.array([kinds.index(k) for k in act.sensor_kind])
 
 f = pd.read_csv(DATA / "failures.csv")
 f["t"] = pd.to_datetime(f.started_at, utc=True)
 f = f[f.t >= pd.Timestamp("2022-04-01", tz=MSK)]
-# окна ППР match = sure: эпизод газового датчика узла в окне — не отказ
+f = f.merge(ch[["channel_id", "object_id", "sensor_kind", "collector", "picket", "is_active", "is_stub"]],
+            on="channel_id", how="left")
 w = pd.read_csv(DATA / "ppr_windows.csv")
 w = w[w.match == "sure"]
-f = f.merge(
-    ch[["channel_id", "object_id", "sensor_kind", "collector", "picket"]],
-    on="channel_id",
-    how="left",
-)
 ppr = np.zeros(len(f), bool)
 for r in w.itertuples():
     lo = pd.Timestamp(r.dismantle_from, tz=MSK)
-    hi = pd.Timestamp(r.return_to, tz=MSK) + pd.Timedelta(
-        hours=23, minutes=59, seconds=59
-    )
-    ppr |= (
-        (f.object_id == r.object_id)
-        & (f.sensor_kind == r.sensor_kind)
-        & (f.t >= lo)
-        & (f.t <= hi)
-    ).to_numpy()
+    hi = pd.Timestamp(r.return_to, tz=MSK) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+    ppr |= ((f.object_id == r.object_id) & (f.sensor_kind == r.sensor_kind) & (f.t >= lo) & (f.t <= hi)).to_numpy()
 log(f"реальных отказов с 2022-04-01: {len(f)}, из них в окнах ППР sure: {ppr.sum()}")
-f = f[~ppr]
-f["s"] = sec(f.t)
+f = f[~ppr].copy()
+f["s"] = f.t.astype("int64") // 10**9
+inactive = f[~f.channel_id.isin(cid)]
+log(f"отказов на неактивных каналах и заглушках (в метрики не входят): {len(inactive)}")
 
-sim = pd.read_csv(HERE / "sim_failures.csv")
-sim["s"] = sec(pd.to_datetime(sim.started_at, utc=True))
-log(f"симулированных отказов: {len(sim)}")
-
-# сетка срезов: сутки d, срез d 21:00 МСК
-days = pd.date_range(DAY0, DAYN, freq="D")
-D = len(days)
-cuts = np.array(
-    [int(datetime(d.year, d.month, d.day, 21, tzinfo=MSK).timestamp()) for d in days]
-)
-dates = np.array([d.date() for d in days])
+EMPTY = np.array([], dtype="int64")
 
 
-def didx(d):
-    return int(np.searchsorted(dates, d))
-
-
-# ------------------------------------------------------------------ признаки
-def by_channel(df):
+def by_channel(pairs):
     g = {}
-    for c, s in zip(df.channel_id.to_numpy(), df.s.to_numpy()):
-        g.setdefault(c, []).append(s)
-    return {c: np.sort(np.array(v)) for c, v in g.items()}
+    for c, s in pairs:
+        if int(c) in pos:
+            g.setdefault(pos[int(c)], []).append(int(s))
+    return {i: np.sort(np.array(v, dtype="int64")) for i, v in g.items()}
 
 
-F = by_channel(f)
-SIM = by_channel(sim)
+F = by_channel(zip(f.channel_id, f.s))  # реальные отказы активных каналов, по индексу
 
 
-def window_count(arr, lo_excl, hi_incl):
-    return np.searchsorted(arr, hi_incl, "right") - np.searchsorted(
-        arr, lo_excl, "right"
-    )
-
-
-def group_count(keycol):
-    """Отказы группы (коллектор или пикет) за 7 сут до среза, по всем каналам группы."""
+def groups(keys_of):
+    """Отказы по группе (коллектор или пикет) — по всем каналам, и активным, и нет."""
     g = {}
-    ff = f.dropna(subset=["collector"])
-    if keycol == "picket":
-        ff = ff.dropna(subset=["picket"])
-        keys = list(zip(ff.collector, ff.picket.astype(int)))
-    else:
-        keys = list(ff.collector)
-    for k, s in zip(keys, ff.s.to_numpy()):
-        g.setdefault(k, []).append(s)
+    for k, s in zip(keys_of, f.s.to_numpy()):
+        if k is not None:
+            g.setdefault(k, []).append(int(s))
     return {k: np.sort(np.array(v)) for k, v in g.items()}
 
 
-GC, GP = group_count("collector"), group_count("picket")
-EMPTY = np.array([], dtype="int64")
+GC = groups([c if pd.notna(c) else None for c in f.collector])
+GP = groups([(c, int(p)) if pd.notna(c) and pd.notna(p) else None for c, p in zip(f.collector, f.picket)])
+COL = [c if pd.notna(c) else None for c in act.collector]
+PK = [(c, int(p)) if pd.notna(c) and pd.notna(p) else None for c, p in zip(act.collector, act.picket)]
 
-X = np.zeros(
-    (C, D, 10), dtype="float32"
-)  # r1 r30 n7 n30 n90 nb_pk nb_col life check overdue
+days = [DAY0 + timedelta(days=k) for k in range((DAYN - DAY0).days + 1)]
+TICKS = np.array([ts(d, 21) for d in days], dtype="int64")
+EPOCH_ORD = date(1970, 1, 1).toordinal()
+
 pp = pd.read_csv(DATA / "passports.csv").set_index("channel_id")
 chk = pd.read_csv(DATA / "checks.csv")
 chk["d"] = chk.measured_at.str[:10].map(date.fromisoformat)
-CHK = {
-    c: (("motohours" if g.is_counter.iloc[0] == "t" else "calib"), sorted(g.d))
-    for c, g in chk.groupby("channel_id")
-}
-day_ord = np.array([d.toordinal() for d in dates])
-
-for i, c in enumerate(cid):
-    a = F.get(c, EMPTY)
-    idx = np.searchsorted(a, cuts, "right")
-    last = np.where(idx > 0, a[np.maximum(idx - 1, 0)] if len(a) else 0, 0)
-    dd = np.where(idx > 0, np.minimum((cuts - last) / 86400, 365), 365)
-    n7 = idx - np.searchsorted(a, cuts - 7 * 86400, "right")
-    n30 = idx - np.searchsorted(a, cuts - 30 * 86400, "right")
-    n90 = idx - np.searchsorted(a, cuts - 90 * 86400, "right")
-    col = act.collector.iloc[i]
-    pk = act.picket.iloc[i]
-    gc = (
-        window_count(GC.get(col, EMPTY), cuts - 7 * 86400, cuts) - n7
-        if pd.notna(col)
-        else 0 * n7
-    )
-    gp = (
-        window_count(GP.get((col, int(pk)), EMPTY), cuts - 7 * 86400, cuts) - n7
-        if pd.notna(col) and pd.notna(pk)
-        else 0 * n7
-    )
-    X[i, :, 0] = np.exp(-dd)
-    X[i, :, 1] = np.exp(-dd / 30)
-    X[i, :, 2] = np.log1p(n7)
-    X[i, :, 3] = np.log1p(n30)
-    X[i, :, 4] = np.log1p(n90)
-    X[i, :, 5] = np.log1p(gp)
-    X[i, :, 6] = np.log1p(gc)
-    p = pp.loc[c]
-    age = np.maximum(day_ord - date.fromisoformat(p.in_service_from).toordinal(), 0)
-    X[i, :, 7] = np.minimum(age / 365.25 / p.service_life_years, 2.0)
-    if c in CHK:
-        kind, ds = CHK[c]
-        iv = sensor_risk.INTERVAL[kind]
-        o = np.array([d.toordinal() for d in ds])
-        j = np.searchsorted(o, day_ord, "right")
-        since = np.where(j > 0, day_ord - o[np.maximum(j - 1, 0)], age)
-        X[i, :, 8] = np.minimum(since / iv, 3.0)
-        X[i, :, 9] = since > iv
-KIND = np.array([kinds.index(k) if isinstance(k, str) else -1 for k in act.sensor_kind])
-log("признаки готовы", X.shape)
+CHK = {int(c): (("motohours" if g.is_counter.iloc[0] == "t" else "calib"), sorted(g.d)) for c, g in chk.groupby("channel_id")}
+passports = {int(c): {"object_kind": r.object_kind, "in_service": date.fromisoformat(r.in_service_from),
+                      "life": int(r.service_life_years)} for c, r in pp.iterrows()}
+checks_by = {c: v[1] for c, v in CHK.items()}
 
 
-# сверка с единственной реализацией тика: sensor_risk.features() на случайных строках
-def eq_of(c):
-    p = pp.loc[c]
-    e = {
-        "in_service": date.fromisoformat(p.in_service_from),
-        "life": int(p.service_life_years),
-        "points": [],
-    }
-    if c in CHK:
-        e["points"] = [{"kind": CHK[c][0], "readings": [(d,) for d in CHK[c][1]]}]
-    return e
+# ------------------------------------------------------------------ симуляция
+def simulate(pf, ratio):
+    fails, pre = failure_sim.simulate(passports, checks_by, DAY0, DAYN, pf_days=pf, false_ratio=ratio)
+    S = by_channel((c, t.timestamp()) for c, t in fails)
+    P = by_channel((c, t.timestamp()) for c, t, _ in pre)
+    return fails, pre, S, P
 
 
-rng = np.random.default_rng(263)
-hot = [pos[c] for c in F if c in pos]
-for i, j in list(zip(rng.choice(hot, 1500), rng.integers(0, D, 1500))) + list(
-    zip(rng.integers(0, C, 500), rng.integers(0, D, 500))
-):
-    c = cid[i]
-    at = datetime.fromtimestamp(int(cuts[j]), MSK)
-    starts = [datetime.fromtimestamp(int(s), MSK) for s in F.get(c, EMPTY)]
-    col, pk = act.collector.iloc[i], act.picket.iloc[i]
-    n7 = sum(1 for s in F.get(c, EMPTY) if 0 <= cuts[j] - s < 7 * 86400)
-    nb = (
-        int(np.expm1(X[i, j, 5]).round()),
-        int(np.expm1(X[i, j, 6]).round()),
-    )
-    # соседей считаем здесь ещё раз, в лоб, по всем отказам группы
-    grp = f[(f.collector == col) & (f.s <= cuts[j]) & (f.s > cuts[j] - 7 * 86400)]
-    want_nb = (
-        int(
-            ((grp.picket == pk).sum() if pd.notna(pk) else 0)
-            - (n7 if pd.notna(pk) else 0)
-        ),
-        int(len(grp) - n7) if pd.notna(col) else 0,
-    )
-    assert nb == want_nb, (c, at, nb, want_nb)
-    x = sensor_risk.features(starts, at, eq_of(c), nb)
-    got = [x[k] for k in sensor_risk.REAL + sensor_risk.SYNTH]
-    assert np.allclose(got, X[i, j], atol=1e-5), (c, at, got, X[i, j].tolist())
-log("признаки совпали с sensor_risk.features() на 2 000 строках")
+log("симуляция: P-F 2 сут, 1 ложный на 1 истинный")
+sim_fails, sim_pre, SIM, PRE = simulate(failure_sim.PF_DAYS, failure_sim.FALSE_RATIO)
+with open(HERE / "sim_failures.csv", "w") as fh:
+    fh.write("channel_id,started_at\n")
+    for c, t in sim_fails:
+        fh.write(f"{c},{t.isoformat(timespec='seconds')}\n")
+with open(HERE / "sim_failures_precursors.csv", "w") as fh:
+    fh.write("channel_id,observed_at,is_true\n")
+    for c, t, ok in sim_pre:
+        fh.write(f"{c},{t.isoformat(timespec='seconds')},{'t' if ok else 'f'}\n")
+log(f"  отказов {len(sim_fails)}, предвестников {len(sim_pre)} (истинных {sum(ok for *_, ok in sim_pre)})")
 
 
-# ------------------------------------------------------------------ метки
-def labels(world, H):
-    Y = np.zeros((C, D), bool)
-    for i, c in enumerate(cid):
-        a = world.get(c)
-        if a is not None:
-            Y[i] = window_count(a, cuts, cuts + H * 3600) > 0
-    return Y
+# ------------------------------------------------------------------ моменты и признаки
+def moments(extra_of):
+    """Моменты всех каналов: (канал, время, вид) по каналу и времени.
+    вид 0 — tick 21:00, 1 — через час после своего отказа, 2 — после отказа соседа
+    по пикету, 3 — через час после синтетического предвестника."""
+    mc, mt, mk = [], [], []
+    for i in range(C):
+        parts = [(TICKS, 0)] + [(a, k) for a, k in extra_of(i)]
+        t = np.concatenate([p for p, _ in parts])
+        k = np.concatenate([np.full(len(p), kk, "int8") for p, kk in parts])
+        o = np.lexsort((k, t))
+        t, k = t[o], k[o]
+        keep = np.ones(len(t), bool)
+        keep[1:] = t[1:] != t[:-1]  # совпавшие моменты — один
+        mc.append(np.full(keep.sum(), i, "int32"))
+        mt.append(t[keep])
+        mk.append(k[keep])
+    return np.concatenate(mc), np.concatenate(mt), np.concatenate(mk)
 
 
-def merged(a, b):
-    out = dict(a)
-    for c, v in b.items():
-        out[c] = np.sort(np.concatenate([out.get(c, EMPTY), v]))
+def own_rearm(i):
+    a = F.get(i, EMPTY)
+    return [(a + CONFIRM, 1)] if len(a) else []
+
+
+def picket_rearm(i):
+    out = own_rearm(i)
+    if PK[i] is not None:
+        g = GP.get(PK[i], EMPTY)
+        mine = set(F.get(i, EMPTY).tolist())
+        other = np.array([s for s in g.tolist() if s not in mine], dtype="int64")
+        if len(other):
+            out.append((other + CONFIRM, 2))
     return out
 
 
-WORLD = {"real": F, "synthetic": merged(F, SIM)}
-COLS = {"real": list(range(7)), "synthetic": list(range(10))}
-NAMES = sensor_risk.REAL + sensor_risk.SYNTH
+def cnt(arr, lo_excl, hi_incl):
+    return np.searchsorted(arr, hi_incl, "right") - np.searchsorted(arr, lo_excl, "right")
 
 
-def span(period, H):
-    """Срезы периода, у которых окно метки [срез, срез + H] не выходит за конец периода."""
-    j0 = didx(period[0])
-    end = int(
-        datetime(period[1].year, period[1].month, period[1].day, tzinfo=MSK).timestamp()
-    )
-    j1 = int(np.searchsorted(cuts, end - H * 3600, "right"))
-    return j0, j1
+def real_features(mc, mt):
+    X = np.zeros((len(mt), len(sensor_risk.REAL)), "float32")
+    starts = np.searchsorted(mc, np.arange(C + 1))
+    for i in range(C):
+        a, b = starts[i], starts[i + 1]
+        t = mt[a:b]
+        s = F.get(i, EMPTY)
+        idx = np.searchsorted(s, t, "right")
+        last = s[np.maximum(idx - 1, 0)] if len(s) else np.zeros(len(t), "int64")
+        dd = np.where(idx > 0, np.minimum((t - last) / 86400, sensor_risk.CAP), sensor_risk.CAP)
+        n7, n30, n90 = (idx - np.searchsorted(s, t - k * 86400, "right") for k in (7, 30, 90))
+        gc = cnt(GC.get(COL[i], EMPTY), t - 7 * 86400, t) - n7 if COL[i] is not None else 0 * n7
+        gp = cnt(GP.get(PK[i], EMPTY), t - 7 * 86400, t) - n7 if PK[i] is not None else 0 * n7
+        fresh = (dd * 24 < sensor_risk.FRESH_H).astype(float)
+        X[a:b] = np.stack([fresh, np.exp(-dd), np.exp(-dd / 30), np.log1p(n7), np.log1p(n30), np.log1p(n90),
+                           np.log1p(gp), np.log1p(gc)], axis=1)
+    return X
 
 
-def design(mode, j0, j1):
-    x = X[:, j0:j1][:, :, COLS[mode]].reshape(-1, len(COLS[mode]))
-    k = np.zeros((C, len(kinds)), "float32")
-    k[np.arange(C), KIND] = 1
-    k = np.repeat(k, j1 - j0, axis=0)
-    return np.hstack([x, k])
+def sim_features(mc, mt, P):
+    X = np.zeros((len(mt), len(sensor_risk.SIM)), "float32")
+    starts = np.searchsorted(mc, np.arange(C + 1))
+    for i in range(C):
+        a, b = starts[i], starts[i + 1]
+        t = mt[a:b]
+        c = int(cid[i])
+        p = passports[c]
+        dord = (t + 3 * 3600) // 86400 + EPOCH_ORD  # московская дата момента
+        age = np.maximum(dord - p["in_service"].toordinal(), 0)
+        life = np.minimum(age / 365.25 / p["life"], 2.0)
+        check = over = np.zeros(len(t))
+        if c in CHK:
+            kind, ds = CHK[c]
+            iv = sensor_risk.INTERVAL[kind]
+            o = np.array([d.toordinal() for d in ds])
+            j = np.searchsorted(o, dord, "right")
+            since = np.where(j > 0, dord - o[np.maximum(j - 1, 0)], age)
+            check, over = np.minimum(since / iv, 3.0), (since > iv).astype(float)
+        pr = P.get(i, EMPTY)
+        # возраст предвестника в [lo, hi) сут ⇔ момент предвестника в (t − hi, t − lo]
+        bins = [np.log1p(cnt(pr, t - hi * 86400, t - lo * 86400)) for lo, hi in sensor_risk.PRE_BINS]
+        X[a:b] = np.stack([life, check, over, *bins], axis=1)
+    return X
 
 
-def fit(mode, H, period):
-    j0, j1 = span(period, H)
-    Y = labels(WORLD[mode], H)[:, j0:j1].reshape(-1)
-    Xd = design(mode, j0, j1)
-    keep = Y | (rng.random(len(Y)) < NEG_SHARE)
-    wts = np.where(Y[keep], 1.0, 1 / NEG_SHARE)
-    # Признаки стандартизируем: на исходной шкале lbfgs при доле положительных 0,02 %
-    # останавливался на 12-й итерации с невыученными коэффициентами (знак у доли
-    # выработки выходил обратным). Коэффициенты Scaled пересчитывает обратно.
-    m = Scaled().fit(Xd[keep], Y[keep], wts)
-    log(
-        f"  {mode} H={H}: строк {len(Y):,}, положительных {Y.sum():,}, "
-        f"обучено на {keep.sum():,}, итераций {m.n_iter}"
-    )
-    return m
+def labels(mc, mt, world, H):
+    y = np.zeros(len(mt), bool)
+    starts = np.searchsorted(mc, np.arange(C + 1))
+    for i, s in world.items():
+        a, b = starts[i], starts[i + 1]
+        y[a:b] = cnt(s, mt[a:b], mt[a:b] + H * 3600) > 0
+    return y
 
 
+def onehot(mc):
+    k = np.zeros((len(mc), len(kinds)), "float32")
+    k[np.arange(len(mc)), KIND[mc]] = 1
+    return k
+
+
+# ------------------------------------------------------------------ модель
 class Scaled:
     """Логистическая регрессия на стандартизированных признаках; coef_ и intercept_ —
-    в исходной шкале, как их читает sensor_risk._logit()."""
+    в исходной шкале, как их читает sensor_risk._logit(). На исходной шкале lbfgs при
+    доле положительных 0,02 % останавливался на 12-й итерации с невыученными
+    коэффициентами (знак у доли выработки выходил обратным)."""
 
     def fit(self, X, y, w):
         mu, sd = X.mean(axis=0), X.std(axis=0)
@@ -317,45 +281,68 @@ class Scaled:
         m.fit((X - mu) / sd, y, sample_weight=w)
         self.n_iter = int(m.n_iter_[0])
         assert self.n_iter < 20_000, "регрессия не сошлась"
-        self.coef_ = (m.coef_[0] / sd)[None, :]
-        self.intercept_ = np.array(
-            [m.intercept_[0] - float((m.coef_[0] * mu / sd).sum())]
-        )
+        self.coef_ = m.coef_[0] / sd
+        self.intercept_ = float(m.intercept_[0] - (m.coef_[0] * mu / sd).sum())
         return self
 
-    def predict_proba(self, X):
-        z = X.astype("float64") @ self.coef_[0] + self.intercept_[0]
-        p = 1 / (1 + np.exp(-z))
-        return np.stack([1 - p, p], axis=1)
+    def proba(self, X):
+        return 1 / (1 + np.exp(-(X.astype("float64") @ self.coef_ + self.intercept_)))
 
 
-def predict(m, mode, j0, j1):
-    return m.predict_proba(design(mode, j0, j1))[:, 1].reshape(C, j1 - j0)
+def window_mask(mt, period, H):
+    """Моменты окна: с первого tick окна до последнего tick, у которого окно метки
+    [tick, tick + H] не выходит за конец периода."""
+    lo = ts(period[0], 21)
+    last = ts(period[1]) - H * 3600
+    hi = TICKS[TICKS <= last].max()
+    return (mt >= lo) & (mt <= hi), lo, hi
 
 
-# ------------------------------------------------------------------ замер
-def failures_in(mode, j0, j1, H):
-    """Отказы, которые окно срезов [j0, j1) вообще может поймать: (первый срез, последний + H]."""
-    lo, hi = cuts[j0], cuts[j1 - 1] + H * 3600
+class Design:
+    def __init__(self, mc, mt, mk, X):
+        self.mc, self.mt, self.mk, self.X = mc, mt, mk, X
+
+    def rows(self, m):
+        """Строки для регрессии. У модели журнала свежий отказ (fresh = 1) отключает
+        остальные признаки и вид датчика: все такие моменты получают одну вероятность,
+        и модель на них повторяет правило «канал отказал час назад»."""
+        x = np.hstack([self.X[m], onehot(self.mc[m])])
+        if self.X.shape[1] == len(sensor_risk.REAL):
+            fr = x[:, :1]
+            x = np.hstack([fr, x[:, 1:] * (1 - fr)])
+        return x
+
+
+def fit(D, world, H, period):
+    m, _, _ = window_mask(D.mt, period, H)
+    y = labels(D.mc, D.mt, world, H)
+    keep = m & (y | (D.mk > 0) | (rng.random(len(y)) < NEG_SHARE))
+    wts = np.where(y[keep] | (D.mk[keep] > 0), 1.0, 1 / NEG_SHARE)
+    model = Scaled().fit(D.rows(keep), y[keep], wts)
+    log(f"    H={H}: строк {m.sum():,}, положительных {y[m].sum():,}, обучено на {keep.sum():,}, итераций {model.n_iter}")
+    return model
+
+
+def failures_in(world, lo, hi, H):
     out = {}
-    for c, a in WORLD[mode].items():
-        if c in pos:
-            v = a[(a > lo) & (a <= hi)]
-            if len(v):
-                out[c] = v
+    for i, a in world.items():
+        v = a[(a > lo) & (a <= hi + H * 3600)]
+        if len(v):
+            out[i] = v
     return out
 
 
-def fast(alert_mask, j0, fails, H):
-    """То же, что evaluate_alerts(horizon_hours=0, max_lead_hours=H) по каналам,
-    только через bisect; с оригиналом сверяется assert в exact()."""
+def fast(ai, at, fails, H):
+    """evaluate_alerts(horizon_hours=0, max_lead_hours=H) по каналам через bisect;
+    с оригиналом сверяется в exact()."""
+    o = np.lexsort((at, ai))
+    ai, at = ai[o], at[o]
+    starts = np.searchsorted(ai, np.arange(C + 1))
     tp = fp = fn = 0
-    rows = {i for i in np.flatnonzero(alert_mask.any(axis=1))} | {pos[c] for c in fails}
-    for i in rows:
-        al = cuts[j0 + np.flatnonzero(alert_mask[i])].tolist()
-        used = [False] * len(al)
-        matched = [False] * len(al)
-        for t in fails.get(cid[i], EMPTY).tolist():
+    for i in set(np.unique(ai).tolist()) | set(fails):
+        al = at[starts[i]:starts[i + 1]].tolist()
+        used, matched = [False] * len(al), [False] * len(al)
+        for t in fails.get(i, EMPTY).tolist():
             a = bisect.bisect_left(al, t - H * 3600)
             b = bisect.bisect_right(al, t)
             best = None
@@ -371,175 +358,355 @@ def fast(alert_mask, j0, fails, H):
         fp += matched.count(False)
     p = tp / (tp + fp) if tp + fp else 0.0
     r = tp / (tp + fn) if tp + fn else 0.0
-    return {
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "alerts": int(alert_mask.sum()),
-        "precision": p,
-        "recall": r,
-    }
+    return {"tp": tp, "fp": fp, "fn": fn, "alerts": len(at), "precision": p, "recall": r}
 
 
-def exact(alert_mask, j0, fails, H):
-    """Числа в отчёт: evaluate_alerts() как есть, объект — канал."""
-    al = [
-        (int(cid[i]), datetime.fromtimestamp(int(cuts[j0 + j]), MSK))
-        for i, j in zip(*np.nonzero(alert_mask))
-    ]
-    fl = [
-        (int(c), datetime.fromtimestamp(int(t), MSK))
-        for c, a in fails.items()
-        for t in a
-    ]
+def one_open(ai, at, H, world):
+    """Политика «одно открытое предупреждение», как у модели коллектора v3
+    (ml-model/src/ml/moments.py): предупреждение по каналу открыто H часов или до
+    первого отказа канала после него, и пока оно открыто, новое не выдаётся. Без неё
+    срез 21:00 через несколько часов после отказа выдаёт второе предупреждение
+    о том же риске. Без закрытия отказом политика глушила бы и сам rearm: на окне
+    выбора правило теряло 13 попаданий из 34."""
+    o = np.lexsort((at, ai))
+    ai, at = ai[o], at[o]
+    keep = np.zeros(len(at), bool)
+    last_c, until = -1, 0
+    for k, (c, t) in enumerate(zip(ai.tolist(), at.tolist())):
+        if c != last_c or t >= until:
+            keep[k] = True
+            last_c = c
+            s = world.get(c, EMPTY)
+            j = np.searchsorted(s, t, "right")
+            until = min(t + H * 3600, int(s[j]) if j < len(s) else 1 << 62)
+    return ai[keep], at[keep]
+
+
+def exact(ai, at, fails, H):
+    """Числа в отчёт: evaluate_alerts() как есть, по каналам; сверка с fast()."""
     by = {}
-    for o, t in al:
-        by.setdefault(o, ([], []))[0].append((o, t))
-    for o, t in fl:
-        by.setdefault(o, ([], []))[1].append((o, t))
+    for i, t in zip(ai.tolist(), at.tolist()):
+        by.setdefault(i, ([], []))[0].append((i, datetime.fromtimestamp(t, MSK)))
+    for i, a in fails.items():
+        for t in a.tolist():
+            by.setdefault(i, ([], []))[1].append((i, datetime.fromtimestamp(t, MSK)))
     tp = fp = fn = dup = 0
     for a, b in by.values():
         m = evaluate_alerts(a, b, horizon_hours=0, max_lead_hours=H)
         tp, fp, fn, dup = tp + m["tp"], fp + m["fp"], fn + m["fn"], dup + m["dup"]
-    got = fast(alert_mask, j0, fails, H)
-    assert (got["tp"], got["fp"], got["fn"]) == (tp, fp, fn), (got, tp, fp, fn)
-    p = tp / (tp + fp) if tp + fp else 0.0
-    r = tp / (tp + fn) if tp + fn else 0.0
-    return {
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "dup": dup,
-        "alerts": len(al),
-        "incidents": len(fl),
-        "precision": round(p, 3),
-        "recall": round(r, 3),
-    }
+    g = fast(ai, at, fails, H)
+    assert (g["tp"], g["fp"], g["fn"]) == (tp, fp, fn), (g, tp, fp, fn)
+    n = sum(len(v) for v in fails.values())
+    return {"tp": tp, "fp": fp, "fn": fn, "dup": dup, "alerts": len(at), "incidents": n,
+            "precision": round(tp / (tp + fp), 3) if tp + fp else 0.0,
+            "recall": round(tp / (tp + fn), 3) if tp + fn else 0.0}
 
 
-def f_beta(m, b):
+def f1(m):
     p, r = m["precision"], m["recall"]
-    return (1 + b * b) * p * r / (b * b * p + r) if p + r else 0.0
+    return 2 * p * r / (p + r) if p + r else 0.0
 
 
-def curve(P, j0, fails, H):
-    """Пороги — по числу предупреждений: верхние k строк окна, k по геометрической сетке."""
-    flat = np.sort(P.reshape(-1))[::-1]
+def ceiling(D, m, fails, H):
+    """Потолок Recall набора моментов: доля отказов, перед которыми в пределах H ч
+    есть хоть один момент решения этого канала."""
+    ok = n = 0
+    starts = np.searchsorted(D.mc, np.arange(C + 1))
+    for i, a in fails.items():
+        t = D.mt[starts[i]:starts[i + 1]]
+        t = t[m[starts[i]:starts[i + 1]]]
+        for s in a.tolist():
+            n += 1
+            ok += cnt(t, s - H * 3600 - 1, s).item() > 0
+    return round(ok / n, 3) if n else 0.0, ok, n
+
+
+def curve(D, m, p, fails, H, world):
+    order = np.argsort(-p)
     out = []
-    for k in np.unique(np.geomspace(20, min(len(flat), 400_000), 60).astype(int)):
-        t = float(flat[k - 1])
-        m = fast(P >= t, j0, fails, H)
-        out.append({"threshold": t, **m, "f1": f_beta(m, 1), "f2": f_beta(m, 2)})
+    for k in np.unique(np.geomspace(20, min(len(p), 400_000), 60).astype(int)):
+        t = float(p[order[k - 1]])
+        sel = p >= t
+        r = fast(*one_open(D.mc[m][sel], D.mt[m][sel], H, world), fails, H)
+        out.append({"threshold": t, **r, "f1": f1(r)})
     return out
 
 
-def recency_mask(j0, j1, n):
-    """Правило недавности: предупреждение на срезе, если у канала был отказ за n сут."""
-    idx = np.stack(
-        [np.searchsorted(F.get(c, EMPTY), cuts[j0:j1], "right") for c in cid]
-    )
-    ago = np.stack(
-        [
-            np.searchsorted(F.get(c, EMPTY), cuts[j0:j1] - n * 86400, "right")
-            for c in cid
-        ]
-    )
-    return idx > ago
+def evaluate(D, m, p, fails, H, thr, world):
+    """Модель: предупреждение, если p ≥ порога, и политика одного открытого."""
+    sel = p >= thr
+    return exact(*one_open(D.mc[m][sel], D.mt[m][sel], H, world), fails, H)
 
 
-run = {"horizons": {}, "sim_failures": len(sim)}
-log("выбор: учим на 2022-04-01…2025-12-31, смотрим 2026-01-01…2026-03-31")
+def choose(cv):
+    hi = max(cv, key=lambda x: x["f1"])
+    wa = min(cv, key=lambda x: abs(x["alerts"] - 10 * hi["alerts"]))
+    return hi["threshold"], wa["threshold"]
+
+
+def carry(model_sel, model_new, D, m, thr):
+    """Порог после переобучения. Вероятности переученной модели сдвигаются, и число-
+    порог первой модели на ней значит другое (так на проверке пропали все моменты
+    rearm). Переносим не число, а долю: порог новой модели — такой, при котором
+    на том же окне выбора она выдаёт столько же строк выше порога, сколько первая."""
+    k = int((model_sel.proba(D.rows(m)) >= thr).sum())
+    p = np.sort(model_new.proba(D.rows(m)))[::-1]
+    return float(p[max(k, 1) - 1])
+
+
+def rule(D, m, kinds_):
+    sel = m & np.isin(D.mk, kinds_)
+    return D.mc[sel], D.mt[sel]
+
+
+# ------------------------------------------------------------------ сверка признаков
+def check_features(D, P=None):
+    """Признаки скрипта против sensor_risk.features() на случайных моментах."""
+    idx = np.concatenate([rng.choice(np.flatnonzero(D.mk > 0), 300), rng.integers(0, len(D.mt), 700)])
+    for r in idx:
+        i, t = int(D.mc[r]), int(D.mt[r])
+        at = datetime.fromtimestamp(t, MSK)
+        starts = [datetime.fromtimestamp(s, MSK) for s in F.get(i, EMPTY).tolist()]
+        if P is None:
+            nb = (int(round(math.expm1(D.X[r, 6]))), int(round(math.expm1(D.X[r, 7]))))
+            got = [sensor_risk.features(starts, at, nb=nb)[k] for k in sensor_risk.REAL]
+            # соседей в лоб по таблице отказов
+            g = f[(f.s <= t) & (f.s > t - 7 * 86400)]
+            n7 = sum(1 for s in F.get(i, EMPTY).tolist() if 0 <= t - s < 7 * 86400)
+            want = (int(((g.collector == COL[i]) & (g.picket == (PK[i][1] if PK[i] else -1))).sum()) - n7 if PK[i] else 0,
+                    int((g.collector == COL[i]).sum()) - n7 if COL[i] is not None else 0)
+            assert nb == want, (i, at, nb, want)
+        else:
+            c = int(cid[i])
+            e = passports[c]
+            eq = {"in_service": e["in_service"], "life": e["life"], "points": []}
+            if c in CHK:
+                eq["points"] = [{"kind": CHK[c][0], "readings": [(d,) for d in CHK[c][1]]}]
+            pre = [datetime.fromtimestamp(s, MSK) for s in P.get(i, EMPTY).tolist()]
+            x = sensor_risk.features([], at, eq, pre=pre)
+            got = [x[k] for k in sensor_risk.SIM]
+        assert np.allclose(got, D.X[r], atol=1e-5), (i, at, got, D.X[r].tolist())
+
+
+# ------------------------------------------------------------------ прогон
+run = {"horizons": {}, "sim": {}, "chosen": None, "text": {}}
+
+log("моменты без синтетики: tick + rearm своего отказа; вариант — плюс rearm соседа по пикету")
+DR = {}
+for name, extra in (("own", own_rearm), ("picket", picket_rearm)):
+    mc, mt, mk = moments(extra)
+    DR[name] = Design(mc, mt, mk, real_features(mc, mt))
+    log(f"  {name}: моментов {len(mt):,}, из них rearm {int((mk == 1).sum()):,}, соседа {int((mk == 2).sum()):,}")
+check_features(DR["picket"])
+log("  признаки без синтетики совпали с sensor_risk.features() на 1 000 моментах")
+
+log("моменты модели симулированных отказов: tick + через час после предвестника")
+
+
+def sim_design(P):
+    mc, mt, mk = moments(lambda i: [(P[i] + CONFIRM, 3)] if i in P else [])
+    return Design(mc, mt, mk, sim_features(mc, mt, P))
+
+
+DS = sim_design(PRE)
+check_features(DS, PRE)
+log("  признаки паспорта и предвестника совпали с sensor_risk.features() на 1 000 моментах")
+
+# числа для текстов (п. 6 доработки): считаются здесь, чтобы их можно было повторить
+for name, per in (("select", SELECT), ("test", TEST)):
+    _, lo, hi = window_mask(DR["own"].mt, per, 12)
+    fl = failures_in(F, lo, hi, 12)
+    first = sum(int((F[i] < s).sum() == 0) for i, a in fl.items() for s in a.tolist())
+    coll = 0
+    for i, a in fl.items():
+        for s in a.tolist():
+            coll += COL[i] is not None and cnt(GC[COL[i]], s - 86400 - 1, s - 1).item() - cnt(F[i], s - 86400 - 1, s - 1).item() > 0
+    tick = DR["own"].mk == 0
+    n = sum(len(a) for a in fl.values())
+    run["text"][name] = {"failures": n, "first_ever": first, "coll_prior_24h": int(coll),
+                         "night_ceiling_12h": ceiling(DR["own"], tick, fl, 12)}
+    log(f"  {name}: отказов {n}, первый у канала с 2022-04-01 {first}, на коллекторе был отказ за 24 ч до {coll}, "
+        f"потолок Recall tick 21:00 при 12 ч {run['text'][name]['night_ceiling_12h']}")
+
+log("выбор на 2026-01-01…2026-03-31")
 models = {}
 for H in HORIZONS:
     run["horizons"][H] = {}
-    j0, j1 = span(SELECT, H)
-    for mode in ("real", "synthetic"):
-        m = fit(mode, H, TRAIN)
-        models[(mode, H)] = m
-        P = predict(m, mode, j0, j1)
-        fails = failures_in(mode, j0, j1, H)
-        cv = curve(P, j0, fails, H)
-        hi = max(cv, key=lambda x: x["f1"])
-        # watch — список наблюдения вдесятеро длиннее списка high на том же окне
-        wa = min(cv, key=lambda x: abs(x["alerts"] - 10 * hi["alerts"]))
-        rec = []
-        for n in RECENCY:
-            r = fast(recency_mask(j0, j1, n), j0, fails, H)
-            rec.append({"days": n, **r, "f1": f_beta(r, 1)})
-        rb = max(rec, key=lambda x: x["f1"])
-        run["horizons"][H][mode] = {
-            "high": hi["threshold"],
-            "watch": wa["threshold"],
-            "model": exact(P >= hi["threshold"], j0, fails, H),
-            "model_watch": exact(P >= wa["threshold"], j0, fails, H),
-            "recency_days": rb["days"],
-            "recency": exact(recency_mask(j0, j1, rb["days"]), j0, fails, H),
-            "curve": cv,
-            "recency_curve": rec,
-            "cuts": [str(dates[j0]), str(dates[j1 - 1])],
-        }
-        s = run["horizons"][H][mode]
-        log(
-            f"  {mode} H={H}: модель {s['model']}, недавность {s['recency_days']} сут {s['recency']}"
-        )
+    for name, D in DR.items():
+        m, lo, hi = window_mask(D.mt, SELECT, H)
+        fails = failures_in(F, lo, hi, H)
+        model = fit(D, F, H, TRAIN)
+        models[("real", H)] = model
+        p = model.proba(D.rows(m))
+        cv = curve(D, m, p, fails, H, F)
+        hi_t, wa_t = choose(cv)
+        res = {"high": hi_t, "watch": wa_t, "model": evaluate(D, m, p, fails, H, hi_t, F),
+               "rule_rearm": exact(*rule(D, m, [1]), fails, H),
+               "rule_rearm_one_open": exact(*one_open(*rule(D, m, [1]), H, F), fails, H),
+               "curve": cv, "ceiling_all": ceiling(D, m, fails, H),
+               "ceiling_tick": ceiling(D, m & (D.mk == 0), fails, H)}
+        if name == "picket":
+            res["rule_rearm_picket"] = exact(*one_open(*rule(D, m, [1, 2]), H, F), fails, H)
+        run["horizons"][H][name] = res
+        log(f"  без синтетики, {name}, H={H}: модель {res['model']}, правило rearm {res['rule_rearm']}")
+    # модель симулированных отказов: метрики только на симулированных отказах
+    m, lo, hi = window_mask(DS.mt, SELECT, H)
+    fails = failures_in(SIM, lo, hi, H)
+    model = fit(DS, SIM, H, TRAIN)
+    models[("sim", H)] = model
+    p = model.proba(DS.rows(m))
+    cv = curve(DS, m, p, fails, H, SIM)
+    hi_t, wa_t = choose(cv)
+    run["horizons"][H]["sim"] = {"high": hi_t, "watch": wa_t, "model": evaluate(DS, m, p, fails, H, hi_t, SIM), "curve": cv}
+    log(f"  симуляция H={H}: модель {run['horizons'][H]['sim']['model']}")
 
-# горизонт выбираем по лучшему F1 модели без синтетики на окне выбора
-Hbest = max(HORIZONS, key=lambda H: f_beta(run["horizons"][H]["real"]["model"], 1))
-run["chosen"] = Hbest
-log(
-    f"выбран горизонт {Hbest} ч; переучиваем на 2022-04-01…2026-03-31 и меряем апрель–июнь"
-)
+best = max(((H, n) for H in HORIZONS for n in DR), key=lambda x: f1(run["horizons"][x[0]][x[1]]["model"]))
+Hb, variant = best
+run["chosen"] = {"horizon": Hb, "moments": variant}
+log(f"выбрано: {Hb} ч, моменты {variant}; переучиваем на 2022-04-01…2026-03-31 и меряем апрель–июнь")
 
-j0, j1 = span(TEST, Hbest)
-out = {
-    "version": f"sensor-lr-h{Hbest}-2026.09.28",
-    "horizon_h": Hbest,
-    "trained": [str(REFIT[0]), str(REFIT[1] - timedelta(days=1))],
-    "modes": {},
+D = DR[variant]
+sel = run["horizons"][Hb][variant]
+real_model = fit(D, F, Hb, REFIT)
+msel, _, _ = window_mask(D.mt, SELECT, Hb)
+sel = {**sel, "high": carry(models[("real", Hb)], real_model, D, msel, sel["high"]),
+       "watch": carry(models[("real", Hb)], real_model, D, msel, sel["watch"])}
+run["chosen"]["thresholds_real"] = {"high": sel["high"], "watch": sel["watch"]}
+m, lo, hi = window_mask(D.mt, TEST, Hb)
+fails = failures_in(F, lo, hi, Hb)
+p = real_model.proba(D.rows(m))
+run["test"] = {
+    "cuts": [str(datetime.fromtimestamp(lo, MSK)), str(datetime.fromtimestamp(hi, MSK))],
+    "real": {
+        "model": evaluate(D, m, p, fails, Hb, sel["high"], F),
+        "model_watch": evaluate(D, m, p, fails, Hb, sel["watch"], F),
+        "model_rearm_only": evaluate(D, m & (D.mk > 0), real_model.proba(D.rows(m & (D.mk > 0))), fails, Hb, sel["high"], F),
+        "rule_rearm": exact(*rule(D, m, [1]), fails, Hb),
+        "rule_rearm_one_open": exact(*one_open(*rule(D, m, [1]), Hb, F), fails, Hb),
+        "rule_tick_1d": None,
+        "ceiling_all": ceiling(D, m, fails, Hb),
+        "ceiling_tick": ceiling(D, m & (D.mk == 0), fails, Hb),
+    },
 }
-run["test"] = {"cuts": [str(dates[j0]), str(dates[j1 - 1])]}
-for mode in ("real", "synthetic"):
-    sel = run["horizons"][Hbest][mode]
-    m = fit(mode, Hbest, REFIT)
-    P = predict(m, mode, j0, j1)
-    fails = failures_in(mode, j0, j1, Hbest)
-    run["test"][mode] = {
-        "model": exact(P >= sel["high"], j0, fails, Hbest),
-        "model_watch": exact(P >= sel["watch"], j0, fails, Hbest),
-        "recency": exact(recency_mask(j0, j1, sel["recency_days"]), j0, fails, Hbest),
-    }
-    log(f"  тест {mode}: {run['test'][mode]}")
-    names = [NAMES[k] for k in COLS[mode]]
-    coef = m.coef_[0]
-    out["modes"][mode] = {
-        "intercept": float(m.intercept_[0]),
-        "coef": {n: round(float(v), 6) for n, v in zip(names, coef)},
-        "kind": {k: round(float(v), 6) for k, v in zip(kinds, coef[len(names) :])},
-        "baseline": {
-            "r1": 0.0,
-            "r30": 0.0,
-            "n7": 0.0,
-            "n30": 0.0,
-            "n90": 0.0,
-            "nb_picket": 0.0,
-            "nb_coll": 0.0,
-            "life": 0.0,
-            "check": 0.0,
-            "overdue": 0.0,
-        },
-        "thresholds": {"high": round(sel["high"], 6), "watch": round(sel["watch"], 6)},
-    }
-    # экспорт сверяем с предсказанием sklearn через sensor_risk на тех же строках
-    Xd = design(mode, j0, j1)
-    for r in rng.integers(0, len(Xd), 300):
-        x = dict(zip(names, Xd[r, : len(names)].astype(float)))
-        k = kinds[int(np.argmax(Xd[r, len(names) :]))]
-        z = sensor_risk._logit(out["modes"][mode], x, k)
-        assert abs(1 / (1 + np.exp(-z)) - P.reshape(-1)[r]) < 1e-4
-(ROOT / "backend/app/domain/sensor_model.json").write_text(
-    json.dumps(out, ensure_ascii=False, indent=1) + "\n"
-)
-(HERE / "run.json").write_text(
-    json.dumps(run, ensure_ascii=False, indent=1, default=float) + "\n"
-)
+# прежнее правило на tick 21:00: отказ канала за последние сутки
+tk = m & (D.mk == 0)
+recent = D.X[:, 1] > math.exp(-1) - 1e-9  # r1 = exp(−d), d ≤ 1 сут
+run["test"]["real"]["rule_tick_1d"] = exact(D.mc[tk & recent], D.mt[tk & recent], fails, Hb)
+if variant == "picket":
+    run["test"]["real"]["rule_rearm_picket"] = exact(*one_open(*rule(D, m, [1, 2]), Hb, F), fails, Hb)
+log(f"  тест без синтетики: {run['test']['real']}")
+
+# уровни на срезах: сколько high и watch у парка на tick 21:00
+levels = {}
+for d in (date(2026, 6, 23), date(2026, 6, 29)):
+    mm = D.mt == ts(d, 21)
+    pr = real_model.proba(D.rows(mm))
+    levels[str(d)] = {"high": int((pr >= sel["high"]).sum()), "watch": int(((pr >= sel["watch"]) & (pr < sel["high"])).sum())}
+tkt = m & (D.mk == 0)
+ptk = real_model.proba(D.rows(tkt))
+per_tick = pd.Series(ptk >= sel["high"]).groupby(D.mt[tkt]).sum()
+levels["test_ticks_high_median"] = float(per_tick.median())
+levels["test_ticks_high_max"] = int(per_tick.max())
+run["test"]["levels_real"] = levels
+log(f"  уровни без синтетики на tick 21:00: {levels}")
+
+# симуляция на выбранном горизонте: итог, потолки, чувствительность
+ss = run["horizons"][Hb]["sim"]
+sim_model = fit(DS, SIM, Hb, REFIT)
+msel, _, _ = window_mask(DS.mt, SELECT, Hb)
+ss = {**ss, "high": carry(models[("sim", Hb)], sim_model, DS, msel, ss["high"]),
+      "watch": carry(models[("sim", Hb)], sim_model, DS, msel, ss["watch"])}
+run["chosen"]["thresholds_sim"] = {"high": ss["high"], "watch": ss["watch"]}
+m, lo, hi = window_mask(DS.mt, TEST, Hb)
+fails = failures_in(SIM, lo, hi, Hb)
+p = sim_model.proba(DS.rows(m))
+# потолок без предвестника: истинная вероятность генератора на моментах tick
+tk = m & (DS.mk == 0)
+true_p = []
+tk_c, tk_t = DS.mc[tk], DS.mt[tk]
+tk_starts = np.searchsorted(tk_c, np.arange(C + 1))
+for i in range(C):
+    c = int(cid[i])
+    beta, eta, iv, mult = failure_sim.params_of(passports[c])
+    pday = {}
+    for t in tk_t[tk_starts[i]:tk_starts[i + 1]].tolist():
+        d0 = datetime.fromtimestamp(t, MSK).date()
+        q = 1.0
+        for k in range(math.ceil(Hb / 24) + 1):
+            d = d0 + timedelta(days=k)
+            if d not in pday:
+                pday[d] = failure_sim.day_prob(d, passports[c]["in_service"], beta, eta, checks_by.get(c, ()), iv, mult)
+            share = min(max((t + Hb * 3600 - ts(d)) / 86400, 0), 1) - min(max((t - ts(d)) / 86400, 0), 1)
+            q *= (1 - pday[d]) ** share
+        true_p.append(1 - q)
+true_p = np.sort(np.array(true_p))[::-1]
+oracle = [p_ for p_ in (true_p[:20].mean(), true_p[:100].mean(), true_p[:1000].mean())]
+pf = failure_sim.PF_DAYS * 86400
+pre_ok = np.zeros(m.sum(), bool)
+mc_, mt_ = DS.mc[m], DS.mt[m]
+m_starts = np.searchsorted(mc_, np.arange(C + 1))
+for i, pr in PRE.items():
+    a, b = m_starts[i], m_starts[i + 1]
+    pre_ok[a:b] = cnt(pr, mt_[a:b] - pf, mt_[a:b] - pf + Hb * 3600) > 0
+run["test"]["sim"] = {
+    "model": evaluate(DS, m, p, fails, Hb, ss["high"], SIM),
+    "model_watch": evaluate(DS, m, p, fails, Hb, ss["watch"], SIM),
+    "oracle_no_precursor_precision": {"top20": oracle[0], "top100": oracle[1], "top1000": oracle[2], "max": float(true_p[0])},
+    "oracle_precursor": exact(*one_open(mc_[pre_ok], mt_[pre_ok], Hb, SIM), fails, Hb),
+    "ceiling_all": ceiling(DS, m, fails, Hb),
+}
+log(f"  тест симуляции: {run['test']['sim']}")
+
+run["sensitivity"] = []
+for pf_, ratio in SENS:
+    _, _, S2, P2 = simulate(pf_, ratio)
+    D2 = sim_design(P2)
+    msel, lo, hi = window_mask(D2.mt, SELECT, Hb)
+    mdl = fit(D2, S2, Hb, TRAIN)
+    cv = curve(D2, msel, mdl.proba(D2.rows(msel)), failures_in(S2, lo, hi, Hb), Hb, S2)
+    thr, _ = choose(cv)
+    mdl0 = mdl
+    mdl = fit(D2, S2, Hb, REFIT)
+    thr = carry(mdl0, mdl, D2, msel, thr)
+    mt_m, lo, hi = window_mask(D2.mt, TEST, Hb)
+    fl2 = failures_in(S2, lo, hi, Hb)
+    res = evaluate(D2, mt_m, mdl.proba(D2.rows(mt_m)), fl2, Hb, thr, S2)
+    run["sensitivity"].append({"pf_days": pf_, "false_ratio": ratio, "model": res})
+    log(f"  чувствительность P-F {pf_} сут, ложных {ratio}: {res}")
+
+
+def export(model, names):
+    return {"intercept": model.intercept_,
+            "coef": {n: round(float(v), 6) for n, v in zip(names, model.coef_)},
+            "kind": {k: round(float(v), 6) for k, v in zip(kinds, model.coef_[len(names):])}}
+
+
+out = {
+    "version": f"sensor-lr-h{Hb}-{variant}-2026.09.28",
+    "horizon_h": Hb,
+    "moments": variant,
+    "trained": [str(REFIT[0]), str(REFIT[1] - timedelta(days=1))],
+    "modes": {
+        "real": {**export(real_model, sensor_risk.REAL), "gate": "fresh",
+                 "thresholds": {"high": round(sel["high"], 6), "watch": round(sel["watch"], 6)}},
+        "sim": {**export(sim_model, sensor_risk.SIM),
+                "thresholds": {"high": round(ss["high"], 6), "watch": round(ss["watch"], 6)},
+                "pf_days": failure_sim.PF_DAYS, "false_ratio": failure_sim.FALSE_RATIO},
+    },
+}
+out["modes"]["real"]["intercept"] = round(out["modes"]["real"]["intercept"], 6)
+out["modes"]["sim"]["intercept"] = round(out["modes"]["sim"]["intercept"], 6)
+# экспорт против предсказания обученных моделей: sensor_risk._logit на тех же строках
+for mode, model, DD in (("real", real_model, D), ("sim", sim_model, DS)):
+    names = sensor_risk.REAL if mode == "real" else sensor_risk.SIM
+    idx = np.concatenate([rng.integers(0, len(DD.mt), 300), rng.choice(np.flatnonzero(DD.mk > 0), 100)])
+    for r in idx:
+        x = dict(zip(names, DD.X[r].astype(float)))
+        z = sensor_risk._logit(out["modes"][mode], x, kinds[KIND[DD.mc[r]]])
+        one = np.zeros(len(DD.mt), bool)
+        one[r] = True
+        want = model.proba(DD.rows(one))[0]
+        assert abs(1 / (1 + math.exp(-z)) - want) < 1e-5 * max(want, 1e-3)
+(ROOT / "backend/app/domain/sensor_model.json").write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
+(HERE / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=1, default=float) + "\n")
 log("готово: backend/app/domain/sensor_model.json, run.json")
