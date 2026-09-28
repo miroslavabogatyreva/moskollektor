@@ -5,6 +5,7 @@
 // свой комплекс. Заявку берём первую по сроку, у участка которой есть канал,
 // хоть раз терявший связь, — иначе сц. 3 проверять не на чем.
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
 
 test.use({ extraHTTPHeaders: { 'X-User-Login': 'tech1' } })
 
@@ -93,4 +94,22 @@ test('US-22 сц. 3: История канала', async ({ page, request }) => 
     expect(т, 'дата начала').toMatch(/\d\d\.\d\d\.\d{4} \d\d:\d\d/)
     expect(т, 'длительность или «не закрыт»').toMatch(/\d+,\d ч|не закрыт/)
   }
+})
+
+// Ссылка на канал в таблице «Отказы по каналам» открывает историю сверху карточки,
+// а таблица внизу — без прокрутки к истории клик выглядел пустым (Слава, 28.09.2026).
+test('US-22 сц. 3: клик по каналу в таблице показывает его историю', async ({
+  page,
+  request,
+}) => {
+  const { з, к } = await заявкаСКаналом(request)
+  await свойБандл(page)
+  await page.goto(`/objects/${з.object.section_id}`)
+  const таблица = page.locator('section', { hasText: 'Отказы по каналам' })
+  const ссылка = таблица.getByRole('link', { name: к.name.trim() }).first()
+  await ссылка.scrollIntoViewIfNeeded()
+  await ссылка.click()
+  const история = page.locator('section', { hasText: 'История канала' })
+  await expect(история).toContainText(к.name.trim())
+  await expect(история).toBeInViewport()
 })

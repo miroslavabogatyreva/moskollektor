@@ -1,6 +1,8 @@
 import { ROUTES } from './routes'
 import { logout, roleLabels, type AuthUser } from './lib/auth'
-import { formatTime } from './lib/format'
+import { formatDate, formatTime } from './lib/format'
+import { useEffect, useState } from 'preact/hooks'
+import { apiFetch } from './lib/api'
 import { useLastUpdate } from './lib/poll'
 import { Logo } from './components/Logo'
 
@@ -12,10 +14,22 @@ const ADMIN_ROUTES = [
   { path: '/admin/settings', label: 'Настройки' },
 ]
 
+const ДАННЫЕ_С = '01.01.2019'
+
 export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | null }) {
   // Пункт меню виден только администратору — сервер всё равно отвечает 403
   // остальным (НФ-43: скрытие пункта не заменяет отказ по прямому адресу).
   const at = useLastUpdate()
+  // Срез берём один раз: шапка живёт всё время работы, а срез двигается раз в сутки.
+  // Без свежо(): «обновлена в» — про данные текущего экрана, а не про шапку.
+  const [asOf, setAsOf] = useState<string | null>(null)
+  useEffect(() => {
+    if (!me) return
+    apiFetch('/api/sensor-risk/summary')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { as_of: string | null } | null) => setAsOf(s?.as_of ?? null))
+      .catch(() => {})
+  }, [me])
   const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ...ADMIN_ROUTES] : ROUTES
 
   // flex-wrap у шапки и меню: на 390 px без переноса шапка была шире окна — до 812 px
@@ -51,15 +65,17 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           )
         })}
       </nav>
-      {/* Место под «обновлено в» держим всегда: экран без опроса его не пишет, и
-          появление подписи сдвигало всё меню на 131 px при переходе (28.09.2026). */}
-      <span
-        class="num text-xs"
-        style={`color:#B9CCE6${at ? '' : '; visibility:hidden'}`}
-        aria-hidden={at ? undefined : 'true'}
-      >
-        обновлено в {at ? formatTime(at) : '00:00:00'}
-      </span>
+      {/* Ширину блока держит вторая строка, она есть всегда: появление «обновлена в»
+          сдвигало всё меню на 131 px при переходе (28.09.2026). Первая строка пустая,
+          пока экран без опроса.
+          Вторая строка — период выгрузки: начало 01.01.2019 (docs/day-one.md), конец —
+          срез, на котором считает worker; раньше это была плитка «Срез данных» на главной. */}
+      <div class="num text-xs leading-tight text-right" style="color:#B9CCE6; min-width:30ch">
+        <div style="min-height:1.25em">{at && `система обновлена в ${formatTime(at)}`}</div>
+        <div data-testid="data-period">
+          {asOf ? `данные ${ДАННЫЕ_С} — ${formatDate(asOf)}` : `данные с ${ДАННЫЕ_С}`}
+        </div>
+      </div>
       {me && (
         <div class="flex flex-wrap items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
           <span>
