@@ -123,4 +123,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    if not os.environ.get("DATABASE_URL"):
+        sys.exit("СБОЙ: не задана переменная DATABASE_URL, подключаться не к чему")
     sys.exit(asyncio.run(main()))

@@ -36,4 +36,8 @@ COPY contracts ./contracts
 # доказывает запуск check_metrics.py внутри контейнера, а не наше слово.
 # Порядок запуска — docs/install.md, раздел «Проверки на приёмке» (MOS-120).
 COPY code ./code
+# Проверки из code/ импортируют app.*, а sys.path[0] у них — /app/code, не /app:
+# без этой строки девять из них падали ModuleNotFoundError: No module named 'app'
+# (MOS-156). Сервисам не мешает: они и так запускаются из WORKDIR /app.
+ENV PYTHONPATH=/app
 CMD ["python", "-m", "app.api.main"]
