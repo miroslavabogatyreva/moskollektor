@@ -55,7 +55,7 @@ export function ChannelHistory({ sectionId, channelId }: { sectionId: string; ch
     <section
       ref={блок}
       class="card text-sm"
-      style="border-left:4px solid var(--accent); scroll-margin-top:16px"
+      style="border-left:4px solid var(--accent); scroll-margin-top:96px"
     >
       <h2 class="font-semibold mb-1">
         История канала{data && ` «${data.channel.name.trim()}» · ${data.channel.sensor_kind ?? ''}`}

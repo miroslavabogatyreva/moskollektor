@@ -23,14 +23,9 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
   // Срез берём один раз: шапка живёт всё время работы, а срез двигается раз в сутки.
   // Без свежо(): «обновлена в» — про данные текущего экрана, а не про шапку.
   const [asOf, setAsOf] = useState<string | null>(null)
-  // Кнопка тура мерцает, пока её ни разу не нажимали в этом браузере.
-  const [турНовый, setТурНовый] = useState(() => {
-    try {
-      return localStorage.getItem('tour-seen') !== '1'
-    } catch {
-      return true
-    }
-  })
+  // Кнопка тура мерцает при каждом входе и загрузке страницы: под одной учёткой
+  // заходят разные люди (Слава, 28.09.2026), поэтому ничего не запоминаем.
+  const [турНовый, setТурНовый] = useState(true)
   useEffect(() => {
     if (!me) return
     let отменено = false
@@ -106,11 +101,6 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
               type="button"
               onClick={() => {
                 setТурНовый(false)
-                try {
-                  localStorage.setItem('tour-seen', '1')
-                } catch {
-                  // приватное окно — мерцание погаснет до перезагрузки, и ладно
-                }
                 import('./lib/tour').then((m) => m.запуститьТур())
               }}
               data-new={турНовый ? '' : undefined}
