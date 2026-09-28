@@ -186,11 +186,19 @@ test('SL.6: самый плотный коллектор — «объект Мю
     const высота = await полоса.locator('svg[role="img"]').evaluate((e) => e.clientHeight)
     expect(высота).toBeLessThanOrEqual(188)
   }
-  // Каждый датчик с пикетом нарисован (кольцо ППР — отдельный круг без заливки).
+  // Каждый датчик с пикетом учтён: нарисован значком (не больше 8 на пикет, кольцо ППР —
+  // отдельный круг без заливки) или вошёл в число «+N» над стопкой.
   const значков = await демо
     .locator('g[data-picket] > :is(polygon, circle):not([fill="none"])')
     .count()
-  expect(значков).toBe(наОси)
+  const скрыто = await демо
+    .locator('g[data-picket] > text[data-hidden]')
+    .evaluateAll((es) => es.reduce((n, e) => n + Number(e.getAttribute('data-hidden')), 0))
+  expect(значков + скрыто).toBe(наОси)
+  for (const g of await демо.locator('g[data-picket]').all())
+    expect(
+      await g.locator(':scope > :is(polygon, circle):not([fill="none"])').count(),
+    ).toBeLessThanOrEqual(8)
 
   // Датчик с другой линии по адресу: выбрана его линия и пикет, полоса приближена.
   const участки = (await (await page.request.get('/data/sections.json')).json()) as {

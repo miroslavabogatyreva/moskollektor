@@ -47,9 +47,14 @@ test('демо по датчикам: на ПК632 видны и плохие, �
   await expect(демо.locator('g[data-picket="632"][data-selected]')).toHaveCount(1)
   await expect(демо.getByTestId('sensor-picket')).toContainText('ПК632')
 
+  // Сначала список — только датчики с риском и снятые по ППР; «в норме» свёрнуты кнопкой.
   const строки = демо.locator('li[data-channel-id]')
-  expect(await строки.count()).toBeGreaterThanOrEqual(30)
   expect(await строки.locator('[data-level="high"]').count()).toBeGreaterThanOrEqual(1)
+  const свёрнуто = демо.getByRole('button', { name: /^Показать ещё \d+ в норме$/ })
+  const всего = (await строки.count()) + Number((await свёрнуто.textContent())!.match(/\d+/)![0])
+  await свёрнуто.click()
+  expect(await строки.count()).toBe(всего)
+  expect(всего).toBeGreaterThanOrEqual(30)
   expect(await строки.locator('[data-level="normal"]').count()).toBeGreaterThanOrEqual(1)
 
   // Газовый датчик на ПК632: отказ 04.06.2026 — плановый демонтаж по графику ППР.
