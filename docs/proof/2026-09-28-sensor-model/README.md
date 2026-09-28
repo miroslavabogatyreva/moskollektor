@@ -32,3 +32,33 @@ q checks      "select e.source_key::int as channel_id, mp.point_no, c.code as ch
 
 Контрольные числа выгрузки: отказов по годам 2019 — 638, 2020 — 2 849, 2021 — 3 562,
 2022 — 1 870, 2023 — 763, 2024 — 323, 2025 — 1 153, 2026 — 981.
+
+## Признаки показаний, MOS-225 (28.09.2026)
+
+`data/reading_features.csv.gz` — отдельная суточная таблица по исходным журналам
+2025 и января–июня 2026. Она содержит очищенный метан, флаг вероятной поверки
+и счётчики отметок эпохи. Это реальные данные, синтетических паспортов в ней нет.
+Аудит исключений и список дней — `data/reading_features_audit.json`, контрольные
+суммы исходных CSV и результата — `data/reading_features_manifest.json`.
+
+Подробности и замер: `ml-model/docs/mos225-reading-features.md`.
+Контракт: `contracts/sensor-reading-features.v1.json`. Пример чтения:
+
+```python
+import csv
+import gzip
+from datetime import datetime
+
+cut = datetime.fromisoformat("2026-06-23T21:00:00+03:00")
+with gzip.open("docs/proof/2026-09-28-sensor-model/data/reading_features.csv.gz", "rt") as f:
+    history = [row for row in csv.DictReader(f)
+               if datetime.fromisoformat(row["available_at"]) <= cut]
+```
+
+Перед обучением выбрать историческое окно и агрегировать строки по `channel_id`;
+не присоединять итог за всё полугодие к каждой дате. В 21:00 сегодняшние сутки
+ещё недоступны. Дней до 2025 года в этой таблице нет: их отсутствие не равно нулю.
+`epoch_marker` и `selected_rows` — аудит, не признаки ошибки или молчания.
+`calibration_candidate` — общий флаг дня, а не доказанная поверка каждого канала.
+Действующая модель датчика этот файл пока не читает: подключение и повторная
+оценка модели требуют отдельного эксперимента после MOS-263/MOS-264.
