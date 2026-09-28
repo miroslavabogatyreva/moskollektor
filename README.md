@@ -7,11 +7,20 @@
 
 <br>
 
-[![Открыть сервис](https://img.shields.io/badge/▶_Открыть_сервис-moskollektor.mbogatyreva.ru-0B4EA2?style=for-the-badge)](https://moskollektor.mbogatyreva.ru)
-&nbsp;
-[![REST API](https://img.shields.io/badge/REST_API-Swagger-85EA2D?style=for-the-badge&logo=swagger&logoColor=black)](https://moskollektor.mbogatyreva.ru/docs)
-
-<sub>Демо-учётки показаны прямо на экране входа — нажмите «Войти как».</sub>
+<table>
+<tr>
+<td align="center" width="50%">
+<a href="https://moskollektor.mbogatyreva.ru"><img src="https://img.shields.io/badge/▶%20%20Открыть%20сервис-FF6A00?style=for-the-badge&labelColor=FF6A00" width="300" alt="Открыть сервис"></a><br>
+<b><a href="https://moskollektor.mbogatyreva.ru">moskollektor.mbogatyreva.ru</a></b><br>
+<sub>демо-учётки — на экране входа, кнопка «Войти как»</sub>
+</td>
+<td align="center" width="50%">
+<a href="https://moskollektor.mbogatyreva.ru/docs"><img src="https://img.shields.io/badge/Swagger%20·%20REST%20API-2EB82E?style=for-the-badge&logo=swagger&logoColor=white&labelColor=2EB82E" width="340" alt="Swagger · REST API"></a><br>
+<b><a href="https://moskollektor.mbogatyreva.ru/docs">moskollektor.mbogatyreva.ru/docs</a></b><br>
+<sub>все методы API, можно вызвать прямо со страницы</sub>
+</td>
+</tr>
+</table>
 
 <br>
 
@@ -68,6 +77,38 @@ Precision 0,120 в 252 раза выше случайного выбора. По
 не дают: отказ канала редок, а предвестника отказа в журнале нет. Как повторить замер —
 [`ml-model/sensor/`](ml-model/sensor/README.md).
 
+### Почему горизонт 24 часа
+
+Мы проверили то же правило давности на пяти горизонтах. Чем длиннее окно, тем выше
+Precision, но растёт он в основном за счёт самого окна: за 14 суток отказ случается
+почти в 30 раз чаще, чем за 12 часов, и угадать его проще даже наугад. Поэтому мы
+сравниваем с долей пар «канал × срез», за которыми в пределах горизонта идёт отказ.
+
+| Горизонт | Precision | Recall | Во сколько раз лучше случайного выбора |
+|---|:---:|:---:|:---:|
+| 12 часов | 0,022 | 0,018 | 115 |
+| **24 часа** | **0,120** | **0,097** | **252** |
+| 3 суток | 0,146 | 0,117 | 111 |
+| 7 суток | 0,199 | 0,158 | 67 |
+| 14 суток | 0,335 | 0,264 | 59 |
+
+24 часа — целевой горизонт постановки, и на нём правило сильнее всего опережает
+случайный выбор. Замер повторяет `ml-model/sensor/horizons.py`, числа —
+в [`ml-model/sensor/horizons.json`](ml-model/sensor/horizons.json).
+
+### Ещё три числа
+
+| Число | Что это | Откуда |
+|---|---|---|
+| **11 485 из ≈108 500** | датчиков в нашей выгрузке против всего парка заказчика — 10,6 % | парк назвал заказчик в докладе 17.09.2026: около 100 000 датчиков ОПС и ДУ и 8 500 метановых |
+| **≈3 секунды** | весь расчёт прогноза по парку: 10 720 датчиков на 3 173 участках; требование — меньше 5 минут | журнал worker на стенде, например прогон 2831 28.09.2026: «стадии 6/6, суммарно 3.2 с». Повторить без следа в базе: `docker exec moskollektor-worker-1 python -m app.worker.run --rollback` |
+| **раз в 4 минуты** | как часто пересчитывается весь парк | `GET /api/data-status`, поле `computed_at`; интервал задан в `backend/app/worker/scheduler.py` |
+
+## Требования ТЗ
+
+Все требования технического задания заказчика — 175 пунктов по разделам, с номером страницы
+и цитатой, — [`tz-requirements.md`](tz-requirements.md).
+
 ## Запуск у себя
 
 Нужны Docker с Compose и Node.js.
@@ -103,5 +144,5 @@ cd ../frontend && npm ci && npm run build \
 
 ## Команда
 
-**Мирослава Богатырева** — бэкенд, фронтенд, база, заявки, API, развёртывание<br>
-**Николай Тлехугов** — модель
+Мирослава Богатырева<br>
+Николай Тлехугов
