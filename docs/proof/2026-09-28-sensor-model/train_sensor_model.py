@@ -691,6 +691,11 @@ for pf_, ratio in SENS:
     log(f"  чувствительность P-F {pf_} сут, ложных {ratio}: {res}")
 
 
+def sig(x):
+    """Шесть значащих цифр: порог 6,4·10⁻⁷ при round(x, 6) превращался в 10⁻⁶."""
+    return float(f"{x:.6g}")
+
+
 def export(model, names):
     return {"intercept": model.intercept_,
             "coef": {n: round(float(v), 6) for n, v in zip(names, model.coef_)},
@@ -704,9 +709,9 @@ out = {
     "trained": [str(REFIT[0]), str(REFIT[1] - timedelta(days=1))],
     "modes": {
         "real": {**export(real_model, sensor_risk.REAL), "gate": "fresh",
-                 "thresholds": {"high": round(sel["high"], 6), "watch": round(sel["watch"], 6)}},
+                 "thresholds": {"high": sig(sel["high"]), "watch": sig(sel["watch"])}},
         "sim": {**export(sim_model, sensor_risk.SIM),
-                "thresholds": {"high": round(ss["high"], 6), "watch": round(ss["watch"], 6)},
+                "thresholds": {"high": sig(ss["high"]), "watch": sig(ss["watch"])},
                 "pf_days": failure_sim.PF_DAYS, "false_ratio": failure_sim.FALSE_RATIO},
     },
 }

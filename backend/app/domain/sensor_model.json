@@ -42,8 +42,8 @@
    },
    "gate": "fresh",
    "thresholds": {
-    "high": 0.356075,
-    "watch": 0.00568
+    "high": 0.321333,
+    "watch": 0.005126
    }
   },
   "sim": {
