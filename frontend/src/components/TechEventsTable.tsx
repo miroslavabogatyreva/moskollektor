@@ -14,9 +14,12 @@ import { usePoll, свежо } from '../lib/poll'
    идёт ~0,1–1 с и пишет строку в журнал действий. Автообновление — от общего
    опроса раз в минуту (poll.ts, НФ-89).
 
-   Два места (Ф-89): карточка участка передаёт sectionId и типы датчиков из
-   своих каналов, общий журнал /tech-events (TechEventsScreen ниже) — без
-   участка, по всему парку; там «Объект» и «Тип датчика» вводятся текстом. */
+   Два места (Ф-89): карточка участка передаёт sectionId, общий журнал
+   /tech-events (TechEventsScreen ниже) — без участка, по всему парку; там
+   «Объект» вводится текстом. «Тип датчика» в обоих местах — список из
+   GET /api/tech-events/sensor-kinds: 19 типов каналов плюс «Журнал ОДС».
+   «Событие датчика» остаётся текстом: у него сотни значений (943 за июнь
+   2026, в основном числа показаний). */
 
 interface TechEvent {
   journal_id: number
@@ -70,13 +73,7 @@ export function TechEventsScreen(_props: Record<string, unknown>) {
   )
 }
 
-export function TechEventsTable({
-  sectionId,
-  sensorKinds,
-}: {
-  sectionId?: number
-  sensorKinds?: string[]
-}) {
+export function TechEventsTable({ sectionId }: { sectionId?: number }) {
   const [черновик, setЧерновик] = useState<Отбор>(ПУСТО)
   const [отбор, setОтбор] = useState<Отбор>(ПУСТО)
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
@@ -88,6 +85,7 @@ export function TechEventsTable({
   const [items, setItems] = useState<TechEvent[] | null>(null)
   const [total, setTotal] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [sensorKinds, setSensorKinds] = useState<string[]>([])
   const { tick } = usePoll()
   // Выключенное автообновление замораживает tick: эффект не перезапускается.
   const [тикТаблицы, setТикТаблицы] = useState(tick)
@@ -123,6 +121,16 @@ export function TechEventsTable({
       clearInterval(t)
     }
   }, [авто])
+
+  useEffect(() => {
+    const ac = new AbortController()
+    const q = sectionId != null ? `?section_id=${sectionId}` : ''
+    apiFetch(`/api/tech-events/sensor-kinds${q}`, { signal: ac.signal })
+      .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
+      .then(setSensorKinds)
+      .catch(() => {}) // без списка остаётся «Все» — журнал работает и так
+    return () => ac.abort()
+  }, [sectionId])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -220,30 +228,19 @@ export function TechEventsTable({
         </label>
         <label class="flex flex-col gap-1">
           Тип датчика
-          {sensorKinds ? (
-            <select
-              value={черновик.sensor_kind}
-              onChange={поле('sensor_kind')}
-              class="px-2 py-1 rounded text-sm"
-              style={inputStyle}
-            >
-              <option value="">Все</option>
-              {sensorKinds.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={черновик.sensor_kind}
-              onInput={поле('sensor_kind')}
-              placeholder="точно, например «Датчик дыма»"
-              class="px-2 py-1 rounded text-sm"
-              style={inputStyle}
-            />
-          )}
+          <select
+            value={черновик.sensor_kind}
+            onChange={поле('sensor_kind')}
+            class="px-2 py-1 rounded text-sm"
+            style={inputStyle}
+          >
+            <option value="">Все</option>
+            {sensorKinds.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
         </label>
         <label class="flex flex-col gap-1">
           Событие датчика
