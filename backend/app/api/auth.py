@@ -9,7 +9,7 @@ _sync_ldap_user при входе не трогает is_active, поэтому 
 Маршрут входа сам решает способ по auth_source учётки: local — argon2 против
 ref.app_user.password_hash, ldap (или неизвестный логин при настроенном
 LDAP_URI) — bind в каталог и синхронизация ролей/области видимости из
-ref.ldap_role_map (backend/app/auth/ldap.py). Демо-учётки (dispatcher1, ods1,
+ref.ldap_role_map (backend/app/auth/ldap.py). Демо-учётки (disp2, ods1,
 tech1, admin1) и одноимённые учётки каталога (ldap_dispatcher1, …) — разные
 пары «логин/секрет», решение Славы 24.09.2026: демо обязано работать без
 каталога.
@@ -47,8 +47,12 @@ _WRONG = "неверный логин или пароль"
 # Самопроверка ниже сверяет константу с сидом, чтобы подсказка на экране входа
 # не разошлась с базой молча (задание A, п. 8).
 DEMO_ACCOUNTS = [
-    {"login": "dispatcher1", "password": "dispatcher123", "role_code": "dispatcher",
-     "role_name": "диспетчер", "sees": "риски, прогнозы, объекты и заявки своего района"},
+    # Диспетчер района — disp2, а не dispatcher1: район в выгрузке один (узел 5773),
+    # и dispatcher1 с ним видит весь парк, как ods1, — на экране входа роли
+    # не отличались бы ничем. disp2 — «район А», коллекторы 5 и 7, 512 участков
+    # из 3 173 (US-16). dispatcher1 остаётся учёткой проверок, которым нужен весь парк.
+    {"login": "disp2", "password": "disp2123123", "role_code": "dispatcher",
+     "role_name": "диспетчер", "sees": "риски, прогнозы, объекты и заявки своего района: коллекторы Альфа и Гамма"},
     {"login": "ods1", "password": "ods123456", "role_code": "ods_dispatcher",
      "role_name": "диспетчер ОДС", "sees": "риски, прогнозы, объекты и заявки по всему парку"},
     {"login": "tech1", "password": "tech123456", "role_code": "technician",
@@ -341,7 +345,7 @@ def _selfcheck():
     # DEMO_ACCOUNTS — против argon2-хешей db/seed/rbac.sql. Разойдётся сид с
     # константой — эта проверка первой покраснеет, а не подсказка на экране входа.
     _SEED_HASHES = {
-        "dispatcher1": "$argon2id$v=19$m=65536,t=3,p=4$W3DAWpcjq6AWcOjKU8hXXg$bDZhR+9jFwI74Bg5IuB2yZsaMJ56mVYkCSwatPdrY0E",
+        "disp2": "$argon2id$v=19$m=65536,t=3,p=4$HxqQqqxM0wRtfSbUZGG+Lw$Ga/XIR9roTT9R7A+mhyXx/WvbKGBWNEVG8Itb451iqE",
         "ods1": "$argon2id$v=19$m=65536,t=3,p=4$OP7Y01uuWH56hJrmN4ssLA$DSrZdqPpPn+s6XL+B00xTP+bu502QCJUHQOYCxw//S8",
         "tech1": "$argon2id$v=19$m=65536,t=3,p=4$VH5tU5alwapN3s4VKo3NfQ$8fMA7COqLtjQ5IlzFLU7Y+MIvmCnny+ENVITMG7yBH4",
         "admin1": "$argon2id$v=19$m=65536,t=3,p=4$hi21eVs/+Z4TC+MviMr/qQ$fiWyF7z+LFJYhUBo/YKjDMBOn8c7hbnKcDFs1/4/ud4",

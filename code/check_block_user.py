@@ -9,9 +9,9 @@ ref.app_user.is_active есть с 008_rbac.sql, вход и каждый зап
 GET /api/auth/users и PATCH /api/auth/users/{login}.
 
 Шаги. Подопытный — tech2: демо на странице входа его не показывает, а на tech1,
-ods1, dispatcher1, admin1 держатся другие строки check-all.
+ods1, dispatcher1, disp2, admin1 держатся другие строки check-all.
 1. admin1 читает список: tech2 в нём есть, список отсортирован по login.
-   dispatcher1 получает 403 — список учёток видит только администратор.
+   disp2 (демо-диспетчер из подсказки) получает 403 — список учёток видит только администратор.
 2. tech2 входит, его кука запоминается (дальше называю её старой).
 3. admin1 блокирует tech2 → 200 и is_active=false в ответе. После этого вход
    tech2 даёт 401, старая кука на /api/auth/me тоже 401: блокировка закрывает
@@ -48,9 +48,9 @@ def проверить(с, пароль_подопытного):
     итог = []
     _, info, _ = с.запрос("GET", "/api/auth/info")
     пароли = {у["login"]: у["password"] for у in (info or {}).get("demo_accounts") or []}
-    assert {"admin1", "dispatcher1"} <= пароли.keys(), f"в подсказке /api/auth/info нет admin1 или dispatcher1: {sorted(пароли)}"
+    assert {"admin1", "disp2"} <= пароли.keys(), f"в подсказке /api/auth/info нет admin1 или disp2: {sorted(пароли)}"
     кука = {}
-    for логин in ("admin1", "dispatcher1"):
+    for логин in ("admin1", "disp2"):
         код, _, к = с.войти(логин, пароли[логин])
         assert код == 200 and к, f"{логин} не вошёл: {код}"
         кука[логин] = к[0]
@@ -63,9 +63,9 @@ def проверить(с, пароль_подопытного):
     assert ПОДОПЫТНЫЙ in по_логину, f"{ПОДОПЫТНЫЙ} нет в GET /api/auth/users: {логины}"
     исходное = по_логину[ПОДОПЫТНЫЙ]["is_active"]
     assert isinstance(исходное, bool), f"is_active {ПОДОПЫТНЫЙ}: {исходное!r}, ждали bool"
-    код, _, _ = с.запрос("GET", "/api/auth/users", кука=кука["dispatcher1"])
-    assert код == 403, f"GET /api/auth/users dispatcher1: {код}, ждали 403"
-    итог.append(f"список: {len(список)} учёток по login, {ПОДОПЫТНЫЙ} is_active={исходное}; dispatcher1 403")
+    код, _, _ = с.запрос("GET", "/api/auth/users", кука=кука["disp2"])
+    assert код == 403, f"GET /api/auth/users disp2: {код}, ждали 403"
+    итог.append(f"список: {len(список)} учёток по login, {ПОДОПЫТНЫЙ} is_active={исходное}; disp2 403")
 
     путь = f"/api/auth/users/{ПОДОПЫТНЫЙ}"
 

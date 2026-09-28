@@ -25,14 +25,16 @@ test.describe('под администратором', () => {
   // он честен для прогноза, по которому тест ничего не проверял.
   // Ставим их на 4 САМЫХ СТАРЫХ прогноза, как e2e/us-09-decision.spec.ts.
   //
-  // Диспетчер — disp2, а не dispatcher1: под dispatcher1 по умолчанию ходят все
+  // Диспетчер — disptech, а не dispatcher1: под dispatcher1 по умолчанию ходят все
   // остальные спеки и соседние сессии, и 27.09.2026 первый прогон поймал в своей
-  // минуте 22 чужих GET dispatcher1 («найдено 28» при 6 действиях). disp2 трогает
-  // только US-16. Его пароля нет в GET /api/auth/info, он записан в db/seed/rbac.sql.
+  // минуте 22 чужих GET dispatcher1 («найдено 28» при 6 действиях). disp2 тоже
+  // не годится: с 28.09.2026 он демо-диспетчер экрана входа, под ним входят
+  // US-24, US-26 и US-30. disptech трогает только US-16 сц. 4. Его пароля нет
+  // в GET /api/auth/info, он записан в db/seed/rbac.sql.
   test('US-25 сц. 1: каждое действие — одна запись', async ({ page, browser }) => {
     const диспетчер = {
-      login: process.env.E2E_US25_LOGIN ?? 'disp2',
-      password: process.env.E2E_US25_PASSWORD ?? 'disp2123123',
+      login: process.env.E2E_US25_LOGIN ?? 'disptech',
+      password: process.env.E2E_US25_PASSWORD ?? 'disptech123123',
     }
 
     // Четыре самых старых прогноза в районе диспетчера — до входа: этот просмотр
