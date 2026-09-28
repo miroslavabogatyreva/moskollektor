@@ -25,10 +25,14 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
   const [asOf, setAsOf] = useState<string | null>(null)
   useEffect(() => {
     if (!me) return
+    let отменено = false
     apiFetch('/api/sensor-risk/summary')
       .then((r) => (r.ok ? r.json() : null))
-      .then((s: { as_of: string | null } | null) => setAsOf(s?.as_of ?? null))
+      .then((s: { as_of: string | null } | null) => !отменено && setAsOf(s?.as_of ?? null))
       .catch(() => {})
+    return () => {
+      отменено = true
+    }
   }, [me])
   const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ...ADMIN_ROUTES] : ROUTES
 
