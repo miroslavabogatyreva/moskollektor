@@ -37,6 +37,11 @@ test('MOS-130: статус словом, просрочка числом сут
   const строка = page.locator('tbody tr', { hasText: new RegExp(`^\\s*${первая.id}\\b`) }).first()
   await expect(строка).toBeVisible()
   await expect(page.locator('tbody')).not.toContainText(КОДЫ)
-  const сутки = Math.floor((Date.now() - Date.parse(первая.due_at)) / 86_400_000)
+  // Просрочку экран меряет от среза расчёта (dashboard/api.ts, моментРасчёта), не от часов.
+  const { as_of } = (await (await page.request.get('/api/data-status')).json()) as {
+    as_of: string | null
+  }
+  const срез = as_of ? Date.parse(as_of) : Date.now()
+  const сутки = Math.floor((срез - Date.parse(первая.due_at)) / 86_400_000)
   if (сутки >= 1) await expect(строка).toContainText(`просрочено на ${сутки} сут.`)
 })

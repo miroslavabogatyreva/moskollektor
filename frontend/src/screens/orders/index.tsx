@@ -8,6 +8,7 @@ import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { isoDate } from '../../components/ObjectCard.logic'
 import { сПараметром } from '../../lib/sensorRisk'
+import { моментРасчёта } from '../dashboard/api'
 
 /* Экран заявок — задача 6.7 (MOS-62), постраничность — 4.13 (MOS-117). Данные
    читаются из GET /api/orders, форма ответа — contracts/examples/orders/order-list.json
@@ -142,7 +143,13 @@ function OrdersTab({ status, priority }: { status: string; priority: string }) {
     setDueTo(to)
     setOffset(0)
   }
-  const сейчас = Date.now()
+  // Пока срез расчёта не пришёл, просрочку не показываем: иначе на миг мелькнёт
+  // «просрочено» от часов браузера (см. моментРасчёта).
+  const [срез, setСрез] = useState<number | null>(null)
+  useEffect(() => {
+    моментРасчёта().then(setСрез)
+  }, [tick])
+  const сейчас = срез ?? -Infinity
   const стильПоля =
     'background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)'
 

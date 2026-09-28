@@ -17,6 +17,20 @@ export async function fetchDataStatus(): Promise<DataStatus> {
   return r.json()
 }
 
+// Просрочку заявок меряем от среза расчёта, а не от часов браузера: на стенде
+// проигрывается архив, и «сейчас» системы — момент данных, а не 28.09. От часов
+// браузера все июньские заявки выходили «просрочено на 119 сут.». В эксплуатации
+// срез отстаёт от реального времени не больше чем на интервал расчёта (4 мин).
+// Среза ещё нет или метод не ответил — берём текущее время.
+export async function моментРасчёта(): Promise<number> {
+  try {
+    const { as_of } = await fetchDataStatus()
+    return as_of ? Date.parse(as_of) : Date.now()
+  } catch {
+    return Date.now()
+  }
+}
+
 // Справочник участков — тот же файл, который читает схема коллектора
 // (screens/map/index.tsx). Нужен, чтобы назвать объект словами: `GET /api/risks`
 // отдаёт только section_id (MOS-127). Файл статический, лежит рядом с бандлом,
@@ -50,7 +64,7 @@ export async function fetchOrdersSummary(): Promise<OrdersSummary> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   const { items } = (await r.json()) as { items: { status: string; due_at: string }[] }
   const открытые = items.filter((o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED')
-  const сейчас = Date.now()
+  const сейчас = await моментРасчёта()
   return {
     open: открытые.length,
     overdue: открытые.filter((o) => Date.parse(o.due_at) < сейчас).length,
