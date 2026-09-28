@@ -45,6 +45,10 @@ const ПИШУЩИЕ: Record<string, { таблицы: string[]; что: string 
     таблицы: ['ref.app_user'],
     что: 'блокировка пользователя сервиса, поле is_active (US-30)',
   },
+  'POST /api/forecasts/{forecast_id}/outcome': {
+    таблицы: ['pred.forecast_outcome'],
+    что: 'исход прогноза: подтвердилось или ложная с причиной (US-10)',
+  },
   'POST /api/forecasts/{forecast_id}/feedback': {
     таблицы: ['pred.feedback'],
     что: 'решение диспетчера по прогнозу (US-09)',
@@ -114,5 +118,48 @@ test('US-29 сц. 1: ни одного метода управления', async
   test.info().annotations.push({
     type: 'замер',
     description: `методов в описании: ${всего.length}; меняют данные: ${пишущие.length}, все пишут только в базу сервиса`,
+  })
+})
+
+// Вторая половина Ф-74 — экраны. Обходить их браузером из облачной сессии нельзя:
+// прокси рвёт навигацию (ERR_TOO_MANY_RETRIES, 28.09.2026). Поэтому читаем бандл,
+// выложенный на стенд, — это ровно то, что исполняет браузер диспетчера. Минификатор
+// оставляет вызовы в виде W(`/api/…/${e}/ack`,{method:`POST`}), путь и метод видны.
+test('US-29 сц. 2: экраны не шлют ничего, кроме методов из списка', async ({ request }) => {
+  const html = await (await request.get('/')).text()
+  const бандлы = [...html.matchAll(/src="(\/assets\/[^"]+\.js)"/g)].map((m) => m[1])
+  expect(бандлы.length, 'в index.html есть бандл').toBeGreaterThan(0)
+
+  const вызовы: string[] = []
+  const чужие: string[] = []
+  const слова: string[] = []
+  for (const путь of бандлы) {
+    const js = await (await request.get(путь)).text()
+    for (const m of js.matchAll(
+      /\(\s*[`'"]([^`'"]*)[`'"]\s*,\s*\{[^{}]*?method:\s*[`'"](POST|PUT|PATCH|DELETE)[`'"]/g,
+    ))
+      вызовы.push(`${m[2]} ${m[1].replace(/\$\{[^}]*\}/g, '{}').split('?')[0]}`)
+    // Абсолютные адреса: всё, кроме пространств имён SVG/MathML/XHTML, — запрос мимо стенда.
+    for (const m of js.matchAll(/https?:\/\/[^\s"'`)]+/g))
+      if (!m[0].startsWith('http://www.w3.org/')) чужие.push(m[0])
+    // Подписи пульта в строках интерфейса. Слово целиком: «допуск» не «пуск».
+    for (const m of js.matchAll(
+      /(?<![а-яё])(пуск|включить|выключить|отключить|перезапуст|перезагрузить|команд[аыу]|управлени[ея]|задвижк)/gi,
+    ))
+      слова.push(js.slice(Math.max(0, m.index - 30), m.index + 30))
+  }
+
+  const разрешённые = new Set(Object.keys(ПИШУЩИЕ).map((k) => k.replace(/\{[^}]*\}/g, '{}')))
+  expect(вызовы.length, 'пишущие вызовы в бандле найдены — регулярка не ослепла').toBeGreaterThan(0)
+  expect(
+    вызовы.filter((в) => !разрешённые.has(в)),
+    'экран шлёт пишущий запрос, которого нет в ПИШУЩИЕ',
+  ).toEqual([])
+  expect(чужие, 'экран обращается к адресу вне стенда').toEqual([])
+  expect(слова, 'на экране есть подпись управления оборудованием').toEqual([])
+
+  test.info().annotations.push({
+    type: 'замер',
+    description: `бандлов: ${бандлы.length}; пишущих вызовов с экранов: ${вызовы.length} (${[...new Set(вызовы)].join('; ')}); внешних адресов: 0`,
   })
 })
