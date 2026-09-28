@@ -431,5 +431,5 @@ docker compose --profile app up -d api worker emulator-smvu
 
 **Чего копия не спасает.** Том `backups` лежит на том же диске, что и база.
 Отказ диска целиком уносит и то и другое. У заказчика это закрывает его СХД
-на 48 ТБ в двух ЦОДах (`docs/plan.md`, блок Q1): каталог тома `backups`
+на 48 ТБ в двух ЦОДах (план работ команды, блок Q1): каталог тома `backups`
 на хосте — `docker volume inspect moskollektor_backups` — туда и уезжает.
