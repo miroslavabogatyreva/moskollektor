@@ -406,6 +406,7 @@ async def get_sensor_risk(
     synthetic: int = Query(1, ge=0, le=1, description="1 — балл с синтетическим паспортом, 0 — только реальные отказы"),
     node: int | None = Query(None, description="узел smvu.object_tree (5657 — «объект Каппа ДУ»)"),
     collector: int | None = Query(None, description="коллектор — узел уровня 2 smvu.object_tree"),
+    channel: int | None = Query(None, description="один канал smvu.channel (экран /map?channel=, MOS-255)"),
     level: Literal["high", "watch", "normal"] | None = Query(None),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
@@ -422,7 +423,12 @@ async def get_sensor_risk(
     паспорт выдуман, и без синтетики его показывать нечем.
 
     Область видимости — как у GET /api/risks: каналы участков вне роли выпадают
-    молча, канал без участка видит только тот, кто видит всё. Сортировка — балл по
+    молча, канал без участка видит только тот, кто видит всё. `channel` — один канал
+    для экрана /map?channel= (MOS-255): канал вне роли, несуществующий и без строки
+    в срезе одинаково дают пустой items, а не 404, — иначе по разнице ответов
+    диспетчер узнал бы, есть ли чужой канал (тот же довод, что у проверить_участок).
+    У элемента есть node_id, collector_id и picket, по ним экран выбирает коллектор
+    и пикет. Сортировка — балл по
     убыванию, затем channel_id. Тик ещё не считал — as_of = null и items пустой.
     """
     syn = bool(synthetic)
@@ -431,12 +437,12 @@ async def get_sensor_risk(
     участки = await видимые_участки(user, conn)
     фильтр = """
      WHERE ($3::int IS NULL OR node_id = $3) AND ($4::int IS NULL OR collector_id = $4)
-       AND ($5::text IS NULL OR level = $5)"""
-    аргументы = (syn, участки, node, collector, level)
+       AND ($5::text IS NULL OR level = $5) AND ($6::int IS NULL OR channel_id = $6)"""
+    аргументы = (syn, участки, node, collector, level, channel)
     total = await conn.fetchval(ДАТЧИКИ + "SELECT count(*) FROM s" + фильтр, *аргументы)
     rows = await conn.fetch(
         ДАТЧИКИ + "SELECT * FROM s" + фильтр
-        + " ORDER BY score DESC, channel_id LIMIT $6 OFFSET $7",
+        + " ORDER BY score DESC, channel_id LIMIT $7 OFFSET $8",
         *аргументы, limit, offset,
     )
     as_of = await conn.fetchval("SELECT max(as_of) FROM pred.sensor_risk")
