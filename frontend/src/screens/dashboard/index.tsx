@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { RiskBadge } from '../../components/RiskBadge'
 import { SyntheticToggle } from '../../components/SyntheticToggle'
+import { Panel, Tile, UnackedPanel } from '../../components/Tiles'
 import { датчиков, коллекторах, коллекторов } from '../../lib/plural'
 import {
   синтетикаВключена,
@@ -176,36 +177,7 @@ export function DashboardScreen({
       />
     </>
   )
-  const ждутКвитирования = (
-    <Panel title="Ждут квитирования">
-      {!unacked ? (
-        <p class="text-sm" style="color:var(--text-muted)">
-          Загрузка…
-        </p>
-      ) : unacked.items.length === 0 ? (
-        <p class="text-sm" style="color:var(--text-muted)">
-          Неквитированных уведомлений нет.
-        </p>
-      ) : (
-        <ul class="flex flex-col gap-2 text-sm">
-          {unacked.items.map((n) => (
-            <li key={n.id}>
-              <a
-                href={`/objects/${n.section_id}`}
-                class="flex justify-between gap-3"
-                style="color:inherit; text-decoration:none"
-              >
-                <span>{n.object_name}</span>
-                <span class="num shrink-0" style="color:var(--text-secondary)">
-                  {процент(n.probability)} за {n.horizon_h} ч · {formatDateTime(n.reported_at)}
-                </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
-  )
+  const ждутКвитирования = <UnackedPanel unacked={unacked} />
 
   return (
     <main class="p-5 flex flex-col gap-4">
@@ -615,20 +587,6 @@ function NowStrip({
   )
 }
 
-function Panel({ title, children }: { title: string; children: preact.ComponentChildren }) {
-  return (
-    <section
-      class="p-3 rounded flex flex-col gap-2"
-      style="background:var(--bg-surface); border:1px solid var(--border-subtle)"
-    >
-      <h2 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
-        {title}
-      </h2>
-      {children}
-    </section>
-  )
-}
-
 /* Край выгрузки и момент расчёта — два разных числа под двумя разными подписями
    (MOS-148). Раньше здесь стояло одно: дашборд брал max(as_of) по строкам ответа
    и подписывал его концом выгрузки. Пока срез назначает планировщик, эти числа
@@ -681,53 +639,5 @@ function DataEdgeTile({ status, error }: { status: DataStatus | null; error: str
           : undefined
       }
     />
-  )
-}
-
-function Tile({
-  label,
-  value,
-  sub,
-  note,
-  warn,
-  accent,
-  href,
-}: {
-  label: string
-  value: string
-  sub?: string
-  note?: string
-  warn?: string
-  accent?: string // цвет полоски слева — у плиток, где число требует действия
-  href?: string // плитка ведёт туда, где с этим числом работают
-}) {
-  return (
-    <article
-      class="p-3 rounded flex flex-col gap-1 relative"
-      style={`background:var(--bg-surface); border:1px solid var(--border-subtle)${accent ? `; border-left:4px solid ${accent}` : ''}`}
-    >
-      <h3 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
-        {label}
-      </h3>
-      <div class="num text-2xl font-semibold" style="font-family:var(--font-display)">
-        {value}
-      </div>
-      {sub && (
-        <div class="text-xs" style="color:var(--text-secondary)">
-          {sub}
-        </div>
-      )}
-      {note && (
-        <div class="text-xs" style="color:var(--text-muted)">
-          {note}
-        </div>
-      )}
-      {warn && (
-        <div class="text-xs" style="color:var(--state-warning)">
-          {warn}
-        </div>
-      )}
-      {href && <a href={href} class="absolute inset-0" aria-label={`${label}: ${value}`} />}
-    </article>
   )
 }

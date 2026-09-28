@@ -14,7 +14,7 @@ const правыйКрай = (page: Page, селектор: string) =>
   )
 
 test('шапка на 390 px не шире окна', async ({ page }) => {
-  for (const адрес of ['/dashboard', '/orders']) {
+  for (const адрес of ['/map', '/dashboard', '/orders']) {
     await page.goto(адрес)
     await expect(page.getByRole('navigation', { name: 'Разделы' })).toBeVisible()
     expect(await правыйКрай(page, 'header, header *'), адрес).toBeLessThanOrEqual(390)
@@ -23,7 +23,7 @@ test('шапка на 390 px не шире окна', async ({ page }) => {
 })
 
 test('кнопка «вся линия» оси пикетов на 390 px не вылезает за окно', async ({ page }) => {
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   const кнопка = page.getByRole('group', { name: /^Масштаб линии / }).first()
   await expect(кнопка.getByRole('button', { name: 'вся линия' })).toBeVisible()
   expect(await правыйКрай(page, '[aria-label^="Масштаб линии"] button')).toBeLessThanOrEqual(390)

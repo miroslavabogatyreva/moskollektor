@@ -77,7 +77,7 @@ test('US-01 сц. 2: уровень риска читается без цифр'
     expect(т, `строка ${i + 1}`).toMatch(/высокий риск|низкий риск|класса нет/)
 
   // Цвет того же уровня в легенде схемы коллектора — обводка значка.
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   for (const [слово, цвет] of Object.entries(цветСтроки)) {
     const значок = page
       .locator('main span', { hasText: new RegExp(`^${слово}$`) })
