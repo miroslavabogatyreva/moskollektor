@@ -266,7 +266,7 @@ docker compose exec api python code/check_lock.py
 корня пакета: `python3 code/<имя>.py`. `check_metrics_report` лежит в обоих местах:
 в образе он нужен как модуль (`check_orders` берёт из него окно замера), а сам отчёт
 и доказательства проверяет только из пакета — в контейнере он скажет это словами; все разом с привязкой к строкам приёмки —
-`bash delivery/check-all.sh`.
+`bash delivery/check-all.sh`. `check_structure` — исключение: она сверяет счётчики каталогов с `git ls-tree`, поэтому работает только из клона репозитория, а не из архива `delivery/pack.sh`, где `.git` нет.
 
 `check_licenses` сверяет перечень `docs/libraries.md` с `node_modules`, а в них
 платформенные сборки (`@rolldown/binding-darwin-arm64` на Маке, `-linux-x64-gnu`
