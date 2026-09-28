@@ -1,5 +1,0 @@
-H=720 geometry=tail rule=margin threshold=0.63
-body_hi=2026-06-01 00:00:00
-alerts=166 body=133
-incidents=170
-judge={'threshold': 0.63, 'per_day': 2.18, 'tp': 121, 'fp': 12, 'fn': 27, 'P': 0.91, 'R': 0.841, 'median_lead_h': 22.6, 'P_lead1h': 0.9, 'R_lead1h': 0.8, 'P_lead24h': 0.882, 'R_lead24h': 0.676, 'rule_P': 0.875, 'rule_R': 0.824}

@@ -69,3 +69,23 @@ moskollektor-wt/
 docs/review/
 docs/workflow.md
 docs/typical-composition-of-the-security-system-of-urban-sewers.md
+
+# Внутренняя кухня и рабочие материалы: в git не идут, на диске остаются (MOS-266, 28.09.2026).
+/.agents/
+/.claude/
+/skills-lock.json
+/CLAUDE.md
+docs/CLAUDE.md
+docs/proof/
+docs/meetings/
+/analysis/
+/dashboard/
+docs/plan.md
+docs/for-ml-team.md
+docs/day-one.md
+docs/toir-libs-verdict.md
+docs/toir-opensource-libs.md
+docs/sensor-level-proposal.md
+docs/График ППР АКМ на 2026г. РЭК.xlsx
+docs/График_ТО_АКМ_и_ДУ_на_2026г_РЭК_3_на_А4.xlsx
+docs/project-structure.md

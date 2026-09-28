@@ -57,7 +57,7 @@
 
 Ловушку `scikit-survival` (GPL в поле, пустые классификаторы) сам пакет
 не ставим — 274 МБ по замеру `docs/HLD.md` разд. 7.2, он и так не наш
-(`docs/toir-libs-verdict.md`). `code/check_licenses.py --selfcheck` подсовывает
+(разбор библиотек ТОиР). `code/check_licenses.py --selfcheck` подсовывает
 такую же запись без установки пакета и доказывает, что она красная.
 
 ## `api`, `worker`
