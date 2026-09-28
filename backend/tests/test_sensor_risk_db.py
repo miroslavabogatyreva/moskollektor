@@ -117,7 +117,7 @@ def database():
             """.replace("$1", str(КАНАЛОВ))
             )
             # Отказы: газ узла 5657 — в окне ППР 04.06.2026 (не отказ), каждый 7-й
-            # канал — свежий отказ 30.06 за 6 ч до среза, каждый 11-й — отказ позже среза (не видим).
+            # канал — свежий отказ 30.06 за 1 ч до среза (момент rearm), каждый 11-й — отказ позже среза (не видим).
             await conn.execute("""
                 INSERT INTO smvu.model_failure_episode
                        (channel_id, section_id, started_at, ended_at, fault_value, model_version)
@@ -125,7 +125,7 @@ def database():
                        'Неисправен', 'lgbm-v3-bag-2026.09.21'
                   FROM smvu.channel c
                   JOIN (VALUES (timestamptz '2026-06-04 09:30+03', 'ppr'),
-                               (timestamptz '2026-06-30 18:00+03', 'fresh'),
+                               (timestamptz '2026-06-30 23:00+03', 'fresh'),
                                (timestamptz '2026-07-10 10:00+03', 'future')) AS s(t, what)
                     ON (s.what = 'ppr' AND c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик')
                     OR (s.what = 'fresh' AND c.channel_id % 7 = 0)
@@ -319,6 +319,15 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         ):
             assert r["score_real"] > здоровый(r["channel_id"]), r
             assert json.loads(r["reasons_real"])[0]["kind"] == "real"
+        # отказ час назад — момент rearm: модель журнала даёт high всем таким каналам
+        assert await conn.fetchval(
+            "SELECT bool_and(level_real = 'high') FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+        )
+        # синтетический предвестник доходит до причин режима «с синтетикой»
+        assert await conn.fetchval(
+            "SELECT count(*) FROM pred.sensor_risk "
+            "WHERE reasons::text LIKE '%предупреждение прибора%'"
+        ) > 0
         for r in await conn.fetch(
             "SELECT channel_id, score_real FROM pred.sensor_risk "
             "WHERE channel_id % 11 = 0 AND channel_id % 7 <> 0 AND channel_id NOT IN "
