@@ -169,7 +169,43 @@ export interface SensorMock {
   items: (synthetic: boolean) => Item[]
 }
 
+// E2E_SENSOR_MOCK=0 — против живого API: запросы уходят на сервер как есть (адреса
+// всё равно пишем), а items() — тот же парк, прочитанный с сервера заранее, с именем
+// коллектора из sections.json, как его показывает экран. Тест сверяет экран с тем,
+// что сервер отдал, а не с числами мока. Нужна сборка с API стенда (BASE_URL).
+const ЖИВОЙ = process.env.E2E_SENSOR_MOCK === '0'
+
+async function живойПарк(page: Page, synthetic: boolean): Promise<Item[]> {
+  const имена = new Map<number, string>()
+  const sections = (await (await page.request.get('/data/sections.json')).json()) as Section[]
+  for (const s of sections) имена.set(s.collector, s.collector_name ?? String(s.collector))
+  const out: Item[] = []
+  for (let offset = 0; ; offset += 5000) {
+    const r = await page.request.get(
+      `/api/sensor-risk?synthetic=${synthetic ? 1 : 0}&limit=5000&offset=${offset}`,
+    )
+    if (!r.ok()) throw new Error(`GET /api/sensor-risk: ${r.status()}`)
+    const d = (await r.json()) as { total: number; items: Omit<Item, 'collector_name'>[] }
+    for (const s of d.items)
+      out.push({ ...s, collector_name: имена.get(s.collector_id) ?? String(s.collector_id) })
+    if (out.length >= d.total || d.items.length === 0) return out
+  }
+}
+
 export async function mockSensorRisk(page: Page): Promise<SensorMock> {
+  if (ЖИВОЙ) {
+    const срезы = new Map([
+      [true, await живойПарк(page, true)],
+      [false, await живойПарк(page, false)],
+    ])
+    const urls: string[] = []
+    await page.route('**/api/sensor-risk**', (route) => {
+      const url = new URL(route.request().url())
+      urls.push(url.pathname + url.search)
+      return route.continue()
+    })
+    return { urls, items: (synthetic) => срезы.get(synthetic)! }
+  }
   const все = парк()
   const cache = new Map<boolean, Item[]>()
   const items = (synthetic: boolean) => {
