@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { RiskBadge } from '../../components/RiskBadge'
-import { Tile, UnackedPanel } from '../../components/Tiles'
+import { UnackedPanel } from '../../components/Tiles'
 import { apiFetch } from '../../lib/api'
 import { usePoll, свежо } from '../../lib/poll'
 import { errorMessage, formatDate, formatDateTime, имяУчастка } from '../../lib/format'
-import { участков } from '../../lib/plural'
+import { датчиков, коллекторах, слово, участков } from '../../lib/plural'
 import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
@@ -526,7 +526,68 @@ function AxisSwitch({
   )
 }
 
-// Полоса-сводка над схемой: те же плитки, что на дашборде, в одну строку.
+// Полоса-сводка над схемой: четыре плотные плитки-ссылки в одну строку (на 390 px —
+// по две в ряд). Число стоит рядом с подписью, ниже — подробности из тех же ответов:
+// сводки по датчикам, журнала неквитированных и сводки заявок. Тон плитки красит
+// кружок значка и фон; при нуле плитка спокойная, серая или зелёная.
+type Тон = 'danger' | 'warning' | 'ok' | 'idle'
+const тыс = (n: number) => n.toLocaleString('ru-RU')
+const доля = (n: number, из: number) =>
+  `${(из ? (n / из) * 100 : 0).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} %`
+
+function StatTile({
+  href,
+  tone,
+  icon,
+  value,
+  label,
+  sub,
+  children,
+}: {
+  href: string
+  tone: Тон
+  icon: preact.ComponentChildren
+  value: string
+  label: string
+  sub?: string
+  children?: preact.ComponentChildren
+}) {
+  return (
+    <a href={href} class="stat" data-tone={tone}>
+      <span class="stat-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span class="stat-body">
+        <span class="stat-head">
+          <span class="stat-value num">{value}</span>
+          <span class="stat-label">{label}</span>
+        </span>
+        {sub && <span class="stat-sub">{sub}</span>}
+        {children}
+      </span>
+    </a>
+  )
+}
+
+// Контурные значки в одном стиле (обводка 2, скруглённые концы): колокол и планшет.
+const Значок = ({ d }: { d: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d={d} />
+  </svg>
+)
+const КОЛОКОЛ = 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0'
+const ПЛАНШЕТ =
+  'M9 3h6v3H9zM9 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-3M9 13l2 2 4-4'
+
 function HomeStrip({
   summary,
   summaryError,
@@ -539,40 +600,90 @@ function HomeStrip({
   orders: OrdersSummary | null
 }) {
   const нет = summaryError ? '—' : '…'
+  const всего = summary ? summary.high + summary.watch + summary.normal : 0
+  const топ = summary?.top_collectors.find((c) => c.high > 0)
+  const свежее = unacked?.items[0]
   return (
-    <div
-      data-testid="home-strip"
-      class="grid gap-3"
-      style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"
-    >
-      <Tile
-        label="▲ Высокий риск"
-        value={summary ? String(summary.high) : нет}
-        sub={summaryError ? 'сводка по датчикам не загрузилась' : 'датчиков'}
-        accent={summary && summary.high > 0 ? 'var(--risk-critical-border)' : undefined}
+    <div data-testid="home-strip" class="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3">
+      <StatTile
         href="/dashboard?level=high"
-      />
-      <Tile
-        label="◆ Наблюдать"
-        value={summary ? String(summary.watch) : нет}
-        sub={summary ? `в норме ${summary.normal}` : undefined}
-        accent={summary && summary.watch > 0 ? 'var(--risk-medium-border)' : undefined}
+        tone={summary && summary.high > 0 ? 'danger' : 'idle'}
+        icon="▲"
+        value={summary ? тыс(summary.high) : нет}
+        label="Высокий риск"
+        sub={
+          summaryError
+            ? 'сводка по датчикам не загрузилась'
+            : !summary
+              ? undefined
+              : summary.high > 0
+                ? `${слово(summary.high, ['датчик', 'датчика', 'датчиков'])} на ${коллекторах(summary.collectors_with_high)}`
+                : 'датчиков высокого риска нет'
+        }
+      >
+        {топ && (
+          <span class="stat-extra" title={`${топ.name}: ${датчиков(топ.high)}`}>
+            больше всего: <b>{топ.name}</b> · {топ.high}
+          </span>
+        )}
+      </StatTile>
+      <StatTile
         href="/dashboard?level=watch"
-      />
-      <Tile
-        label="Неквитированные"
-        value={unacked ? String(unacked.total) : '…'}
-        sub={unacked ? (unacked.total > 0 ? 'уведомлений' : 'все квитированы') : undefined}
-        accent={unacked && unacked.total > 0 ? 'var(--state-warning)' : undefined}
+        tone={summary && summary.watch > 0 ? 'warning' : 'idle'}
+        icon="◆"
+        value={summary ? тыс(summary.watch) : нет}
+        label="Наблюдать"
+        sub={summary ? `в норме ${тыс(summary.normal)} из ${тыс(всего)}` : undefined}
+      >
+        {summary && всего > 0 && (
+          <span
+            class="stat-bar"
+            role="img"
+            aria-label={`высокий риск ${доля(summary.high, всего)}, наблюдать ${доля(summary.watch, всего)}, в норме ${доля(summary.normal, всего)}`}
+            title={`▲ ${доля(summary.high, всего)} · ◆ ${доля(summary.watch, всего)} · в норме ${доля(summary.normal, всего)}`}
+          >
+            <i style={`flex-grow:${summary.high}; background:var(--risk-critical-border)`} />
+            <i style={`flex-grow:${summary.watch}; background:var(--risk-medium-border)`} />
+            <i style={`flex-grow:${summary.normal}; background:var(--risk-low-border)`} />
+          </span>
+        )}
+      </StatTile>
+      <StatTile
         href="/orders"
-      />
-      <Tile
-        label="Заявки в работе"
-        value={orders ? String(orders.open) : '…'}
-        sub={orders ? (orders.overdue > 0 ? undefined : 'просроченных нет') : undefined}
-        warn={orders && orders.overdue > 0 ? `из них просрочено ${orders.overdue}` : undefined}
+        tone={!unacked ? 'idle' : unacked.total > 0 ? 'warning' : 'ok'}
+        icon={<Значок d={КОЛОКОЛ} />}
+        value={unacked ? тыс(unacked.total) : '…'}
+        label="Неквитированные"
+        sub={
+          !unacked
+            ? undefined
+            : unacked.total > 0
+              ? слово(unacked.total, ['уведомление', 'уведомления', 'уведомлений'])
+              : 'все квитированы'
+        }
+      >
+        {свежее && (
+          <span class="stat-extra" title={свежее.object_name}>
+            свежее: <b>{свежее.object_name}</b> · {formatDateTime(свежее.reported_at)}
+          </span>
+        )}
+      </StatTile>
+      <StatTile
         href="/orders?status=active"
-      />
+        tone={!orders ? 'idle' : orders.overdue > 0 ? 'danger' : 'ok'}
+        icon={<Значок d={ПЛАНШЕТ} />}
+        value={orders ? тыс(orders.open) : '…'}
+        label="Заявки в работе"
+      >
+        {orders &&
+          (orders.overdue > 0 ? (
+            <span class="stat-flag">
+              просрочено {тыс(orders.overdue)} · {доля(orders.overdue, orders.open)}
+            </span>
+          ) : (
+            <span class="stat-sub">просроченных нет</span>
+          ))}
+      </StatTile>
     </div>
   )
 }

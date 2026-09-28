@@ -90,7 +90,7 @@ test('плитка «Заявки в работе» ведёт на открыт
   const все = await всеЗаявки(page)
   await слушатьЗаявки(page, все)
   await page.goto('/map')
-  await page.getByRole('link', { name: /^Заявки в работе/ }).click()
+  await page.getByRole('link', { name: /Заявки в работе/ }).click()
   await expect(page).toHaveURL(/\/orders\?status=active$/)
   await expect(page.getByLabel('Статус')).toHaveValue('active')
   const активных = все.filter((o) => подходит(o, 'active', null)).length
