@@ -123,6 +123,8 @@ export interface OrderDetail {
   created_at: string
   // null у автозаявки — её завёл расчёт, а не человек (moskollektor-44, 17.09.2026)
   created_by: string | null
+  // История заявки — maint.notification_status_log (миграция 058, US-19, Ф-87)
+  status_history: OrderStatusEntry[]
 }
 
 // Строка GET /api/objects/{id}/channels (backend/app/api/objects.py) — ровно те
@@ -134,4 +136,11 @@ export interface TopChannel {
   system_kind: string
   faults_cnt: number
   last_fault_at: string | null
+}
+
+export interface OrderStatusEntry {
+  status: string
+  assignee: string | null
+  changed_at: string // момент смены в источнике
+  source: 'order_system' | 'user'
 }
