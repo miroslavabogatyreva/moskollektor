@@ -6,8 +6,9 @@
 
 Формула одна — `app.domain.sensor_risk`: отказы smvu.model_failure_event (как
 у карточки участка, от нижней границы pred.weight_window()), синтетический паспорт
-из db/seed/sensor_demo.sql, окна графика ППР. Здесь только чтение входа тремя
-запросами и запись результата: на 11,5 тыс. каналов это три выборки и один COPY.
+из db/seed/sensor_demo.sql, окна графика ППР из maint.ppr_window (MOS-251). Здесь
+только чтение входа четырьмя запросами и запись результата: на 11,5 тыс. каналов это
+четыре выборки и один COPY.
 
 Блокировка своя — `pg_try_advisory_lock(48219)`, рядом с 48217 расчёта (run.py)
 и 48218 самопроверки планировщика: занято — тик выходит сразу, без ожидания.
@@ -74,6 +75,7 @@ async def баллы(conn, at) -> list[tuple]:
     starts: dict[int, list] = {}
     for r in await conn.fetch(ОТКАЗЫ, at):
         starts.setdefault(r["channel_id"], []).append(r["started_at"])
+    окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
     строки = []
     for c in await conn.fetch(КАНАЛЫ, sensor_risk.SRC):
         eq = c["eq_id"] and {
@@ -85,7 +87,7 @@ async def баллы(conn, at) -> list[tuple]:
             starts.get(c["channel_id"], []),
             eq or None,
             at,
-            sensor_risk.plan_windows(c["object_id"], c["sensor_kind"]),
+            окна.get((c["object_id"], c["sensor_kind"]), ()),
         )
         строки.append(
             (

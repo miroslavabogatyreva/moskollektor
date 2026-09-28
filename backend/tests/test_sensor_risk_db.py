@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "code"))
 import synth_sensor_level
 
+PPR_SQL = ROOT / "db/seed/ppr_2026.sql"
 КАНАЛОВ = 11_500
 AS_OF = "2026-06-30 23:59:59+03"
 ADMIN = {"login": "admin", "roles": ["admin"]}
@@ -78,18 +79,25 @@ def database():
             # Чистая установка до заливки: сид молчит и ничего не пишет.
             await conn.execute(synth_sensor_level.SEED_SQL.read_text())
             assert await conn.fetchval("SELECT count(*) FROM asset.equipment") == 0
+            # график ППР пишется и до заливки дерева, но без узлов
+            await conn.execute(PPR_SQL.read_text())
+            assert await conn.fetchval(
+                "SELECT count(*) FILTER (WHERE object_id IS NULL) FROM maint.ppr_window"
+            ) == 26
             await conn.execute("""
                 INSERT INTO smvu.object_tree (object_id, level, parent_id, kind, name) VALUES
                   (1, 1, NULL, 'district', 'Район'),
                   (15, 2, 1, 'guardObject', 'объект Каппа'),
                   (16, 2, 1, 'guardObject', 'объект Лямбда'),
                   (5657, 3, 15, 'controlHouse', 'объект Каппа ДУ'),
+                  (5675, 3, 16, 'controlHouse', 'объект Мю ДУ'),
                   (5700, 3, 16, 'controlHouse', 'объект Лямбда ДУ');
                 INSERT INTO ref.object_xref (section_id, smvu_key)
                 SELECT g, 'test:' || g FROM generate_series(1, 40) g;
                 INSERT INTO ref.app_user (login, full_name) VALUES ('disp_kappa', 'Диспетчер Каппы');
                 INSERT INTO ref.user_scope (login, object_id) VALUES ('disp_kappa', 15);
             """)
+            await conn.execute(PPR_SQL.read_text())  # теперь узлы есть — допишет
             # Каналы: первая половина — узел 5657 (участки 1…20), вторая — 5700 (21…40).
             await conn.execute(
                 """
@@ -200,6 +208,35 @@ def test_seed_passport_everywhere_deterministic_and_blind(database):
                 JOIN asset.measurement m ON m.point_id = p.id
                WHERE c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик'
                GROUP BY c.channel_id) x""")
+
+    _в_базе(database, тело)
+
+
+def test_ppr_seed_rows_nodes_and_rerun(database):
+    """SL.2: 26 строк графика, узел — только у пар, которые есть в дереве;
+    повторный накат ничего не трогает; тик берёт окна match = 'sure'."""
+
+    async def тело(conn):
+        строки = await conn.fetch(
+            "SELECT id, plan_row, object_id, match FROM maint.ppr_window ORDER BY id"
+        )
+        assert len(строки) == 26
+        по = {r["plan_row"]: r for r in строки}
+        assert [по[f"Объект {n}"]["match"] for n in (14, 9, 3, 6)] == [
+            "sure", "sure", "doubtful", "doubtful",
+        ]
+        assert sum(r["match"] == "none" for r in строки) == 22
+        # 4610 и 4369 в тестовом дереве нет — узла нет и у строки
+        assert {r["plan_row"]: r["object_id"] for r in строки if r["object_id"]} == {
+            "Объект 14": 5657, "Объект 9": 5675,
+        }
+        await conn.execute(PPR_SQL.read_text())
+        assert await conn.fetch(
+            "SELECT id, plan_row, object_id, match FROM maint.ppr_window ORDER BY id"
+        ) == строки
+        окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
+        assert set(окна) == {(5657, "Газовый датчик"), (5675, "Газовый датчик")}
+        assert окна[(5675, "Газовый датчик")][0]["text"].startswith("23.04.2026")
 
     _в_базе(database, тело)
 
@@ -355,9 +392,9 @@ def test_api_reads_table_with_filters_and_scope(database):
         assert (await _список(conn, DISP, channel=266003))["total"] == 1
         assert (await _список(conn, ADMIN, channel=424242))["items"] == []
 
-        with pytest.raises(objects.HTTPException) as e:
-            await _список(conn, ADMIN, node=424242)
-        assert e.value.status_code == 404
+        # несуществующий узел — пустой items, как у channel, а не 404 (MOS-251)
+        нет = await _список(conn, ADMIN, node=424242)
+        assert (нет["total"], нет["items"], нет["node_name"]) == (0, [], None)
         with pytest.raises(objects.HTTPException):
             await _список(conn, ADMIN, collector=5657)  # узел, а не коллектор
 

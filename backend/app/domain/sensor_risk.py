@@ -29,26 +29,38 @@ HIGH, WATCH = 0.5, 0.25
 # ТО насоса и вентилятора (снимают моточасы) раз в полгода.
 INTERVAL = {"calib": 365, "motohours": 182}
 
-# Окна планового демонтажа. Источник: docs/График ППР АКМ на 2026г. РЭК.xlsx,
-# строка «Июнь, Объект 14, 33 шт., начало демонтажа 04.06.2026, вывоз из ОМ
-# 18.06.2026». Объект 14 графика = «объект Каппа ДУ» (5657): 33 газовых канала
-# ушли в «Неисправен» 04.06.2026 09:22–10:38 на ~11 суток.
-# ponytail: константа; брать из maint.plan, когда заказчик даст график
-# с нашими именами объектов.
-ППР = [
-    {
-        "node": 5657,
-        "sensor_kind": "Газовый датчик",
-        "from": datetime(2026, 6, 4, tzinfo=MSK),
-        "to": datetime(2026, 6, 18, 23, 59, 59, tzinfo=MSK),
-        "text": "04.06.2026 — плановый демонтаж на поверку по графику ППР "
-        "заказчика (Объект 14), не отказ",
+# Окна планового демонтажа — maint.ppr_window (миграция 060, сид db/seed/ppr_2026.sql,
+# 26 строк графика ППР заказчика). В балл идут только окна match = 'sure':
+# Объект 14 = Каппа ДУ (5657) и Объект 9 = Мю ДУ (5675), разбор —
+# docs/proof/2026-09-28-sensor-level/ppr-match.md. Тик читает их запросом ОКНА
+# и передаёт сюда аргументом, поэтому самопроверка обходится без базы.
+ОКНА = """
+SELECT plan_row, object_id, sensor_kind, dismantle_from, return_to
+  FROM maint.ppr_window
+ WHERE match = 'sure' AND object_id IS NOT NULL
+"""
+
+
+def window(plan_row, dismantle_from, return_to):
+    """Строка maint.ppr_window → окно для score(): [начало 00:00; вывоз 23:59:59] Москвы."""
+    return {
+        "from": datetime.combine(dismantle_from, datetime.min.time(), MSK),
+        "to": datetime.combine(return_to, datetime.max.time(), MSK).replace(
+            microsecond=0
+        ),
+        "text": f"{dismantle_from:%d.%m.%Y} — плановый демонтаж на поверку по графику "
+        f"ППР заказчика ({plan_row}), не отказ",
     }
-]
 
 
-def plan_windows(node, sensor_kind):
-    return [w for w in ППР if w["node"] == node and w["sensor_kind"] == sensor_kind]
+def plan_windows(rows):
+    """Строки запроса ОКНА → {(object_id, sensor_kind): [окно, …]}."""
+    окна = {}
+    for r in rows:
+        окна.setdefault((r["object_id"], r["sensor_kind"]), []).append(
+            window(r["plan_row"], r["dismantle_from"], r["return_to"])
+        )
+    return окна
 
 
 def level(s):
@@ -58,7 +70,7 @@ def level(s):
 def score(starts, eq, at, plan=()):
     """starts — моменты начала отказов канала (datetime с поясом);
     eq — {"in_service": date, "life": лет, "points": [{"kind", "readings": [(date, …)]}]}
-    или None; plan — окна plan_windows(). Отдаёт {"score", "level", "reasons"}."""
+    или None; plan — окна канала из plan_windows(). Отдаёт {"score", "level", "reasons"}."""
     reasons, faults = [], []
     for s in starts:
         if s > at:
@@ -140,13 +152,44 @@ def _selfcheck():
         "life": 10,
         "points": [{"kind": "calib", "readings": [(date(2025, 12, 1), 1.0)]}],
     }
-    plan = plan_windows(5657, "Газовый датчик")
+    окна = plan_windows(
+        [
+            {
+                "plan_row": "Объект 14",
+                "object_id": 5657,
+                "sensor_kind": "Газовый датчик",
+                "dismantle_from": date(2026, 6, 4),
+                "return_to": date(2026, 6, 18),
+            },
+            {
+                "plan_row": "Объект 9",
+                "object_id": 5675,
+                "sensor_kind": "Газовый датчик",
+                "dismantle_from": date(2026, 4, 23),
+                "return_to": date(2026, 5, 7),
+            },
+        ]
+    )
+    plan = окна[(5657, "Газовый датчик")]
+    assert plan == [
+        {
+            "from": datetime(2026, 6, 4, tzinfo=MSK),
+            "to": datetime(2026, 6, 18, 23, 59, 59, tzinfo=MSK),
+            "text": "04.06.2026 — плановый демонтаж на поверку по графику ППР "
+            "заказчика (Объект 14), не отказ",
+        }
+    ], plan
+    assert (5657, "Датчик температуры") not in окна
+    # Мю ДУ: эпизод 1535 (23.04 09:34) в окне Объекта 9, отказ 08.05 — уже нет
+    мю = окна[(5675, "Газовый датчик")]
+    assert score([datetime(2026, 4, 23, 9, 34, tzinfo=MSK)], None, at, мю)["score"] == 0
+    assert score([datetime(2026, 5, 8, 0, 0, tzinfo=MSK)], None, at, мю)["score"] > 0
     base = score([], eq, at, plan)
     # ППР-эпизод балл не поднимает и оставляет причину plan с весом 0
     ппр = score([datetime(2026, 6, 4, 9, 22, tzinfo=MSK)] * 2, eq, at, plan)
     assert ппр["score"] == base["score"], (ппр, base)
     assert [r for r in ппр["reasons"] if r["kind"] == "plan"] == [
-        {"text": ППР[0]["text"], "weight": 0.0, "kind": "plan"}
+        {"text": plan[0]["text"], "weight": 0.0, "kind": "plan"}
     ]
     # тот же эпизод у фазы (окна нет) — отказ
     assert (
@@ -174,7 +217,9 @@ def _selfcheck():
     assert sp["score_real"] == score([at - timedelta(days=30)], None, at)["score"]
     assert round(sp["score_real"] + sp["score_synth"], 3) == full["score"], (sp, full)
     assert sp["level_full"] == full["level"] and sp["reasons"] == full["reasons"]
-    assert split([], None, at)["score_synth"] == 0 and split([], eq, at)["score_real"] == 0
+    assert (
+        split([], None, at)["score_synth"] == 0 and split([], eq, at)["score_real"] == 0
+    )
     print("sensor_risk selfcheck ok")
 
 
