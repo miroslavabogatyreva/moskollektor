@@ -29,3 +29,33 @@ export interface DataStatus {
   sections_scored: number
   sections_total: number
 }
+
+// GET /api/weather/now — погода в Москве сейчас, живой Open-Meteo (28.09.2026).
+export interface WeatherNow {
+  observed_at: string // час по Москве без пояса: 2026-09-28T10:15
+  temp_c: number
+  precip_mm: number
+  wind_ms: number
+  sky: string
+  source: string
+}
+
+// Неквитированные уведомления: total — для плитки, items — пять свежих для списка.
+export interface Unacked {
+  total: number
+  items: {
+    id: number
+    reported_at: string
+    object_name: string
+    section_id: number
+    probability: number
+    horizon_h: number
+  }[]
+}
+
+// Сводка заявок для плитки: открытых и просроченных — по тому же правилу,
+// что экран заявок (screens/orders/index.tsx, просрочена()).
+export interface OrdersSummary {
+  open: number
+  overdue: number
+}

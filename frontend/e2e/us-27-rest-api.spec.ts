@@ -36,7 +36,7 @@ for (const login of ['ods1', 'tech1']) {
       await expect(строки).toHaveCount(n)
 
       // С экрана: номер участка после точки в столбце «Объект» и вероятность
-      // в столбце «Вероятность» — четыре знака после запятой.
+      // в столбце «Вероятность» — процент с одним знаком: «91,5 %» (дашборд 28.09.2026).
       const наЭкране = new Map<number, string>(
         await строки.evaluateAll((trs) =>
           trs.map((tr) => {
@@ -58,7 +58,7 @@ for (const login of ['ods1', 'tech1']) {
       expect(риски.length, `в ответе столько участков, сколько на экране (${n})`).toBe(n)
       for (const x of риски)
         expect(
-          x.probability.toFixed(4),
+          `${(x.probability * 100).toFixed(1).replace('.', ',')} %`,
           `участок ${x.section_id}: вероятность в API и на экране`,
         ).toBe(наЭкране.get(x.section_id))
       await api.dispose()
