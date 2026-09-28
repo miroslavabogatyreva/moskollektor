@@ -147,7 +147,13 @@ function OrdersTab({ status, priority }: { status: string; priority: string }) {
   // «просрочено» от часов браузера (см. моментРасчёта).
   const [срез, setСрез] = useState<number | null>(null)
   useEffect(() => {
-    моментРасчёта().then(setСрез)
+    let отменено = false
+    моментРасчёта().then((м) => {
+      if (!отменено) setСрез(м)
+    })
+    return () => {
+      отменено = true
+    }
   }, [tick])
   const сейчас = срез ?? -Infinity
   const стильПоля =
