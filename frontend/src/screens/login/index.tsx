@@ -142,7 +142,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
                         setPassword(a.password)
                         setError(null)
                       }}
-                      class="px-2 py-1 rounded text-xs"
+                      class="px-2 py-1 rounded text-xs whitespace-nowrap"
                       style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
                     >
                       Войти как
