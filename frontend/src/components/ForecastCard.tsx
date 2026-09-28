@@ -123,9 +123,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
   return (
     <main class="p-5 flex flex-col gap-5">
       <div>
-        <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Прогноз
-        </h1>
+        <h1 style="font-family:var(--font-display)">Прогноз</h1>
         <p style="color:var(--text-secondary)">
           Срез данных {formatDateTime(data.as_of)} · расчёт {formatDateTime(data.computed_at)}
         </p>
@@ -147,7 +145,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         </p>
       </div>
 
-      <section class="text-sm">
+      <section class="card text-sm">
         {DIRECTION_LABEL[data.direction]}: вероятность{' '}
         <b class="num">{data.probability.toFixed(4)}</b>, ранг <b class="num">{data.risk_rank}</b>,
         горизонт {data.horizon_h} ч
@@ -156,11 +154,9 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
       <section
         data-testid="last-decision"
         data-can-decide={canDecide == null ? undefined : String(canDecide)}
-        class="text-sm flex flex-col gap-2 items-start"
+        class="card text-sm flex flex-col gap-2 items-start"
       >
-        <h2 class="font-semibold" style="color:var(--text-muted)">
-          Решение диспетчера
-        </h2>
+        <h2 class="card-title">Решение диспетчера</h2>
         {data.decision ? (
           <p>
             <b>{data.decision.decision_name}</b>
@@ -181,8 +177,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
             ref={decideButton}
             type="button"
             onClick={() => setDialogOpen(true)}
-            class="px-3 py-1 rounded"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-primary"
           >
             Решение диспетчера
           </button>
@@ -201,10 +196,8 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
 
       {/* Исход прогноза (US-10): чем прогноз кончился. Без отметки человека система
           исход не ставит — пишет «ещё открыт» или «горизонт истёк» (сц. 4, Ф-75). */}
-      <section data-testid="outcome" class="text-sm flex flex-col gap-2 items-start">
-        <h2 class="font-semibold" style="color:var(--text-muted)">
-          Исход прогноза
-        </h2>
+      <section data-testid="outcome" class="card text-sm flex flex-col gap-2 items-start">
+        <h2 class="card-title">Исход прогноза</h2>
         {data.outcome ? (
           <p>
             <b>{data.outcome.outcome_name}</b>
@@ -223,8 +216,7 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
             ref={outcomeButton}
             type="button"
             onClick={() => setOutcomeOpen(true)}
-            class="px-3 py-1 rounded"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-primary"
           >
             Отметить исход
           </button>
@@ -241,10 +233,8 @@ export function ForecastCard({ forecastId }: { forecastId?: string } & Record<st
         )}
       </section>
 
-      <section>
-        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-          Заявки по этому прогнозу
-        </h2>
+      <section class="card">
+        <h2 class="card-title mb-2">Заявки по этому прогнозу</h2>
         {data.order_ids === undefined ? (
           <p class="text-sm" style="color:var(--text-muted)">
             Метод GET /api/forecasts/{'{id}'} пока не отдаёт связанные заявки.

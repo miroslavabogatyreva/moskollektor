@@ -1,0 +1,84 @@
+/* Подсказки тура (src/lib/tour.ts) в цветах приложения: токены из tokens.css,
+   тёмная тема приходит сама вместе с токенами. Грузится вместе с туром, лениво. */
+.driver-popover.tour-popover {
+  font-family: var(--font-ui);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: var(--shadow-raised);
+  max-width: min(380px, calc(100vw - 32px));
+  padding: 16px 18px;
+}
+.tour-popover .driver-popover-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 650;
+  padding-right: 24px;
+}
+.tour-popover .driver-popover-description {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.tour-popover .driver-popover-progress-text {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.tour-popover .driver-popover-close-btn {
+  color: var(--text-muted);
+  font-size: 22px;
+}
+.tour-popover .driver-popover-close-btn:hover,
+.tour-popover .driver-popover-close-btn:focus-visible {
+  color: var(--text-primary);
+}
+.tour-popover .driver-popover-footer-btn {
+  font: 600 13px/1.3 var(--font-ui);
+  text-shadow: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--bg-surface);
+  color: var(--accent-text);
+}
+.tour-popover .driver-popover-footer-btn:hover {
+  background: var(--accent-tint);
+}
+.tour-popover .driver-popover-next-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.tour-popover .driver-popover-next-btn:hover {
+  background: var(--accent-hover);
+}
+.tour-popover :is(.driver-popover-footer-btn, .driver-popover-close-btn):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* Стрелка driver.js красит все четыре стороны цветом фона и прозрачит три лишних
+   своими правилами — перекрашиваем только цвет. */
+.tour-popover .driver-popover-arrow {
+  border-color: var(--bg-raised);
+}
+.tour-popover .driver-popover-arrow-side-left {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+.tour-popover .driver-popover-arrow-side-right {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+.tour-popover .driver-popover-arrow-side-top {
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+.tour-popover .driver-popover-arrow-side-bottom {
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}

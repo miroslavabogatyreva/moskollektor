@@ -25,14 +25,14 @@ import type { DemoAccount } from './types'
 // здесь так же, как её поймал бы сам переход.
 function nextPath(): string {
   const next = new URLSearchParams(window.location.search).get('next')
-  if (!next) return '/dashboard'
+  if (!next) return '/map'
   try {
     const u = new URL(next, window.location.origin)
     return u.origin === window.location.origin && u.pathname !== '/login'
       ? u.pathname + u.search + u.hash
-      : '/dashboard'
+      : '/map'
   } catch {
-    return '/dashboard'
+    return '/map'
   }
 }
 
@@ -101,8 +101,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
           <button
             type="submit"
             disabled={submitting || !loginValue || !password}
-            class="px-3 py-1.5 rounded text-sm disabled:opacity-50"
-            style="background:var(--brand-action); color:var(--text-on-brand)"
+            class="btn btn-primary"
           >
             {submitting ? 'Входим…' : 'Войти'}
           </button>
@@ -118,11 +117,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
             <thead>
               <tr>
                 {['Логин', 'Пароль', 'Роль', 'Что видит', ''].map((h) => (
-                  <th
-                    key={h}
-                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                  >
+                  <th key={h} class="th">
                     {h}
                   </th>
                 ))}
@@ -147,7 +142,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
                         setPassword(a.password)
                         setError(null)
                       }}
-                      class="px-2 py-1 rounded text-xs"
+                      class="px-2 py-1 rounded text-xs whitespace-nowrap"
                       style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
                     >
                       Войти как

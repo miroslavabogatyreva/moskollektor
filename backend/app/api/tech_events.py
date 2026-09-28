@@ -261,6 +261,30 @@ async def list_tech_events(
     }
 
 
+# Для выпадающего списка «Тип датчика» (Слава, 28.09.2026): на стенде 19 типов
+# у 11 485 каналов плюс «Журнал ОДС». Тем же COALESCE, что и отбор выше: канал
+# без типа (1 142 на стенде) отбирается как «Журнал ОДС». Подрезка — та же
+# область видимости; section_id — участок карточки.
+ТИПЫ_SQL = """
+SELECT COALESCE(sensor_kind, 'Журнал ОДС') FROM smvu.channel
+ WHERE ($1::int[] IS NULL OR section_id = ANY($1)) AND ($2::int IS NULL OR section_id = $2)
+UNION
+SELECT 'Журнал ОДС'
+ORDER BY 1
+"""
+
+
+@router.get("/tech-events/sensor-kinds", response_model=list[str])
+async def sensor_kinds(
+    section_id: int | None = Query(None, description="участок, точное совпадение"),
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("tech_events.read")),
+):
+    """Типы датчиков для фильтра журнала — значения, которые принимает `sensor_kind`."""
+    участки = await видимые_участки(user, conn)
+    return [r[0] for r in await conn.fetch(ТИПЫ_SQL, участки, section_id)]
+
+
 class OdsLast(BaseModel):
     last_id: int | None
 

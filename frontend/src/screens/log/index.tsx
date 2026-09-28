@@ -4,6 +4,7 @@ import { fetchForecasts, fetchOutcomeSummary, type OutcomeSummary } from './api'
 import { DIRECTION_LABEL, type Direction, type ForecastRow } from './types'
 import { errorMessage, formatDateTime, isoDateMoscow, имяУчастка } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
+import { Badge } from '../../components/Badge'
 import { usePoll, свежо } from '../../lib/poll'
 
 /* Журнал прогнозов — задача 5.4 (MOS-51), постраничность — 4.13 (MOS-117).
@@ -191,9 +192,7 @@ export function LogScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Журнал прогнозов
-      </h1>
+      <h1 style="font-family:var(--font-display)">Журнал прогнозов</h1>
 
       {error && <p style="color:var(--state-error)">Не удалось загрузить прогнозы: {error}</p>}
 
@@ -204,8 +203,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             type="date"
             value={dateFrom}
             onInput={(e) => изменитьДату(setDateFrom, (e.target as HTMLInputElement).value)}
-            class="px-2 py-1 rounded text-sm"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="input"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -214,8 +212,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             type="date"
             value={dateTo}
             onInput={(e) => изменитьДату(setDateTo, (e.target as HTMLInputElement).value)}
-            class="px-2 py-1 rounded text-sm"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="input"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -227,8 +224,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             aria-describedby={sectionError ? 'log-section-error' : undefined}
             onInput={(e) => setSectionText((e.target as HTMLInputElement).value)}
             onChange={(e) => применитьУчасток((e.target as HTMLInputElement).value)}
-            class="px-2 py-1 rounded text-sm"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="input"
           />
         </label>
         <label class="flex flex-col gap-1">
@@ -236,8 +232,7 @@ export function LogScreen(_props: Record<string, unknown>) {
           <select
             value={direction}
             onChange={(e) => setDirection((e.target as HTMLSelectElement).value as Direction | '')}
-            class="px-2 py-1 rounded text-sm"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="input"
           >
             <option value="">Все</option>
             {(Object.keys(DIRECTION_LABEL) as Direction[]).map((d) => (
@@ -283,96 +278,86 @@ export function LogScreen(_props: Record<string, unknown>) {
       )}
 
       <SkipTable targetId="log-table-end" />
-      <table class="w-full text-sm" style="border-collapse:collapse">
-        <thead>
-          <tr>
-            {COLUMNS.map((c) => (
-              <th
-                key={c.key}
-                aria-sort={
-                  sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-                }
-                class="text-left"
-                style="border-bottom:1px solid var(--border-subtle)"
-              >
-                {/* role="button" на th раньше вытеснял неявную роль columnheader —
+      <div data-tour="log-table" class="card p-0 overflow-x-auto">
+        <table class="w-full text-sm" style="border-collapse:collapse">
+          <thead>
+            <tr>
+              {COLUMNS.map((c) => (
+                <th
+                  key={c.key}
+                  aria-sort={
+                    sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
+                  }
+                  class="th p-0"
+                >
+                  {/* role="button" на th раньше вытеснял неявную роль columnheader —
                     aria-sort определён только для неё, и программа чтения молчала
                     про направление сортировки (нашёл 5f, 22.09.2026). Настоящая
                     button отдаёт Enter и пробел сама, без ручного onKeyDown. */}
-                <button
-                  type="button"
-                  onClick={() => toggleSort(c.key)}
-                  class="w-full text-left px-2 py-2 text-xs uppercase tracking-wide cursor-pointer select-none"
-                  style="color:var(--text-muted)"
-                >
-                  {c.label}
-                  {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
-                </button>
-              </th>
-            ))}
-            <th
-              class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-              style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-            >
-              Решение
-            </th>
-            <th
-              class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-              style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-            >
-              Исход
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((r) => (
-            <tr
-              key={r.forecast_id}
-              data-forecast-id={r.forecast_id}
-              data-section-id={r.section_id}
-              {...rowLink(() => route(`/forecasts/${r.forecast_id}`))}
-              style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
-            >
-              <td class="px-2 py-2 num">{formatDateTime(r.computed_at, true)}</td>
-              <td class="px-2 py-2">{имя(r.section_id)}</td>
-              <td class="px-2 py-2">{DIRECTION_LABEL[r.direction]}</td>
-              <td class="px-2 py-2 num">{r.probability.toFixed(2)}</td>
-              <td class="px-2 py-2 num">{r.horizon_h} ч</td>
-              {/* Решение диспетчера (US-08, US-09 сц. 4): разобран ли прогноз, кем,
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(c.key)}
+                    class="w-full text-left px-2 py-2 font-semibold select-none hover:underline"
+                  >
+                    {c.label}
+                    {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
+                  </button>
+                </th>
+              ))}
+              <th class="th">Решение</th>
+              <th class="th">Исход</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r) => (
+              <tr
+                key={r.forecast_id}
+                data-forecast-id={r.forecast_id}
+                data-section-id={r.section_id}
+                {...rowLink(() => route(`/forecasts/${r.forecast_id}`))}
+                style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
+              >
+                <td class="px-2 py-2 num">{formatDateTime(r.computed_at, true)}</td>
+                <td class="px-2 py-2 font-semibold">{имя(r.section_id)}</td>
+                <td class="px-2 py-2">{DIRECTION_LABEL[r.direction]}</td>
+                <td class="px-2 py-2 num">{r.probability.toFixed(2)}</td>
+                <td class="px-2 py-2 num">{r.horizon_h} ч</td>
+                {/* Решение диспетчера (US-08, US-09 сц. 4): разобран ли прогноз, кем,
                   когда и проверен ли по внешним источникам. «нет» — словом, а не
                   пустой ячейкой: пустая читается как «не загрузилось». */}
-              <td class="px-2 py-2">
-                {r.decision ? (
-                  <>
-                    {r.decision.decision_name}
-                    <span style="color:var(--text-muted)">
-                      {' '}
-                      · {r.decision.decided_by}, {formatDateTime(r.decision.decided_at)}
-                      {r.decision.verified_externally && ' · проверено по внешним источникам'}
-                    </span>
-                  </>
-                ) : (
-                  <span style="color:var(--text-muted)">нет</span>
-                )}
-              </td>
-              {/* Исход (US-10 сц. 4, 5): отмеченный человеком — словом и причиной;
+                <td class="px-2 py-2">
+                  {r.decision ? (
+                    <>
+                      {r.decision.decision_name}
+                      <span style="color:var(--text-muted)">
+                        {' '}
+                        · {r.decision.decided_by}, {formatDateTime(r.decision.decided_at)}
+                        {r.decision.verified_externally && ' · проверено по внешним источникам'}
+                      </span>
+                    </>
+                  ) : (
+                    <span style="color:var(--text-muted)">нет</span>
+                  )}
+                </td>
+                {/* Исход (US-10 сц. 4, 5): отмеченный человеком — словом и причиной;
                   без отметки — «горизонт истёк» или «открыт», система сама его не ставит. */}
-              <td class="px-2 py-2" data-testid="outcome-cell">
-                {r.outcome ? (
-                  <>
-                    {r.outcome.outcome_name}
-                    {r.outcome.reason_name && ` · ${r.outcome.reason_name}`}
-                  </>
-                ) : (
-                  <span style="color:var(--text-muted)">
-                    {r.horizon_expired ? 'горизонт истёк' : 'открыт'}
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                <td class="px-2 py-2" data-testid="outcome-cell">
+                  {r.outcome ? (
+                    <>
+                      {r.outcome.outcome_name}
+                      {r.outcome.reason_name && ` · ${r.outcome.reason_name}`}
+                    </>
+                  ) : (
+                    <Badge tone={r.horizon_expired ? 'neutral' : 'info'}>
+                      {r.horizon_expired ? 'горизонт истёк' : 'открыт'}
+                    </Badge>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div id="log-table-end" tabindex={-1} />
 
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
@@ -386,8 +371,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             type="button"
             disabled={offset === 0}
             onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-secondary"
           >
             ← Раньше
           </button>
@@ -398,8 +382,7 @@ export function LogScreen(_props: Record<string, unknown>) {
             type="button"
             disabled={offset + items.length >= total}
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-secondary"
           >
             Позже →
           </button>

@@ -28,6 +28,14 @@ import asyncpg
 from app.api.schemas import OrderDetail, OrderList
 from app.auth.deps import require, видимые_участки, проверить_участок
 from app.db import get_conn
+from app.domain.state_machine import TRANSITIONS
+
+# Отбор по статусу (?status=): один статус заявки из CHECK maint.notification.status
+# (TRANSITIONS сверяет себя с миграцией) или группа active — «в работе» в смысле
+# плитки на главной: заявка не выполнена и не отменена, то есть OPEN и IN_PROCESS.
+СТАТУСЫ = {s: [s] for s in TRANSITIONS["notification"]} | {
+    "active": [s for s, дальше in TRANSITIONS["notification"].items() if дальше]
+}
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +51,10 @@ FROM_SQL = """
  WHERE ($1::int[] IS NULL OR x.section_id = ANY($1))
    AND ($2::date IS NULL OR n.due_at >= timezone('Europe/Moscow', $2::date::timestamp))
    AND ($3::date IS NULL OR n.due_at < timezone('Europe/Moscow', $3::date::timestamp))
+   AND ($4::text IS NULL OR n.id::text = $4
+        OR n.notification_no ILIKE '%' || $4 || '%' OR wo.order_no ILIKE '%' || $4 || '%')
+   AND ($5::text[] IS NULL OR n.status = ANY($5))
+   AND ($6::text IS NULL OR p.code = $6)
 """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
@@ -59,7 +71,7 @@ SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
  ORDER BY n.due_at, p.code, n.id, wo.id
- LIMIT $4 OFFSET $5
+ LIMIT $7 OFFSET $8
 """
 
 DETAIL_SQL = """
@@ -118,6 +130,22 @@ async def list_orders(
     offset: int = Query(0, ge=0, description="сколько записей пропустить от начала выборки"),
     due_from: date | None = Query(None, description="срок с этой даты (МСК), включительно"),
     due_to: date | None = Query(None, description="срок по эту дату (МСК), весь день целиком"),
+    q: str | None = Query(
+        None,
+        max_length=40,
+        description="номер заявки: id целиком или часть номера уведомления (AF…) или заказа (AW…)",
+    ),
+    status: str | None = Query(
+        None,
+        max_length=20,
+        description="статус заявки: OPEN, IN_PROCESS, COMPLETED, CANCELLED или active"
+        " (OPEN и IN_PROCESS вместе); чужое значение — 422",
+    ),
+    priority: str | None = Query(
+        None,
+        max_length=10,
+        description="код приоритета из ref.priority (1…4); чужой код — 422",
+    ),
     conn: asyncpg.Connection = Depends(get_conn),
     user=Depends(require("orders.read")),
 ):
@@ -125,11 +153,23 @@ async def list_orders(
     московские даты, обе границы включительны: верхняя граница в запросе — начало
     СЛЕДУЮЩЕГО за due_to дня, как у GET /api/forecasts. Период стоит в общем
     FROM_SQL, поэтому total и страница считают одни и те же заявки, и число строк
-    экрана совпадает с total ответа."""
+    экрана совпадает с total ответа. q — поиск по номеру заявки: id целиком
+    или часть номера уведомления (AF…) и заказа (AW…), без учёта регистра.
+
+    status и priority — отбор по статусу заявки и коду приоритета. Чужое значение —
+    422, а не «без отбора»: иначе ссылка с опечаткой показала бы все заявки под видом
+    отобранных, и число на экране соврало бы. Код приоритета сверяем со справочником
+    ref.priority, а не с константой в коде."""
+    if status and status not in СТАТУСЫ:
+        raise HTTPException(422, f"status: одно из {', '.join(СТАТУСЫ)}")
+    if priority and not await conn.fetchval("SELECT 1 FROM ref.priority WHERE code = $1", priority):
+        raise HTTPException(422, "priority: такого кода нет в ref.priority")
     участки = await видимые_участки(user, conn)
     до = due_to + timedelta(days=1) if due_to else None
-    total = await conn.fetchval(COUNT_SQL, участки, due_from, до)
-    rows = await conn.fetch(LIST_SQL, участки, due_from, до, limit, offset)
+    q = (q or "").strip() or None
+    отбор = (q, СТАТУСЫ[status] if status else None, priority or None)
+    total = await conn.fetchval(COUNT_SQL, участки, due_from, до, *отбор)
+    rows = await conn.fetch(LIST_SQL, участки, due_from, до, *отбор, limit, offset)
     return {
         "schema_version": "orders.v1",
         "total": total,

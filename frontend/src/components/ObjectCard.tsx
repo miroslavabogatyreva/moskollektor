@@ -13,6 +13,8 @@ import {
   groupChannelsBySystem,
   groupRepeatedForecasts,
   shortDate,
+  границыОси,
+  раскраскаСостояний,
   type RecentForecast,
   эпизодыПотериСвязи,
 } from './ObjectCard.logic'
@@ -264,11 +266,9 @@ export function ObjectCard({
   const explanationLines = risk?.explanation_ru ? risk.explanation_ru.split('\n') : []
 
   return (
-    <main class="p-5 flex flex-col gap-5">
+    <main class="p-5 flex flex-col gap-4">
       <div>
-        <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          {имяУчастка(data.smvu_key)}
-        </h1>
+        <h1 style="font-family:var(--font-display)">{имяУчастка(data.smvu_key)}</h1>
         <p style="color:var(--text-secondary)">
           Участок <span class="num">{data.section_id}</span>, ключ СМВУ{' '}
           <code class="num">{data.smvu_key}</code> ·{' '}
@@ -296,8 +296,8 @@ export function ObjectCard({
         <p
           key={p.id}
           data-testid="in-works"
-          class="text-sm px-3 py-2 rounded"
-          style="background:var(--bg-surface); border-left:3px solid var(--state-warning)"
+          class="text-sm px-3 py-2 rounded-md"
+          style="background:var(--badge-warning-bg); color:var(--badge-warning-fg); border:1px solid var(--badge-warning-border); border-left-width:4px"
         >
           <b>Объект в работах:</b> наряд-допуск {p.number}, {p.work_type_name}, срок с{' '}
           {formatDateTime(p.valid_from)} до {formatDateTime(p.valid_to)}
@@ -308,10 +308,8 @@ export function ObjectCard({
           и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
           и без двух экранов прокрутки их не было видно. */}
       {risk && (
-        <section>
-          <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-            Уровень риска
-          </h2>
+        <section class="card" data-tour="risk">
+          <h2 class="card-title mb-2">Уровень риска</h2>
           <div class="text-sm flex flex-col gap-1">
             <div>
               {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
@@ -351,10 +349,10 @@ export function ObjectCard({
 
           {explanationLines.length > 0 && (
             <div
-              class="text-sm p-3 mt-2 rounded"
-              style="background:var(--bg-surface); border-left:3px solid var(--brand)"
+              class="text-sm p-3 mt-3 rounded-md"
+              style="background:var(--accent-tint); border-left:3px solid var(--accent)"
             >
-              <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
+              <div class="font-semibold mb-1" style="color:var(--accent-text)">
                 Почему такой риск
               </div>
               {explanationLines.map((line, i) => (
@@ -367,19 +365,13 @@ export function ObjectCard({
         </section>
       )}
 
-      <section>
-        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-          Паспорт: каналы участка
-        </h2>
+      <section class="card">
+        <h2 class="card-title mb-2">Паспорт: каналы участка</h2>
         <table class="w-full text-sm" style="border-collapse:collapse">
           <thead>
             <tr>
               {['Тег', 'Название', 'Тип датчика'].map((h) => (
-                <th
-                  key={h}
-                  class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                  style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                >
+                <th key={h} class="th">
                   {h}
                 </th>
               ))}
@@ -392,7 +384,7 @@ export function ObjectCard({
                   <td
                     colSpan={3}
                     class="px-2 py-2 text-xs font-semibold"
-                    style="background:var(--bg-surface); border-bottom:1px solid var(--border-subtle)"
+                    style="background:var(--bg-subtle); border-bottom:1px solid var(--border-subtle)"
                   >
                     <SystemShape kind={g.systemKind} />
                     {g.systemKind}{' '}
@@ -414,10 +406,8 @@ export function ObjectCard({
         </table>
       </section>
 
-      <section>
-        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-          Отказы по каналам
-        </h2>
+      <section class="card" data-tour="faults">
+        <h2 class="card-title mb-2">Отказы по каналам</h2>
         {channelFaultsError && (
           <p style="color:var(--state-error)">
             Не удалось загрузить отказы по каналам: {channelFaultsError}
@@ -431,11 +421,7 @@ export function ObjectCard({
             <thead>
               <tr>
                 {['Датчик', 'Канал', 'Отказов', 'Последний', 'В среднем лежит'].map((h) => (
-                  <th
-                    key={h}
-                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                  >
+                  <th key={h} class="th">
                     {h}
                   </th>
                 ))}
@@ -443,15 +429,17 @@ export function ObjectCard({
             </thead>
             <tbody>
               {channelFaults.map((c) => (
-                <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
+                // Строка канала с отказами открывает его историю — как строки «Последних
+                // прогнозов» ниже; синяя ссылка в ячейке выбивалась из таблиц (28.09.2026).
+                <tr
+                  key={c.channel_id}
+                  style="border-bottom:1px solid var(--border-subtle)"
+                  {...(c.faults_cnt > 0
+                    ? rowLink(() => route(`/objects/${sectionId}?channel=${c.channel_id}`))
+                    : {})}
+                >
                   <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2">
-                    {c.faults_cnt > 0 ? (
-                      <a href={`/objects/${sectionId}?channel=${c.channel_id}`}>{c.name}</a>
-                    ) : (
-                      c.name
-                    )}
-                  </td>
+                  <td class="px-2 py-2">{c.name}</td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
                     {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
@@ -476,19 +464,13 @@ export function ObjectCard({
         />
       )}
 
-      <section>
-        <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
-          Последние прогнозы
-        </h2>
+      <section class="card">
+        <h2 class="card-title mb-2">Последние прогнозы</h2>
         <table class="w-full text-sm" style="border-collapse:collapse">
           <thead>
             <tr>
               {['Время расчёта', 'Направление', 'Вероятность', 'Ранг'].map((h) => (
-                <th
-                  key={h}
-                  class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                  style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                >
+                <th key={h} class="th">
                   {h}
                 </th>
               ))}
@@ -517,21 +499,18 @@ export function ObjectCard({
         )}
       </section>
 
-      <TechEventsTable
-        sectionId={data.section_id}
-        sensorKinds={[...new Set(data.channels.map((c) => c.sensor_kind))].sort()}
-      />
+      <TechEventsTable sectionId={data.section_id} />
 
-      <section>
-        <h2 class="text-sm font-semibold mb-1" style="color:var(--text-muted)">
-          Показания датчиков
-        </h2>
+      <section class="card" data-tour="readings">
+        <h2 class="card-title mb-1">Показания датчиков</h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
           {risk
             ? `Окно расчёта: 7 суток до среза ${formatDate(risk.as_of)}, на котором считал прогноз.`
             : data.last_reading_at
               ? `Последняя запись участка: ${formatDateTime(data.last_reading_at, true)}. Окно ниже подобрано вокруг неё.`
-              : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}
+              : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}{' '}
+          Прибор пишет в журнал СМВУ только при смене состояния: канал без записей в окне — канал, у
+          которого ничего не менялось. Раздвиньте даты, чтобы увидеть соседние записи.
         </p>
         <div
           class="flex flex-wrap items-end gap-4 text-sm mb-3"
@@ -543,8 +522,7 @@ export function ObjectCard({
               type="date"
               value={readFrom}
               onInput={(e) => setReadFrom((e.target as HTMLInputElement).value)}
-              class="px-2 py-1 rounded text-sm"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+              class="input"
             />
           </label>
           <label class="flex flex-col gap-1">
@@ -553,8 +531,7 @@ export function ObjectCard({
               type="date"
               value={readTo}
               onInput={(e) => setReadTo((e.target as HTMLInputElement).value)}
-              class="px-2 py-1 rounded text-sm"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+              class="input"
             />
           </label>
         </div>
@@ -565,7 +542,7 @@ export function ObjectCard({
         {readings === null && !readingsError && <p style="color:var(--text-muted)">Загрузка…</p>}
 
         {readings && (
-          <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-5">
             {data.channels.map((c) => {
               const chReadings = readings
                 .filter((r) => r.channel_id === c.channel_id)
@@ -576,14 +553,25 @@ export function ObjectCard({
                   : chReadings.filter((r) => r.value_num != null).length / chReadings.length
               return (
                 <div key={c.channel_id} data-channel-chart={c.channel_id}>
-                  <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
-                    {c.name} · {c.sensor_kind}
+                  <div class="text-sm font-semibold mb-1">
+                    {c.name}{' '}
+                    <span class="font-normal" style="color:var(--text-secondary)">
+                      · {c.sensor_kind}
+                    </span>
                   </div>
                   {chReadings.length < 2 ? (
-                    <p class="text-sm" style="color:var(--text-muted)">
+                    <p
+                      class="text-sm px-3 py-1.5 rounded-md"
+                      style="background:var(--bg-subtle); border:1px dashed var(--border-strong); color:var(--text-secondary)"
+                    >
+                      <b style="color:var(--text-primary)">
+                        {chReadings.length === 0
+                          ? 'Нет показаний за период.'
+                          : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
+                      </b>{' '}
                       {chReadings.length === 0
-                        ? 'Нет показаний за период.'
-                        : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
+                        ? 'Состояние канала за эти дни не менялось.'
+                        : 'Одна смена состояния — рисовать ленту не из чего.'}
                     </p>
                   ) : numericShare > 0.5 ? (
                     <NumericLine readings={chReadings} unit={ЕДИНИЦА[c.sensor_kind]} />
@@ -665,18 +653,19 @@ function SystemShape({ kind }: { kind: string }) {
 
 // Ось времени под лентой/линией — 4 деления (начало, конец и две между ними),
 // подпись через formatDateTime — общий формат дат по всему фронту (М-12).
+// SVG без viewBox, x в процентах: шрифт 11 px не растёт вместе с шириной экрана
+// (раньше viewBox растягивал подпись крупнее названия канала).
 function TimeAxis({ start, end }: { start: number; end: number }) {
-  const W = 1000
   const TICKS = 4
   const ticks = axisTicks(start, end, TICKS)
   return (
-    <svg viewBox={`0 0 ${W} 14`} class="w-full" data-axis="time">
+    <svg width="100%" height="16" class="block mt-0.5" data-axis="time">
       {ticks.map((t, i) => (
         <text
           key={i}
-          x={i === 0 ? 0 : i === TICKS - 1 ? W : (W * i) / (TICKS - 1)}
-          y="11"
-          font-size="10"
+          x={`${(100 * i) / (TICKS - 1)}%`}
+          y="12"
+          font-size="11"
           fill="var(--text-muted)"
           text-anchor={i === 0 ? 'start' : i === TICKS - 1 ? 'end' : 'middle'}
         >
@@ -735,6 +724,7 @@ function EpisodeMarks({
             y2={top + height}
             stroke="var(--state-error)"
             stroke-width={2}
+            vector-effect="non-scaling-stroke"
           />
         </g>
       ))}
@@ -763,75 +753,109 @@ function EpisodeList({ readings, to }: { readings: Reading[]; to: string }) {
   )
 }
 
+// Подпись оси значений: одна цифра после запятой, без хвостовых нулей.
+function подписьЗначения(v: number): string {
+  const r = Math.round(v * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1).replace('.', ',')
+}
+
 function NumericLine({ readings, unit }: { readings: Reading[]; unit?: string }) {
   const W = 1000
-  const H = 70
-  const PAD = 10
+  const H = 100
   const times = readings.map((r) => new Date(r.read_time).getTime())
   const values = readings.filter((r) => r.value_num != null).map((r) => r.value_num as number)
   const tMin = Math.min(...times)
   const tMax = Math.max(...times)
-  const vMin = Math.min(...values)
-  const vMax = Math.max(...values)
-  const x = (t: number) => PAD + ((t - tMin) / (tMax - tMin || 1)) * (W - PAD * 2)
-  const y = (v: number) => H - PAD - ((v - vMin) / (vMax - vMin || 1)) * (H - PAD * 2)
+  const [vMin, vMax] = границыОси(values, unit === '°C' ? 10 : 1)
+  const x = (t: number) => ((t - tMin) / (tMax - tMin || 1)) * W
+  const y = (v: number) => H - 8 - ((v - vMin) / (vMax - vMin || 1)) * (H - 16)
 
+  // Ступенька: датчик пишет значение только при изменении, и оно держится до
+  // следующей записи — наклонная линия между точками врала бы о плавном росте.
   let d = ''
-  let penDown = false
+  let пероВниз = false
+  let точки = ''
   readings.forEach((r, i) => {
     if (r.value_num == null) {
-      penDown = false
+      пероВниз = false
       return
     }
-    const cmd = penDown ? 'L' : 'M'
-    d += `${cmd}${x(times[i])},${y(r.value_num)} `
-    penDown = true
+    const xi = x(times[i])
+    const yi = y(r.value_num)
+    d += пероВниз ? `H${xi} V${yi} ` : `M${xi},${yi} `
+    точки += `M${xi},${yi}h0 `
+    пероВниз = true
   })
+  const ед = unit === '°C' ? ' °C' : ''
 
   return (
     <>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        class="w-full"
-        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
-      >
-        <path
-          d={d}
-          fill="none"
-          stroke="var(--chart-outline)"
-          stroke-width="4"
-          stroke-linecap="round"
-        />
-        <path d={d} fill="none" stroke="var(--chart-6)" stroke-width="2" stroke-linecap="round" />
-        <EpisodeMarks
-          episodes={эпизодыПотериСвязи(readings, tMax)}
-          x={(t) => x(Math.min(t, tMax))}
-          top={0}
-          height={H}
-        />
-        <text x={PAD} y={PAD + 2} font-size="10" fill="var(--text-muted)">
-          {fmtValue(vMax)}
-          {unit === '°C' ? ' °C' : ''}
-        </text>
-        <text x={PAD} y={H - 3} font-size="10" fill="var(--text-muted)">
-          {fmtValue(vMin)}
-          {unit === '°C' ? ' °C' : ''}
-        </text>
-      </svg>
+      <div class="flex gap-2 items-stretch">
+        <div
+          class="flex flex-col justify-between text-xs num text-right shrink-0"
+          style="color:var(--text-muted); width:3.5rem"
+        >
+          <span>
+            {подписьЗначения(vMax)}
+            {ед}
+          </span>
+          <span>
+            {подписьЗначения(vMin)}
+            {ед}
+          </span>
+        </div>
+        {/* preserveAspectRatio="none" и non-scaling-stroke: высота графика 88 px
+            на любой ширине, а линия и точки не толстеют вместе с экраном. */}
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          class="block w-full min-w-0"
+          style="height:88px; background:var(--bg-subtle); border:1px solid var(--border-subtle); border-radius:6px"
+        >
+          <path
+            d={d}
+            fill="none"
+            stroke="var(--link)"
+            stroke-width="2"
+            stroke-linejoin="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <path
+            d={точки}
+            stroke="var(--link)"
+            stroke-width="5"
+            stroke-linecap="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <EpisodeMarks
+            episodes={эпизодыПотериСвязи(readings, tMax)}
+            x={(t) => x(Math.min(t, tMax))}
+            top={0}
+            height={H}
+          />
+        </svg>
+      </div>
+      <div style="padding-left:4rem">
+        <TimeAxis start={tMin} end={tMax} />
+      </div>
       <div data-axis="value" class="text-xs" style="color:var(--text-muted)">
         Ось значений: {unit ?? 'значение прибора'}
       </div>
-      <TimeAxis start={tMin} end={tMax} />
     </>
   )
 }
 
-// Нечисловой ряд — лента состояний: сегмент от одной записи до следующей,
-// цвет по is_alarm (это настройка прибора, не решение человека — поэтому
-// цвет служебный var(--state-warning), а не шкала риска и не слово "авария").
+// Штриховка поверх заливки: второе слово того же вида, и пустое начало окна.
+const ШТРИХ = 'repeating-linear-gradient(45deg, rgb(255 255 255 / 55%) 0 2px, transparent 2px 5px)'
+
+// Нечисловой ряд — лента состояний: сегмент от одной записи до следующей. Цвет —
+// по смыслу слова (раскраскаСостояний: норма, выключено, отказ, прочее), а флаг
+// is_alarm — это настройка прибора, не решение человека: он рисуется отдельной
+// оранжевой чертой над сегментом, а не подменяет цвет состояния.
 function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string; to: string }) {
   const W = 1000
-  const H = 36
+  const H = 20
+  const [наведено, setНаведено] = useState<string | null>(null)
   // new Date("2026-06-24") — полночь UTC, то есть 03:00 по Москве (нашла ab,
   // 22.09.2026): граница ленты уезжала на три часа от дат в полях выше, и часть
   // показаний оказывалась левее начала оси. Россия не переходит на летнее время
@@ -847,51 +871,137 @@ function StateRibbon({ readings, from, to }: { readings: Reading[]; from: string
   // а не сломанным экраном.
   if (!Number.isFinite(winStart) || !Number.isFinite(winEnd)) return null
   const x = (t: number) => ((t - winStart) / (winEnd - winStart || 1)) * W
+  const слова = readings.map((r) => r.value_text ?? '—')
+  const цвет = раскраскаСостояний(слова)
+  const моменты = readings.map((r) => new Date(r.read_time).getTime())
+  // Доля окна до первой записи — там журнал молчит, это «нет записей», а не белая дыра.
+  const пусто = Math.max(0, Math.min(1, (моменты[0] - winStart) / (winEnd - winStart)))
+  const тревога = readings.some((r) => r.is_alarm)
+
+  // Своя подсказка под указателем вместо системной: системная всплывала поверх
+  // подписей оси. <title> у сегментов остаются — их читают программа чтения
+  // с экрана и E2E mos-121, но указатель до них не доходит (pointer-events:none).
+  function навести(e: MouseEvent) {
+    const b = (e.currentTarget as SVGSVGElement).getBoundingClientRect()
+    const t = winStart + ((e.clientX - b.left) / b.width) * (winEnd - winStart)
+    let i = -1
+    while (i + 1 < моменты.length && моменты[i + 1] <= t) i++
+    setНаведено(
+      i < 0
+        ? `нет записей до ${formatDateTime(readings[0].read_time, true)}`
+        : `${слова[i]} · с ${formatDateTime(readings[i].read_time, true)}`,
+    )
+  }
 
   return (
     <>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        class="w-full"
-        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:4px"
-      >
-        {readings.map((r, i) => {
-          const t0 = new Date(r.read_time).getTime()
-          const t1 =
-            i + 1 < readings.length ? new Date(readings[i + 1].read_time).getTime() : winEnd
-          const x0 = x(t0)
-          const width = Math.max(x(t1) - x0, 0.5)
-          return (
-            <rect
-              key={i}
-              x={x0}
-              y={6}
-              width={width}
-              height={H - 12}
-              fill={r.is_alarm ? 'var(--state-warning)' : 'var(--border-strong)'}
+      <div class="relative">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          class="block w-full"
+          style="height:22px; border-radius:4px; background:var(--bg-subtle); border:1px solid var(--border-subtle)"
+          onMouseMove={навести}
+          onMouseLeave={() => setНаведено(null)}
+        >
+          <defs>
+            <pattern
+              id="ribbon-hatch"
+              width="5"
+              height="5"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(45)"
             >
-              <title>{`${r.value_text ?? '—'} · ${formatDateTime(r.read_time, true)}`}</title>
-            </rect>
-          )
-        })}
-        <EpisodeMarks episodes={эпизодыПотериСвязи(readings, winEnd)} x={x} top={0} height={H} />
-      </svg>
+              <rect width="2" height="5" fill="#fff" fill-opacity="0.55" />
+            </pattern>
+            <pattern
+              id="ribbon-empty"
+              width="6"
+              height="6"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(45)"
+            >
+              <rect width="1.5" height="6" fill="var(--border-strong)" fill-opacity="0.45" />
+            </pattern>
+          </defs>
+          {пусто > 0 && (
+            <rect x={0} y={0} width={x(моменты[0])} height={H} fill="url(#ribbon-empty)" />
+          )}
+          <g style="pointer-events:none">
+            {readings.map((r, i) => {
+              const t1 = i + 1 < readings.length ? моменты[i + 1] : winEnd
+              const x0 = x(моменты[i])
+              const width = Math.max(x(t1) - x0, 0.5)
+              const c = цвет.get(слова[i])!
+              return (
+                <g key={i}>
+                  <rect
+                    x={x0}
+                    y={r.is_alarm ? 5 : 0}
+                    width={width}
+                    height={r.is_alarm ? H - 5 : H}
+                    fill={c.fill}
+                  >
+                    <title>{`${слова[i]} · ${formatDateTime(r.read_time, true)}`}</title>
+                  </rect>
+                  {c.hatch && (
+                    <rect x={x0} y={0} width={width} height={H} fill="url(#ribbon-hatch)" />
+                  )}
+                  {r.is_alarm && (
+                    <rect x={x0} y={0} width={width} height={4} fill="var(--chart-2)" />
+                  )}
+                </g>
+              )
+            })}
+            <EpisodeMarks
+              episodes={эпизодыПотериСвязи(readings, winEnd)}
+              x={x}
+              top={0}
+              height={H}
+            />
+          </g>
+        </svg>
+        {пусто > 0.08 && (
+          <span
+            class="absolute inset-y-0 left-0 flex items-center justify-center text-[11px] pointer-events-none"
+            style={`width:${пусто * 100}%; color:var(--text-secondary)`}
+          >
+            нет записей
+          </span>
+        )}
+      </div>
       <TimeAxis start={winStart} end={winEnd} />
-      {/* Ось значений у ленты — названия состояний (US-07 сц. 2): цветом служебным,
+      {/* Ось значений у ленты — названия состояний (US-07 сц. 2): цвет по смыслу,
           а словом — то, что прибор писал в журнал. */}
-      <div data-axis="value" class="text-xs flex flex-wrap gap-3" style="color:var(--text-muted)">
-        Состояния:
-        {[...new Map(readings.map((r) => [r.value_text ?? '—', r.is_alarm])).entries()].map(
-          ([имя, тревога]) => (
-            <span key={имя} data-state={имя} class="flex items-center gap-1">
-              <span
+      <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <div
+          data-axis="value"
+          class="text-xs flex flex-wrap items-center gap-x-3 gap-y-1"
+          style="color:var(--text-secondary)"
+        >
+          Состояния:
+          {[...цвет.entries()].map(([имя, c]) => (
+            <span key={имя} data-state={имя} class="inline-flex items-center gap-1">
+              <i
                 aria-hidden="true"
-                style={`display:inline-block; width:10px; height:10px; background:${тревога ? 'var(--state-warning)' : 'var(--border-strong)'}`}
+                style={`display:inline-block; width:12px; height:12px; border-radius:2px; background:${c.hatch ? `${ШТРИХ}, ` : ''}${c.fill}`}
               />
               {имя}
             </span>
-          ),
-        )}
+          ))}
+          {тревога && (
+            <span class="inline-flex items-center gap-1">
+              <i
+                aria-hidden="true"
+                style="display:inline-block; width:12px; height:4px; background:var(--chart-2)"
+              />
+              тревожное по настройке прибора
+            </span>
+          )}
+        </div>
+        <span class="text-xs num ml-auto" style="color:var(--text-primary); min-height:1em">
+          {наведено}
+        </span>
       </div>
     </>
   )
