@@ -153,6 +153,7 @@ interface BarItem {
   object_name: string | null
   section_id: number | null
   probability: number
+  current_probability?: number | null
   horizon_h: number
 }
 
@@ -317,4 +318,27 @@ test('US-04 сц. 4: риск ниже порога не отвлекает', as
     page.locator('main table tbody tr', { hasText: new RegExp(`·\\s*${низкий.section_id}\\b`) }),
     'прогноз виден в списке рисков',
   ).toHaveCount(1)
+})
+
+// MOS-247: плашка писала «91 %» — вероятность прогноза, поднявшего уведомление, —
+// а карточка того же участка 0,8169, текущую. Теперь ответ несёт обе, и плашка
+// называет текущую словом «сейчас», когда проценты разошлись.
+test('US-04 сц. 8: плашка и карточка называют одну текущую вероятность', async ({ page }) => {
+  const n = await свежее(page)
+  expect(n.section_id, 'у уведомления есть участок').toBeTruthy()
+  const карточка = (await (await page.request.get(`/api/objects/${n.section_id}`)).json()) as {
+    current_risk: { probability: number } | null
+  }
+  const сейчас = карточка.current_risk?.probability
+  expect(сейчас, 'у участка есть текущий прогноз').toBeDefined()
+  expect(n.current_probability, 'GET /api/notifications отдаёт current_probability').toBeCloseTo(
+    сейчас!,
+    6,
+  )
+
+  await page.goto('/log')
+  const bar = полоса(page)
+  await expect(bar).toContainText(`${Math.round(n.probability * 100)} %`)
+  if (Math.round(сейчас! * 100) !== Math.round(n.probability * 100))
+    await expect(bar).toContainText(`сейчас ${Math.round(сейчас! * 100)} %`)
 })

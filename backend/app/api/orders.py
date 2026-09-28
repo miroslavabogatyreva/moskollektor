@@ -51,11 +51,14 @@ COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 # нет — total подставлялся бы нулём вместо настоящего числа заявок (нашла 28,
 # 21.09.2026: GET /api/orders?offset=1000 отвечал total=0 при 224 заявках).
 # Отдельный COUNT_SQL от страницы не зависит, как и у /api/forecasts.
+# Внутри одного срока выше более срочный приоритет (p.code '1' — аварийный):
+# у автозаявок срок часто общий, и 337 «высоких» шли вперемешку с 23 «средними»
+# (MOS-130, стенд 28.09.2026).
 LIST_SQL = f"""
 SELECT n.id, l.name AS object_name, x.smvu_key, act.name AS work_type_name,
        n.due_at, n.reported_at, n.status, p.code AS priority_code
 {FROM_SQL}
- ORDER BY n.due_at, n.id, wo.id
+ ORDER BY n.due_at, p.code, n.id, wo.id
  LIMIT $4 OFFSET $5
 """
 

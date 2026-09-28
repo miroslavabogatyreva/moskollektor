@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
 import { usePoll, свежо } from '../../lib/poll'
-import { PRIORITY_LABEL, type OrderListItem, type UnackedNotification } from './types'
+import { PRIORITY_LABEL, STATUS_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { isoDate } from '../../components/ObjectCard.logic'
@@ -29,6 +29,13 @@ const СУТКИ_МС = 24 * 3600 * 1000
 // (backend/app/domain/state_machine.py: COMPLETED и CANCELLED — конечные).
 function просрочена(o: OrderListItem, сейчас: number): boolean {
   return Date.parse(o.due_at) < сейчас && o.status !== 'COMPLETED' && o.status !== 'CANCELLED'
+}
+
+// «просрочено на 119 сут.» — число суток целиком, меньше суток — «меньше суток»:
+// одно слово «просрочено» не отличало вчерашнюю заявку от июньской (MOS-130).
+function насколько(o: OrderListItem, сейчас: number): string {
+  const сутки = Math.floor((сейчас - Date.parse(o.due_at)) / СУТКИ_МС)
+  return сутки >= 1 ? `просрочено на ${сутки} сут.` : 'просрочено меньше суток'
 }
 
 const TABS = [
@@ -204,12 +211,12 @@ function OrdersTab() {
               <td class="px-2 py-2 num">
                 {formatDateTime(o.due_at)}
                 {просрочена(o, сейчас) && (
-                  <span style="color:var(--state-error)"> · просрочено</span>
+                  <span style="color:var(--state-error)"> · {насколько(o, сейчас)}</span>
                 )}
               </td>
               <td class="px-2 py-2 num">{o.deadline_hours.toFixed(1)} ч</td>
               <td class="px-2 py-2">
-                {o.status}{' '}
+                {STATUS_LABEL[o.status] ?? o.status}{' '}
                 <span style="color:var(--text-muted)">
                   · {PRIORITY_LABEL[o.priority_code] ?? o.priority_code}
                 </span>
