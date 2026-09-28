@@ -454,6 +454,21 @@ def carry(model_sel, model_new, D, m, thr):
     return float(p[max(k, 1) - 1])
 
 
+def p_fresh(model):
+    """Вероятность свежего отказа у модели журнала: fresh = 1, остальное отключено."""
+    return 1 / (1 + math.exp(-(model.intercept_ + model.coef_[0])))
+
+
+def carry_real(model_sel, model_new, thr):
+    """Порог модели журнала после переобучения — в долях вероятности свежего отказа.
+    На окне выбора лучший F1 даёт «все свежие отказы и то, что не ниже их», и порог
+    равен p_fresh первой модели; перенос по числу строк на переученной модели ставил
+    порог выше блока свежих отказов (срезы 21:00 обгоняли его), и на проверке модель
+    теряла все моменты rearm."""
+    # допуск 1e-9 на округление: порог, равный p_fresh, не должен выйти выше неё
+    return thr * p_fresh(model_new) / p_fresh(model_sel) * (1 - 1e-9)
+
+
 def rule(D, m, kinds_):
     sel = m & np.isin(D.mk, kinds_)
     return D.mc[sel], D.mt[sel]
@@ -536,7 +551,7 @@ for H in HORIZONS:
         m, lo, hi = window_mask(D.mt, SELECT, H)
         fails = failures_in(F, lo, hi, H)
         model = fit(D, F, H, TRAIN)
-        models[("real", H)] = model
+        models[("real", H, name)] = model
         p = model.proba(D.rows(m))
         cv = curve(D, m, p, fails, H, F)
         hi_t, wa_t = choose(cv)
@@ -569,8 +584,9 @@ D = DR[variant]
 sel = run["horizons"][Hb][variant]
 real_model = fit(D, F, Hb, REFIT)
 msel, _, _ = window_mask(D.mt, SELECT, Hb)
-sel = {**sel, "high": carry(models[("real", Hb)], real_model, D, msel, sel["high"]),
-       "watch": carry(models[("real", Hb)], real_model, D, msel, sel["watch"])}
+sel = {**sel, "high": carry_real(models[("real", Hb, variant)], real_model, sel["high"]),
+       "watch": carry_real(models[("real", Hb, variant)], real_model, sel["watch"])}
+run["chosen"]["p_fresh"] = {"select": p_fresh(models[("real", Hb, variant)]), "refit": p_fresh(real_model)}
 run["chosen"]["thresholds_real"] = {"high": sel["high"], "watch": sel["watch"]}
 m, lo, hi = window_mask(D.mt, TEST, Hb)
 fails = failures_in(F, lo, hi, Hb)

@@ -7684,7 +7684,19 @@
  "sim": {},
  "chosen": {
   "horizon": 36,
-  "moments": "own"
+  "moments": "own",
+  "p_fresh": {
+   "select": 0.3014100602266382,
+   "refit": 0.32133329961981044
+  },
+  "thresholds_real": {
+   "high": 0.3560752031982152,
+   "watch": 0.005680178497330885
+  },
+  "thresholds_sim": {
+   "high": 0.4465337312099315,
+   "watch": 6.39640872724463e-07
+  }
  },
  "text": {
   "select": {
@@ -7715,24 +7727,24 @@
   ],
   "real": {
    "model": {
-    "tp": 4,
-    "fp": 35,
-    "fn": 597,
+    "tp": 2,
+    "fp": 30,
+    "fn": 599,
     "dup": 0,
-    "alerts": 39,
+    "alerts": 32,
     "incidents": 601,
-    "precision": 0.103,
-    "recall": 0.007
+    "precision": 0.062,
+    "recall": 0.003
    },
    "model_watch": {
-    "tp": 221,
-    "fp": 3117,
-    "fn": 380,
+    "tp": 222,
+    "fp": 2918,
+    "fn": 379,
     "dup": 0,
-    "alerts": 3338,
+    "alerts": 3140,
     "incidents": 601,
-    "precision": 0.066,
-    "recall": 0.368
+    "precision": 0.071,
+    "recall": 0.369
    },
    "model_rearm_only": {
     "tp": 0,
@@ -7788,7 +7800,7 @@
   "levels_real": {
    "2026-06-23": {
     "high": 0,
-    "watch": 31
+    "watch": 29
    },
    "2026-06-29": {
     "high": 0,
@@ -7799,23 +7811,23 @@
   },
   "sim": {
    "model": {
-    "tp": 233,
-    "fp": 246,
-    "fn": 58,
+    "tp": 239,
+    "fp": 248,
+    "fn": 52,
     "dup": 0,
-    "alerts": 479,
+    "alerts": 487,
     "incidents": 291,
-    "precision": 0.486,
-    "recall": 0.801
+    "precision": 0.491,
+    "recall": 0.821
    },
    "model_watch": {
     "tp": 131,
-    "fp": 5911,
+    "fp": 5162,
     "fn": 160,
     "dup": 0,
-    "alerts": 6042,
+    "alerts": 5293,
     "incidents": 291,
-    "precision": 0.022,
+    "precision": 0.025,
     "recall": 0.45
    },
    "oracle_no_precursor_precision": {
@@ -7846,56 +7858,56 @@
    "pf_days": 1.0,
    "false_ratio": 1.0,
    "model": {
-    "tp": 265,
-    "fp": 266,
-    "fn": 26,
+    "tp": 261,
+    "fp": 262,
+    "fn": 30,
     "dup": 0,
-    "alerts": 531,
+    "alerts": 523,
     "incidents": 291,
     "precision": 0.499,
-    "recall": 0.911
+    "recall": 0.897
    }
   },
   {
    "pf_days": 4.0,
    "false_ratio": 1.0,
    "model": {
-    "tp": 65,
-    "fp": 296,
-    "fn": 226,
+    "tp": 56,
+    "fp": 269,
+    "fn": 235,
     "dup": 0,
-    "alerts": 361,
+    "alerts": 325,
     "incidents": 291,
-    "precision": 0.18,
-    "recall": 0.223
+    "precision": 0.172,
+    "recall": 0.192
    }
   },
   {
    "pf_days": 2.0,
    "false_ratio": 0.5,
    "model": {
-    "tp": 268,
-    "fp": 124,
-    "fn": 23,
+    "tp": 273,
+    "fp": 126,
+    "fn": 18,
     "dup": 0,
-    "alerts": 392,
+    "alerts": 399,
     "incidents": 291,
     "precision": 0.684,
-    "recall": 0.921
+    "recall": 0.938
    }
   },
   {
    "pf_days": 2.0,
    "false_ratio": 3.0,
    "model": {
-    "tp": 259,
-    "fp": 777,
-    "fn": 32,
+    "tp": 253,
+    "fp": 754,
+    "fn": 38,
     "dup": 0,
-    "alerts": 1036,
+    "alerts": 1007,
     "incidents": 291,
-    "precision": 0.25,
-    "recall": 0.89
+    "precision": 0.251,
+    "recall": 0.869
    }
   }
  ]
