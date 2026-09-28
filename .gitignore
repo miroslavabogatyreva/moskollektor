@@ -53,3 +53,5 @@ frontend/playwright-report/
 # во время проверки строк приёмки. Доказательства живут в переписке и в строках
 # docs/acceptance-test.md, а не в git: за один проход цикла М-12 набежало 344 КБ.
 .playwright-mcp/
+# Пакет сдачи, собирает delivery/pack.sh (MOS-125).
+/dist/
