@@ -129,7 +129,10 @@ export function SensorTable({
 
   return (
     <>
-      <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 mt-2">
+      <div
+        data-tour="sensor-table-head"
+        class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 mt-2"
+      >
         <h2 id="sensor-table" class="card-title">
           Все датчики по риску
         </h2>
