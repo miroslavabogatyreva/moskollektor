@@ -55,3 +55,17 @@ frontend/playwright-report/
 .playwright-mcp/
 # Пакет сдачи, собирает delivery/pack.sh (MOS-125).
 /dist/
+
+# Локальный мусор, в сдачу не идёт: служебные каталоги чужих агентов (crush, zcode),
+# вложения задачи MOS-74 (11 МБ), черновик PRD и соседний рабочий каталог
+# moskollektor-wt/ (3,3 ГБ копия репозитория).
+.crush/
+.zcode/
+MOS-74_attachments/
+moskollektor-wt/
+/PRD_*.md
+
+# Внутренние рабочие документы, экспертам не нужны; на диске остаются (MOS-266).
+docs/review/
+docs/workflow.md
+docs/typical-composition-of-the-security-system-of-urban-sewers.md
