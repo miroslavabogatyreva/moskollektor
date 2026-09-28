@@ -17,7 +17,7 @@
 <td align="center" width="50%">
 <a href="https://moskollektor.mbogatyreva.ru/docs"><img src="https://img.shields.io/badge/Swagger%20·%20REST%20API-2EB82E?style=for-the-badge&logo=swagger&logoColor=white&labelColor=2EB82E" width="340" alt="Swagger · REST API"></a><br>
 <b><a href="https://moskollektor.mbogatyreva.ru/docs">moskollektor.mbogatyreva.ru/docs</a></b><br>
-<sub>все методы API, можно вызвать прямо со страницы</sub>
+<sub>все методы API с описанием</sub>
 </td>
 </tr>
 </table>
@@ -60,6 +60,13 @@
 <td align="center"><sub>Дашборд рисков по датчикам</sub></td>
 </tr>
 </table>
+
+## Где посмотреть
+
+| | |
+|---|---|
+| 🖥️ **Сервис** | **https://moskollektor.mbogatyreva.ru** — на экране входа кнопка «Войти как» у каждой демо-учётки |
+| 📘 **REST API (Swagger)** | **https://moskollektor.mbogatyreva.ru/docs** — все методы с описанием; вызвать их со страницы можно после входа в сервис в том же браузере |
 
 ## Как считается прогноз
 
@@ -141,6 +148,14 @@ cd ../frontend && npm ci && npm run build \
 | [`deploy/`](deploy) | Docker Compose, nginx, резервные копии, выкладка |
 | [`delivery/`](delivery) | сборка пакета сдачи и сквозные проверки |
 | [`code/`](code) | самопроверки схемы, метрик и выкладки |
+
+---
+
+<div align="center">
+
+**Сервис:** https://moskollektor.mbogatyreva.ru &nbsp;·&nbsp; **Swagger:** https://moskollektor.mbogatyreva.ru/docs
+
+</div>
 
 ## Команда
 
