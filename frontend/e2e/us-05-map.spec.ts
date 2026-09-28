@@ -1,6 +1,10 @@
 // US-05. Найти участок на схеме коллектора — docs/user-stories.md, приёмка М-05, план 5.30.
 // Названия test() — дословно названия сценариев истории.
 import { expect, test, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — своя сборка вместо фронта стенда, API настоящий.
+test.beforeEach(({ page }) => свойБандл(page))
 
 // Порог назван до замера: две картинки различимы, если силуэты расходятся хотя бы
 // на 10 % площади. Ниже лежат пары, которые глазом не различаются: восьмиугольник
@@ -110,10 +114,10 @@ async function одинокийЗначок(page: Page, слово: string, чи
   return page.evaluate(
     ([слово, чип]) => {
       document.querySelector('[data-e2e]')?.removeAttribute('data-e2e')
-      const метки = [...document.querySelectorAll('svg[role="img"] :has(> title)')]
+      const метки = [...document.querySelectorAll('svg[role="img"] :has(> desc)')]
       const рамки = метки.map((м) => м.getBoundingClientRect())
       for (let i = 0; i < метки.length; i++) {
-        if (!метки[i].querySelector('title')!.textContent!.endsWith(слово as string)) continue
+        if (!метки[i].querySelector('desc')!.textContent!.endsWith(слово as string)) continue
         if (чип !== рамки[i].width > 12) continue
         const ц = рамки[i]
         const сосед = рамки.some((р, j) => j !== i && Math.abs(р.x - ц.x) < (чип ? 20 : 8))
@@ -145,7 +149,7 @@ async function значокИФон(page: Page, слово: string, чип: bool
     await page.locator('select').first().selectOption(к)
     const есть = await page.evaluate(
       (слово) =>
-        [...document.querySelectorAll('svg[role="img"] title')].some((т) =>
+        [...document.querySelectorAll('svg[role="img"] desc')].some((т) =>
           т.textContent!.endsWith(слово),
         ),
       слово,
@@ -211,8 +215,9 @@ test('US-05 сц. 2: масштаб', async ({ page }) => {
     .locator('option', { hasText: /^объект Зита/ })
     .getAttribute('value')
   await page.locator('select').first().selectOption(зита!)
-  // Родитель svg — блок одной линии: в нём её кнопки зума и больше ничьи.
-  const строка = page.locator('svg[aria-label^="Линия 798"]').locator('..')
+  // Дед svg — блок одной линии: в нём её кнопки зума и больше ничьи (родитель —
+  // обёртка мгновенной подсказки FastTip, с 28.09.2026).
+  const строка = page.locator('svg[aria-label^="Линия 798"]').locator('../..')
   const плюс = строка.getByRole('button', { name: '+ приблизить' })
   for (let шаг = 0; шаг < 12 && (await плюс.isEnabled()); шаг++) {
     await плюс.click()
@@ -324,7 +329,7 @@ test('US-05 сц. 6: узел дерева сужает схему', async ({ pa
   await page.goto('/map?axis=sections')
   const tree = page.getByRole('navigation', { name: 'Дерево объектов' })
   await tree.getByRole('button', { name: 'объект Бета', exact: true }).click()
-  const меток = page.locator('main svg[role="img"] g > title')
+  const меток = page.locator('main svg[role="img"] g > desc')
   await expect(меток).toHaveCount(наОсиБеты.length)
 
   const кнопкаУзла = tree.getByRole('button', { name: /^ДП объект Бета · 81 кан\./ })

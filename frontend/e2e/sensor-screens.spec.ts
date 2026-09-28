@@ -293,7 +293,7 @@ test('MOS-262: склонение — нет «1 датчиков», «1 уча�
     // Подписи на экране и всплывающие <title> над стопками пикетов.
     const тексты = [
       await page.locator('main').innerText(),
-      ...(await демо.locator('svg title').allTextContents()),
+      ...(await демо.locator('svg desc').allTextContents()),
     ]
     let проверено = 0
     for (const текст of тексты)
@@ -325,7 +325,8 @@ test('MOS-262: ?level= переживает перезагрузку, «Наза
   await page.reload()
   await expect(page).toHaveURL(/\/dashboard\?level=high$/)
   await expect(уровень).toHaveValue('high')
-  expect(мок.urls.at(-1)).toContain('level=high')
+  // Последний запрос таблицы, а не сводки: сводку зовёт и шапка (период данных).
+  expect(мок.urls.filter((u) => !u.includes('/summary')).at(-1)).toContain('level=high')
 
   await уровень.selectOption('watch')
   await expect(page).toHaveURL(/\/dashboard\?level=watch$/)
