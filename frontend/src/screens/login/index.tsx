@@ -101,8 +101,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
           <button
             type="submit"
             disabled={submitting || !loginValue || !password}
-            class="px-3 py-1.5 rounded text-sm disabled:opacity-50"
-            style="background:var(--brand-action); color:var(--text-on-brand)"
+            class="btn btn-primary"
           >
             {submitting ? 'Входим…' : 'Войти'}
           </button>
@@ -118,11 +117,7 @@ export function LoginScreen(_props: Record<string, unknown>) {
             <thead>
               <tr>
                 {['Логин', 'Пароль', 'Роль', 'Что видит', ''].map((h) => (
-                  <th
-                    key={h}
-                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                  >
+                  <th key={h} class="th">
                     {h}
                   </th>
                 ))}

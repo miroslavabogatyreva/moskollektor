@@ -178,8 +178,8 @@ export function TechEventsTable({
   }
 
   return (
-    <section aria-labelledby="tech-events-title" class="flex flex-col gap-2">
-      <h2 id="tech-events-title" class="text-sm font-semibold" style="color:var(--text-muted)">
+    <section aria-labelledby="tech-events-title" class="card flex flex-col gap-2">
+      <h2 id="tech-events-title" class="card-title">
         Журнал технологических событий
       </h2>
       <form
@@ -269,12 +269,7 @@ export function TechEventsTable({
             <option value="Норма">Норма</option>
           </select>
         </label>
-        <button
-          type="submit"
-          disabled={датыНаоборот}
-          class="px-3 py-1 rounded text-sm disabled:opacity-50"
-          style={inputStyle}
-        >
+        <button type="submit" disabled={датыНаоборот} class="btn btn-primary">
           Применить
         </button>
         <label class="flex items-center gap-1.5">
@@ -299,52 +294,54 @@ export function TechEventsTable({
 
       {error && <p style="color:var(--state-error)">Не удалось загрузить журнал: {error}</p>}
 
-      <table
-        aria-labelledby="tech-events-title"
-        class="w-full text-sm"
-        style="border-collapse:collapse"
-      >
-        <thead>
-          <tr>
-            {COLUMNS.map((c) => (
-              <th
-                key={c.key}
-                aria-sort={
-                  sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-                }
-                class="text-left"
-                style="border-bottom:1px solid var(--border-subtle)"
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleSort(c.key)}
-                  class="w-full text-left px-2 py-2 text-xs uppercase tracking-wide cursor-pointer select-none"
-                  style="color:var(--text-muted)"
+      <div class="card p-0 overflow-x-auto">
+        <table
+          aria-labelledby="tech-events-title"
+          class="w-full text-sm"
+          style="border-collapse:collapse"
+        >
+          <thead>
+            <tr>
+              {COLUMNS.map((c) => (
+                <th
+                  key={c.key}
+                  aria-sort={
+                    sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
+                  }
+                  class="th p-0"
                 >
-                  {c.label}
-                  {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
-                </button>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items?.map((e) => (
-            <tr key={e.journal_id} style="border-bottom:1px solid var(--border-subtle)">
-              <td class="px-2 py-2 num">{formatDateTime(e.read_time)}</td>
-              <td class="px-2 py-2">{e.object ?? '—'}</td>
-              <td class="px-2 py-2">{e.sensor_kind ?? '—'}</td>
-              <td class="px-2 py-2">{e.value_text ?? '—'}</td>
-              <td
-                class="px-2 py-2"
-                style={e.event_type === 'Предупреждение' ? 'color:var(--state-warning)' : undefined}
-              >
-                {e.event_type}
-              </td>
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(c.key)}
+                    class="w-full text-left px-2 py-2 font-semibold select-none hover:underline"
+                  >
+                    {c.label}
+                    {sort.key === c.key && (sort.dir === 'asc' ? ' ↑' : ' ↓')}
+                  </button>
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items?.map((e) => (
+              <tr key={e.journal_id} style="border-bottom:1px solid var(--border-subtle)">
+                <td class="px-2 py-2 num">{formatDateTime(e.read_time)}</td>
+                <td class="px-2 py-2">{e.object ?? '—'}</td>
+                <td class="px-2 py-2">{e.sensor_kind ?? '—'}</td>
+                <td class="px-2 py-2">{e.value_text ?? '—'}</td>
+                <td
+                  class="px-2 py-2"
+                  style={
+                    e.event_type === 'Предупреждение' ? 'color:var(--state-warning)' : undefined
+                  }
+                >
+                  {e.event_type}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {!error && items?.length === 0 && (
         <p style="color:var(--text-muted)">Событий за период нет.</p>
@@ -355,8 +352,7 @@ export function TechEventsTable({
             type="button"
             disabled={offset === 0}
             onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style={inputStyle}
+            class="btn btn-secondary"
           >
             ← Назад
           </button>
@@ -367,8 +363,7 @@ export function TechEventsTable({
             type="button"
             disabled={offset + items.length >= total}
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style={inputStyle}
+            class="btn btn-secondary"
           >
             Дальше →
           </button>

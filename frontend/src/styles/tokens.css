@@ -32,39 +32,79 @@
   --font-ui: 'Source Sans 3', system-ui, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Source Sans 3', system-ui, sans-serif;
 
-  /* фон и поверхности */
-  --bg-app: #e8ebee;
-  --bg-surface: #f4f6f8;
-  --bg-table: #fafbfc;
-  --bg-table-alt: #f1f4f6;
-  --bg-row-hover: #edf1f4;
-  --border-subtle: #c9d0d8;
+  /* фон и поверхности: страница серо-голубая, карточки белые с тенью — так
+     разделы читаются как отдельные листы (визуальный проход 28.09.2026) */
+  --bg-app: #edf0f4;
+  --bg-surface: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-subtle: #f5f7fa;
+  --bg-table: #ffffff;
+  --bg-table-alt: #f3f5f8;
+  --bg-row-hover: #e8f0fc;
+  --border-subtle: #d3d9e1;
   --border-strong: #7d8894;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --shadow-raised: 0 4px 12px rgb(16 24 40 / 10%), 0 1px 3px rgb(16 24 40 / 8%);
 
   /* текст */
-  --text-primary: #15202b;
-  --text-secondary: #47525e;
-  --text-muted: #5f6a75;
+  --text-primary: #111a24;
+  --text-secondary: #3d4854;
+  --text-muted: #56616e;
   --text-on-brand: #ffffff;
 
-  /* бренд */
+  /* бренд: шапка остаётся тёмно-синей, действие — ярче, чтобы кнопку и ссылку
+     было видно на белой карточке без наведения */
   --brand: #003882;
   --brand-header-bg: #003882;
   --brand-nav-active: #1a4e9e;
   --brand-nav-marker: #38bdf8;
-  --brand-action: #003882;
-  --brand-action-hover: #002a63;
-  --link: #003882;
+  --brand-action: #0b5cd5;
+  --brand-action-hover: #0848a8;
+  --accent: #0b5cd5;
+  --accent-hover: #0848a8;
+  --accent-text: #0a55c6;
+  --accent-tint: #e8f0fc;
+  --accent-border: #8fb2e8;
+  --text-on-accent: #ffffff;
+  --link: #0a55c6;
+  --link-hover: #073f94;
+
+  /* бейджи статусов: заливка / текст / обводка */
+  --badge-info-bg: #e3edfd;
+  --badge-info-fg: #0b4aa8;
+  --badge-info-border: #9dbcf0;
+  --badge-success-bg: #e1f3e7;
+  --badge-success-fg: #17613a;
+  --badge-success-border: #8fcca6;
+  --badge-warning-bg: #fff1d2;
+  --badge-warning-fg: #744600;
+  --badge-warning-border: #e2b35a;
+  --badge-danger-bg: #fde5e2;
+  --badge-danger-fg: #9c1c13;
+  --badge-danger-border: #eea39c;
+  --badge-neutral-bg: #eef1f4;
+  --badge-neutral-fg: #3d4854;
+  --badge-neutral-border: #c3cad3;
 
   /* служебные */
   --state-success: #1e7a46;
   --state-warning: #8a5a00;
-  --state-error: #8f1d18;
-  --state-info: #003882;
-  --row-selected: #d9e6f2;
-  --row-selected-bar: #003882;
+  --state-error: #a1231a;
+  --state-info: #0a55c6;
+  --row-selected: #d9e6f8;
+  --row-selected-bar: #0b5cd5;
   --focus-ring: #0b6fcb;
   --focus-ring-offset: #ffffff;
+
+  /* лента состояний в карточке объекта: норма / выключено / отказ / прочее */
+  --ribbon-ok: #2f9e68;
+  --ribbon-ok-2: #178a9c;
+  --ribbon-off: #8b96a2;
+  --ribbon-off-2: #5f6b78;
+  --ribbon-fault: #d0392f;
+  --ribbon-fault-2: #9c1c13;
+  --ribbon-other: #4a7fd6;
+  --ribbon-other-2: #8a63c9;
 
   /* шкала риска: заливка / текст / обводка (dashboard/color-palette.md, разд. 9) */
   --risk-critical: #a81f16;
@@ -98,35 +138,71 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg-app: #131a22;
-    --bg-surface: #1b242e;
-    --bg-table: #202a35;
-    --bg-table-alt: #1a232d;
-    --bg-row-hover: #232e3a;
-    --border-subtle: #303b47;
+    --bg-app: #0e141b;
+    --bg-surface: #17202a;
+    --bg-raised: #1d2733;
+    --bg-subtle: #1b2530;
+    --bg-table: #17202a;
+    --bg-table-alt: #1b2530;
+    --bg-row-hover: #1e3048;
+    --border-subtle: #2e3b49;
     --border-strong: #6b7886;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-raised: 0 6px 16px rgb(0 0 0 / 45%);
 
-    --text-primary: #e4e9ee;
-    --text-secondary: #aeb9c5;
-    --text-muted: #8a96a3;
+    --text-primary: #e8edf2;
+    --text-secondary: #b4c0cc;
+    --text-muted: #96a3b0;
     --text-on-brand: #ffffff;
 
     --brand: #1a5cb0;
     --brand-header-bg: #06264f;
     --brand-nav-active: #123a6e;
     --brand-nav-marker: #38bdf8;
-    --brand-action: #1a5cb0;
-    --brand-action-hover: #2470c9;
-    --link: #6fc2ea;
+    --brand-action: #2468c4;
+    --brand-action-hover: #1d58a8;
+    --accent: #2468c4;
+    --accent-hover: #1d58a8;
+    --accent-text: #7db4ff;
+    --accent-tint: #1b3350;
+    --accent-border: #3f70ae;
+    --text-on-accent: #ffffff;
+    --link: #7db4ff;
+    --link-hover: #a9cdff;
+
+    --badge-info-bg: #16304f;
+    --badge-info-fg: #a3c9ff;
+    --badge-info-border: #3a6aa8;
+    --badge-success-bg: #12301f;
+    --badge-success-fg: #86dba8;
+    --badge-success-border: #2f6e49;
+    --badge-warning-bg: #36280b;
+    --badge-warning-fg: #f5c870;
+    --badge-warning-border: #8a6420;
+    --badge-danger-bg: #3b1714;
+    --badge-danger-fg: #ffa59b;
+    --badge-danger-border: #9a3a32;
+    --badge-neutral-bg: #222c37;
+    --badge-neutral-fg: #c3cdd7;
+    --badge-neutral-border: #465463;
 
     --state-success: #6fd39b;
     --state-warning: #e8b75a;
     --state-error: #ff9a8d;
-    --state-info: #6fc2ea;
+    --state-info: #7db4ff;
     --row-selected: #24384c;
-    --row-selected-bar: #6fc2ea;
+    --row-selected-bar: #7db4ff;
     --focus-ring: #6fc2ea;
-    --focus-ring-offset: #131a22;
+    --focus-ring-offset: #0e141b;
+
+    --ribbon-ok: #3fb87c;
+    --ribbon-ok-2: #2aa6b8;
+    --ribbon-off: #7b8794;
+    --ribbon-off-2: #aab4bf;
+    --ribbon-fault: #e5534b;
+    --ribbon-fault-2: #ff8a80;
+    --ribbon-other: #5b95f0;
+    --ribbon-other-2: #a585e0;
 
     --risk-critical: #3a1310;
     --risk-critical-text: #ff9a8d;
@@ -158,35 +234,71 @@
 }
 
 [data-theme='dark'] {
-  --bg-app: #131a22;
-  --bg-surface: #1b242e;
-  --bg-table: #202a35;
-  --bg-table-alt: #1a232d;
-  --bg-row-hover: #232e3a;
-  --border-subtle: #303b47;
+  --bg-app: #0e141b;
+  --bg-surface: #17202a;
+  --bg-raised: #1d2733;
+  --bg-subtle: #1b2530;
+  --bg-table: #17202a;
+  --bg-table-alt: #1b2530;
+  --bg-row-hover: #1e3048;
+  --border-subtle: #2e3b49;
   --border-strong: #6b7886;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-raised: 0 6px 16px rgb(0 0 0 / 45%);
 
-  --text-primary: #e4e9ee;
-  --text-secondary: #aeb9c5;
-  --text-muted: #8a96a3;
+  --text-primary: #e8edf2;
+  --text-secondary: #b4c0cc;
+  --text-muted: #96a3b0;
   --text-on-brand: #ffffff;
 
   --brand: #1a5cb0;
   --brand-header-bg: #06264f;
   --brand-nav-active: #123a6e;
   --brand-nav-marker: #38bdf8;
-  --brand-action: #1a5cb0;
-  --brand-action-hover: #2470c9;
-  --link: #6fc2ea;
+  --brand-action: #2468c4;
+  --brand-action-hover: #1d58a8;
+  --accent: #2468c4;
+  --accent-hover: #1d58a8;
+  --accent-text: #7db4ff;
+  --accent-tint: #1b3350;
+  --accent-border: #3f70ae;
+  --text-on-accent: #ffffff;
+  --link: #7db4ff;
+  --link-hover: #a9cdff;
+
+  --badge-info-bg: #16304f;
+  --badge-info-fg: #a3c9ff;
+  --badge-info-border: #3a6aa8;
+  --badge-success-bg: #12301f;
+  --badge-success-fg: #86dba8;
+  --badge-success-border: #2f6e49;
+  --badge-warning-bg: #36280b;
+  --badge-warning-fg: #f5c870;
+  --badge-warning-border: #8a6420;
+  --badge-danger-bg: #3b1714;
+  --badge-danger-fg: #ffa59b;
+  --badge-danger-border: #9a3a32;
+  --badge-neutral-bg: #222c37;
+  --badge-neutral-fg: #c3cdd7;
+  --badge-neutral-border: #465463;
 
   --state-success: #6fd39b;
   --state-warning: #e8b75a;
   --state-error: #ff9a8d;
-  --state-info: #6fc2ea;
+  --state-info: #7db4ff;
   --row-selected: #24384c;
-  --row-selected-bar: #6fc2ea;
+  --row-selected-bar: #7db4ff;
   --focus-ring: #6fc2ea;
-  --focus-ring-offset: #131a22;
+  --focus-ring-offset: #0e141b;
+
+  --ribbon-ok: #3fb87c;
+  --ribbon-ok-2: #2aa6b8;
+  --ribbon-off: #7b8794;
+  --ribbon-off-2: #aab4bf;
+  --ribbon-fault: #e5534b;
+  --ribbon-fault-2: #ff8a80;
+  --ribbon-other: #5b95f0;
+  --ribbon-other-2: #a585e0;
 
   --risk-critical: #3a1310;
   --risk-critical-text: #ff9a8d;
