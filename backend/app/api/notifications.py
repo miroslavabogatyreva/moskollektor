@@ -37,6 +37,11 @@ router = APIRouter(prefix="/api")
 # схема ответа у GET пустая — {}. Типы сверены с колонками (docs/HLD.md разд. 5.4):
 # probability — real (float4, уже float), horizon_h — smallint (уже int),
 # acked_by здесь login из JOIN на ref.app_user, а не число.
+# probability — вероятность прогноза, ПОДНЯВШЕГО уведомление, на его срез as_of;
+# current_probability — вероятность участка сейчас (pred.forecast_current), та же,
+# что в карточке /objects/{id}. Без второго поля плашка писала «91 %», а карточка
+# того же участка 0,8169, и диспетчер не знал, кому верить (MOS-247). None —
+# участок выпал из последнего расчёта.
 class NotificationItem(BaseModel):
     id: int
     reported_at: str
@@ -44,6 +49,7 @@ class NotificationItem(BaseModel):
     smvu_key: str | None
     section_id: int | None
     probability: float
+    current_probability: float | None
     horizon_h: int
     as_of: str | None
     acked_at: str | None
@@ -64,6 +70,7 @@ FROM_SQL = """
   JOIN ref.object_xref x     ON x.func_location_id = l.id
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
+  LEFT JOIN pred.forecast_current fc ON fc.section_id = x.section_id
   LEFT JOIN ref.app_user au  ON au.user_id = n.acked_by
  WHERE n.source_system = 'forecast'
    AND ($1::boolean IS NULL OR (n.acked_at IS NOT NULL) = $1)
@@ -74,7 +81,7 @@ COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 
 LIST_SQL = f"""
 SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
-       f.probability, f.horizon_h, r.as_of,
+       f.probability, fc.probability AS current_probability, f.horizon_h, r.as_of,
        n.acked_at, au.login AS acked_by
 {FROM_SQL}
  ORDER BY n.reported_at DESC, n.id DESC
@@ -88,12 +95,13 @@ SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
 # не должен увидеть чужой коллектор раньше, чем откроет список.
 СОБЫТИЯ_SQL = """
 SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
-       f.probability, f.horizon_h, r.as_of
+       f.probability, fc.probability AS current_probability, f.horizon_h, r.as_of
   FROM maint.notification n
   JOIN asset.func_location l ON l.id = n.func_location_id
   JOIN ref.object_xref x     ON x.func_location_id = l.id
   JOIN pred.forecast f       ON f.forecast_id = n.forecast_id
   JOIN pred.run r            ON r.run_id = f.run_id
+  LEFT JOIN pred.forecast_current fc ON fc.section_id = x.section_id
  WHERE n.source_system = 'forecast' AND n.id > $1
    AND ($2::int[] IS NULL OR x.section_id = ANY($2))
  ORDER BY n.id ASC
@@ -113,6 +121,7 @@ def _строка(r: asyncpg.Record) -> dict:
         "smvu_key": r["smvu_key"],
         "section_id": r["section_id"],
         "probability": r["probability"],
+        "current_probability": r["current_probability"],
         "horizon_h": r["horizon_h"],
         "as_of": r["as_of"].isoformat() if r["as_of"] else None,
     }

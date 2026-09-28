@@ -13,8 +13,12 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.14-slim
+# curl — не сервисам, а приёмочным проверкам: check_minimum (через
+# contracts/examples/api/examples.sh), check_api_paging, check_stable_paging
+# и check_xml_response ходят в API curl'ом; без него в контейнере они падали
+# FileNotFoundError на исправном продукте (проверка ветки 28.09.2026, MOS-156).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libldap2 libsasl2-2 \
+    libldap2 libsasl2-2 curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /install /usr/local
 WORKDIR /app
@@ -36,4 +40,8 @@ COPY contracts ./contracts
 # доказывает запуск check_metrics.py внутри контейнера, а не наше слово.
 # Порядок запуска — docs/install.md, раздел «Проверки на приёмке» (MOS-120).
 COPY code ./code
+# Проверки из code/ импортируют app.*, а sys.path[0] у них — /app/code, не /app:
+# без этой строки девять из них падали ModuleNotFoundError: No module named 'app'
+# (MOS-156). Сервисам не мешает: они и так запускаются из WORKDIR /app.
+ENV PYTHONPATH=/app
 CMD ["python", "-m", "app.api.main"]

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { apiFetch } from '../lib/api'
+import { formatDateTime } from '../lib/format'
 
 /* Полоса уведомлений — план 5.6 (MOS-53), приёмка Ф-88, Ф-90.
 
@@ -19,7 +20,9 @@ interface Alert {
   smvu_key: string | null
   section_id: number | null
   probability: number
+  current_probability: number | null
   horizon_h: number
+  as_of: string | null
 }
 
 // Отметка своя у каждого логина: второй диспетчер за тем же компьютером
@@ -93,7 +96,17 @@ export function AlertBar({ login }: { login: string }) {
       ) : (
         <span>{место}</span>
       )}
-      <span class="num">вероятность {Math.round(alert.probability * 100)} %</span>
+      {/* MOS-247: вероятность уведомления — на срез прогноза, поднявшего его; карточка
+          участка показывает текущую. Разошлись — пишем обе, иначе «91 %» на плашке
+          и 0,8169 в карточке выглядят как ошибка. */}
+      <span class="num">
+        вероятность {Math.round(alert.probability * 100)} %
+        {alert.as_of && <> на {formatDateTime(alert.as_of)}</>}
+        {alert.current_probability != null &&
+          Math.round(alert.current_probability * 100) !== Math.round(alert.probability * 100) && (
+            <>, сейчас {Math.round(alert.current_probability * 100)} %</>
+          )}
+      </span>
       <span class="num">горизонт {alert.horizon_h} ч</span>
       {/* Ф-90: «за локацией стоит переход на карту» (MOS-245) — схема выберет
           коллектор участка, приблизит линию к пикету и обведёт метку. */}

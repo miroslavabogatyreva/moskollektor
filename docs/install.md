@@ -172,6 +172,11 @@ openssl rand -hex 16
 разработчика — раздел «Где заливать» в `deploy/README.md` объясняет,
 почему на маке не хватает места на седьмом файле из восьми.
 
+После заливки выгрузки прогоните `migrate` ещё раз: демо прогноза по датчикам
+(`/map?demo=sensors`) берёт синтетический паспорт оборудования из сида, а сид
+пишет его только на уже залитые каналы — абзац «Синтетика по датчикам появляется при втором накате»
+в `deploy/README.md`.
+
 Собранный интерфейс кладётся в `deploy/nginx/app`, а не в `deploy/nginx/html`.
 В `html` лежит заглушка «Стенд поднят», nginx отдаёт её, только пока `app` пуст.
 Если после выкладки в корне стенда по-прежнему «Стенд поднят», фронт не собран
@@ -241,9 +246,41 @@ docker compose exec api python code/check_lock.py
 он печатает `СБОЙ` и выходит с ненулевым кодом. Зелёный ответ означает, что
 проверка действительно прошла, а не что она не нашла, к чему придраться.
 
-Две проверки в контейнере работать не будут, и это ожидаемо: `check_licenses.py`
-и `check_model_and_objects.py` читают файлы из `docs/`, а документы в образ не едут.
-Их запускают из распакованного пакета поставки, где `docs/` лежит рядом.
+**Какие проверки где запускать — 28.09.2026, MOS-156.** Проверок в `code/` 38, и они
+делятся на две группы по тому, что им нужно. Кто запустит проверку не в том месте,
+получит не трассировку, а отказ со словами «задайте DATABASE_URL» или «нет каталога»;
+до правки 21 из 38 падали в образе трассировкой `ModuleNotFoundError` или
+`FileNotFoundError` на исправном продукте.
+
+*В контейнере `api` — 25 проверок, им нужна база или стенд.* `backend/Dockerfile`
+ставит `PYTHONPATH=/app`, поэтому они видят код `app.*` без подсказок, и ставит `curl`,
+которым четыре из них ходят в API (`check_minimum` через `examples.sh`,
+`check_api_paging`, `check_stable_paging`, `check_xml_response`):
+`check_api_paging`, `check_auth`, `check_block_user`, `check_card_weight`,
+`check_explain_templates`, `check_frontend`, `check_ingest`, `check_lock`,
+`check_metrics`, `check_metrics_report`, `check_minimum`, `check_model_and_objects`,
+`check_order_status`, `check_orders`, `check_risk_deadzone`, `check_runtime`,
+`check_schema`, `check_section_xref`, `check_seed_rbac`, `check_spread`,
+`check_stable_paging`, `check_stream`, `check_tech_events`,
+`check_weather`, `check_xml_response`. Запуск: `docker compose exec api python code/<имя>.py`.
+
+*Из распакованного пакета — 13 проверок, им нужны файлы репозитория* (`docs/`,
+`frontend/src`, исходники `backend/app`), история git (`check_migration_hashes`) или
+ssh до сервера (`check_trust_header`, ей нужна переменная `STAND_SSH`). В образ их не пускает `.dockerignore`, чтобы
+комиссия не нашла там проверку, которая заведомо упадёт:
+`check_contrast`, `check_dependency_pins`, `check_deploy_set`, `check_licenses`,
+`check_migration_hashes`, `check_no_auto_verdict`, `check_pg_version`, `check_plan`,
+`check_stale_fetch`, `check_structure`, `check_trust_header`, `check_unmet`,
+`check_write_policy`. Запуск из
+корня пакета: `python3 code/<имя>.py`. `check_metrics_report` лежит в обоих местах:
+в образе он нужен как модуль (`check_orders` берёт из него окно замера), а сам отчёт
+и доказательства проверяет только из пакета — в контейнере он скажет это словами; все разом с привязкой к строкам приёмки —
+`bash delivery/check-all.sh`. `check_structure` — исключение: она сверяет счётчики каталогов с `git ls-tree`, поэтому работает только из клона репозитория, а не из архива `delivery/pack.sh`, где `.git` нет.
+
+`check_licenses` сверяет перечень `docs/libraries.md` с `node_modules`, а в них
+платформенные сборки (`@rolldown/binding-darwin-arm64` на Маке, `-linux-x64-gnu`
+на Linux). Перечень составлен на Маке, поэтому на Linux проверка печатает
+расхождение по этим пакетам — пакеты другие, лицензии у них те же.
 
 **Третья не живёт в образе и жить не может — `delivery/check-a11y.mjs`.** Она водит
 настоящий браузер: поднимает Chrome, нажимает Tab и Enter и читает дерево доступности,
