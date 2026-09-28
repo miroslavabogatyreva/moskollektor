@@ -62,7 +62,9 @@ test('US-14 сц. 1: одно имя на пяти экранах', async ({ pag
 
   // 5. Схема: подсказка метки участка начинается с того же имени.
   await page.goto('/map')
-  await page.getByLabel('Коллектор').selectOption(String(участок.collector))
+  await page
+    .getByRole('combobox', { name: 'Коллектор', exact: true })
+    .selectOption(String(участок.collector))
   await expect(
     page
       .locator('main svg[role="img"] g > title')
