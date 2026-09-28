@@ -10,6 +10,10 @@
 // на первой странице журнала за сегодня (журнал по умолчанию показывает сегодня,
 // 200 строк). На стенде 27.09.2026 таких 18 из 357 заявок.
 import { expect, test } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — своя сборка вместо фронта стенда, API настоящий.
+test.beforeEach(({ page }) => свойБандл(page))
 
 interface Участок {
   section_id: number
@@ -67,7 +71,7 @@ test('US-14 сц. 1: одно имя на пяти экранах', async ({ pag
     .selectOption(String(участок.collector))
   await expect(
     page
-      .locator('main svg[role="img"] g > title')
+      .locator('main svg[role="img"] g > desc')
       .filter({ hasText: `${имя} · участок ${участок.section_id}` }),
   ).toHaveCount(1)
 })

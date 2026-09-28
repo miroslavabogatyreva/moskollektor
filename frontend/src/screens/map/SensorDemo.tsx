@@ -1,3 +1,4 @@
+import { FastTip } from '../../components/FastTip'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { SENSOR_LEVELS, SensorBadge } from '../../components/SensorBadge'
 import { SyntheticToggle } from '../../components/SyntheticToggle'
@@ -448,132 +449,134 @@ function SensorLine({
         </div>
       </div>
 
-      <svg
-        ref={svgRef}
-        role="img"
-        aria-label={`Датчики, ${имя}, по пикетам`}
-        class="w-full"
-        height={height}
-        viewBox={`0 0 ${width || 1} ${height}`}
-        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
-        onWheel={onWheel}
-      >
-        {width > 0 && (
-          <>
-            {picket != null && (
-              <rect
-                x={x(picket) - 7}
-                y={4}
-                width={14}
-                height={baseY - 2}
-                rx={4}
-                fill="var(--row-selected)"
-                stroke="var(--brand-nav-marker)"
-              />
-            )}
-            <line x1={PAD} y1={baseY} x2={width - PAD} y2={baseY} stroke="var(--border-strong)" />
-            {ticks.map((pk) => (
-              <g key={pk} pointer-events="none">
-                <line
-                  x1={x(pk)}
-                  y1={baseY}
-                  x2={x(pk)}
-                  y2={baseY + 5}
-                  stroke="var(--border-strong)"
+      <FastTip>
+        <svg
+          ref={svgRef}
+          role="img"
+          aria-label={`Датчики, ${имя}, по пикетам`}
+          class="w-full"
+          height={height}
+          viewBox={`0 0 ${width || 1} ${height}`}
+          style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
+          onWheel={onWheel}
+        >
+          {width > 0 && (
+            <>
+              {picket != null && (
+                <rect
+                  x={x(picket) - 7}
+                  y={4}
+                  width={14}
+                  height={baseY - 2}
+                  rx={4}
+                  fill="var(--row-selected)"
+                  stroke="var(--brand-nav-marker)"
                 />
-                <text
-                  x={x(pk)}
-                  y={baseY + 18}
-                  font-size="11"
-                  text-anchor="middle"
-                  fill="var(--text-muted)"
-                >
-                  ПК {pk}
-                </text>
-              </g>
-            ))}
-            {stacks
-              .filter(({ pk }) => pk >= lo + v0 && pk <= lo + v1)
-              .map(({ pk, all, shown, hidden, normal }) => {
-                const низ = baseY - 5 - (normal > 0 ? под : 0)
-                const верх = shown.length
-                  ? низ - (shown.length - 1) * step - 5 - (hidden ? 12 : 0)
-                  : baseY - 6 - (normal > 0 ? под : 0)
-                return (
-                  <g
-                    key={pk}
-                    data-picket={pk}
-                    // Число в норме — и на стопке, где подписи при мелком масштабе нет.
-                    data-normal={normal}
-                    data-selected={pk === picket ? '' : undefined}
-                    style="cursor:pointer"
-                    onClick={() => onPick(pk)}
+              )}
+              <line x1={PAD} y1={baseY} x2={width - PAD} y2={baseY} stroke="var(--border-strong)" />
+              {ticks.map((pk) => (
+                <g key={pk} pointer-events="none">
+                  <line
+                    x1={x(pk)}
+                    y1={baseY}
+                    x2={x(pk)}
+                    y2={baseY + 5}
+                    stroke="var(--border-strong)"
+                  />
+                  <text
+                    x={x(pk)}
+                    y={baseY + 18}
+                    font-size="11"
+                    text-anchor="middle"
+                    fill="var(--text-muted)"
                   >
-                    {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
-                      неё, а не прямым ребёнком <g>: `g > title` на оси считает метки
-                      участков (US-05 сц. 6), датчики туда попадать не должны. */}
-                    <rect
-                      x={x(pk) - 5}
-                      y={верх - 2}
-                      width={10}
-                      height={baseY - верх + 2}
-                      fill="transparent"
+                    ПК {pk}
+                  </text>
+                </g>
+              ))}
+              {stacks
+                .filter(({ pk }) => pk >= lo + v0 && pk <= lo + v1)
+                .map(({ pk, all, shown, hidden, normal }) => {
+                  const низ = baseY - 5 - (normal > 0 ? под : 0)
+                  const верх = shown.length
+                    ? низ - (shown.length - 1) * step - 5 - (hidden ? 12 : 0)
+                    : baseY - 6 - (normal > 0 ? под : 0)
+                  return (
+                    <g
+                      key={pk}
+                      data-picket={pk}
+                      // Число в норме — и на стопке, где подписи при мелком масштабе нет.
+                      data-normal={normal}
+                      data-selected={pk === picket ? '' : undefined}
+                      style="cursor:pointer"
+                      onClick={() => onPick(pk)}
                     >
-                      <title>
-                        ПК{pk}: {датчиков(all.length)}, высокий риск —{' '}
-                        {all.filter((s) => s.level === 'high').length}, в норме — {normal}
-                      </title>
-                    </rect>
-                    {/* Пикет, где все в норме, — серый штрих 1×6 px на оси. */}
-                    {shown.length === 0 && (
+                      {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
+                      неё, а не прямым ребёнком <g>: `g > desc` на оси считает метки
+                      участков (US-05 сц. 6), датчики туда попадать не должны. */}
                       <rect
-                        x={x(pk) - 0.5}
-                        y={baseY - 6}
-                        width={1}
-                        height={6}
-                        fill="var(--text-muted)"
-                      />
-                    )}
-                    {shown.map((s, i) => (
-                      <Dot
-                        key={s.channel_id}
-                        s={s}
-                        cx={x(pk)}
-                        cy={низ - i * step}
-                        r={2.6}
-                        ringOnly={s.level === 'normal'}
-                      />
-                    ))}
-                    {hidden > 0 && (
-                      <text
-                        data-hidden={hidden}
-                        x={x(pk)}
-                        y={низ - (shown.length - 1) * step - 8}
-                        font-size="10"
-                        text-anchor="middle"
-                        fill="var(--text-muted)"
+                        x={x(pk) - 5}
+                        y={верх - 2}
+                        width={10}
+                        height={baseY - верх + 2}
+                        fill="transparent"
                       >
-                        +{hidden}
-                      </text>
-                    )}
-                    {подпись && normal > 0 && (
-                      <text
-                        data-normal={normal}
-                        x={x(pk)}
-                        y={baseY - (shown.length ? 3 : 9)}
-                        font-size="9"
-                        text-anchor="middle"
-                        fill="var(--text-muted)"
-                      >
-                        {целиком ? `${normal} в норме` : normal}
-                      </text>
-                    )}
-                  </g>
-                )
-              })}
-          </>
-        )}
-      </svg>
+                        <desc>
+                          ПК{pk}: {датчиков(all.length)}, высокий риск —{' '}
+                          {all.filter((s) => s.level === 'high').length}, в норме — {normal}
+                        </desc>
+                      </rect>
+                      {/* Пикет, где все в норме, — серый штрих 1×6 px на оси. */}
+                      {shown.length === 0 && (
+                        <rect
+                          x={x(pk) - 0.5}
+                          y={baseY - 6}
+                          width={1}
+                          height={6}
+                          fill="var(--text-muted)"
+                        />
+                      )}
+                      {shown.map((s, i) => (
+                        <Dot
+                          key={s.channel_id}
+                          s={s}
+                          cx={x(pk)}
+                          cy={низ - i * step}
+                          r={2.6}
+                          ringOnly={s.level === 'normal'}
+                        />
+                      ))}
+                      {hidden > 0 && (
+                        <text
+                          data-hidden={hidden}
+                          x={x(pk)}
+                          y={низ - (shown.length - 1) * step - 8}
+                          font-size="10"
+                          text-anchor="middle"
+                          fill="var(--text-muted)"
+                        >
+                          +{hidden}
+                        </text>
+                      )}
+                      {подпись && normal > 0 && (
+                        <text
+                          data-normal={normal}
+                          x={x(pk)}
+                          y={baseY - (shown.length ? 3 : 9)}
+                          font-size="9"
+                          text-anchor="middle"
+                          fill="var(--text-muted)"
+                        >
+                          {целиком ? `${normal} в норме` : normal}
+                        </text>
+                      )}
+                    </g>
+                  )
+                })}
+            </>
+          )}
+        </svg>
+      </FastTip>
     </div>
   )
 }
