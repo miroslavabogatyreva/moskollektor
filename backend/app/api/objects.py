@@ -26,11 +26,13 @@ from app.api.schemas import (
     ObjectChannelList,
     ObjectDetail,
     ObjectReading,
+    SensorRisk,
     TreeCollector,
 )
 from app.auth.deps import require, видимые_участки, проверить_участок
 from app.api.permits import ДЕЙСТВУЮЩИЕ
-from app.db import get_conn
+from app.db import КРАЙ_ДАННЫХ, get_conn
+from app.domain import sensor_risk
 
 router = APIRouter(prefix="/api")
 
@@ -359,6 +361,101 @@ async def list_channel_episodes(
         for r in rows
     ]
     return {"channel": dict(канал), "total": len(items), "items": items}
+
+
+@router.get("/sensor-risk", response_model=SensorRisk)
+async def get_sensor_risk(
+    node: int = Query(5657, description="узел smvu.object_tree; по умолчанию демо-узел «объект Каппа ДУ»"),
+    conn: asyncpg.Connection = Depends(get_conn),
+    user=Depends(require("objects.read")),
+):
+    """Балл риска по каждому датчику узла (демо 28.09.2026). Формула и окна ППР —
+    app.domain.sensor_risk. Паспорт оборудования СИНТЕТИЧЕСКИЙ (db/seed/sensor_demo.sql),
+    отказы настоящие — те же, что у таблицы «Отказы по каналам» карточки
+    (smvu.model_failure_event от нижней границы pred.weight_window()).
+
+    В ответ идут только каналы с синтетическим паспортом: у узла без синтетики
+    items пустой, synthetic=false. Область видимости — как у дерева: каналы
+    невидимых роли участков выпадают молча. `node` необязателен (умолчание 5657),
+    чтобы delivery/check-api-contract.py звал метод без подстановки.
+
+    as_of — срез текущего прогноза (max(as_of) в pred.forecast_current), пока
+    прогноза нет — край данных; отказы позже среза балл не видит.
+    """
+    name = await conn.fetchval("SELECT name FROM smvu.object_tree WHERE object_id = $1", node)
+    if name is None:
+        raise HTTPException(404, "узел не найден")
+    at = await conn.fetchval(
+        f"SELECT coalesce((SELECT max(as_of) FROM pred.forecast_current), ({КРАЙ_ДАННЫХ}), now())"
+    )
+    chans = await conn.fetch(
+        """
+        SELECT c.channel_id, c.name, c.sensor_kind, c.picket, c.section_id,
+               e.id AS eq_id, e.equipment_no, m.name AS manufacturer, e.model_no,
+               e.in_service_from, e.service_life_years
+          FROM smvu.channel c
+          JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $2
+          LEFT JOIN ref.manufacturer m ON m.id = e.manufacturer_id
+         WHERE c.object_id = $1 AND c.is_active
+           AND ($3::int[] IS NULL OR c.section_id = ANY($3))
+        """,
+        node, sensor_risk.SRC, await видимые_участки(user, conn),
+    )
+    points: dict[int, dict] = {}
+    for r in await conn.fetch(
+        """
+        SELECT p.equipment_id, p.id, ch.code,
+               timezone('Europe/Moscow', ms.measured_at)::date AS d, ms.is_out_of_limit
+          FROM asset.measuring_point p
+          JOIN ref.characteristic ch ON ch.id = p.characteristic_id
+          LEFT JOIN asset.measurement ms ON ms.point_id = p.id
+         WHERE p.equipment_id = ANY($1)
+         ORDER BY ms.measured_at
+        """,
+        [c["eq_id"] for c in chans],
+    ):
+        p = points.setdefault(r["id"], {
+            "eq": r["equipment_id"],
+            "kind": "calib" if r["code"] == "SYN_CALIB_ERR" else "motohours",
+            "readings": [],
+        })
+        if r["d"] is not None:
+            p["readings"].append((r["d"], not r["is_out_of_limit"]))
+    starts: dict[int, list] = {}
+    for r in await conn.fetch(
+        """
+        SELECT e.channel_id, e.started_at
+          FROM smvu.model_failure_event e
+         CROSS JOIN pred.weight_window() w
+         WHERE e.channel_id = ANY($1)
+           AND timezone('Europe/Moscow', e.started_at)::date >= w.date_from
+        """,
+        [c["channel_id"] for c in chans],
+    ):
+        starts.setdefault(r["channel_id"], []).append(r["started_at"])
+
+    items = []
+    for c in chans:
+        pts = [p for p in points.values() if p["eq"] == c["eq_id"]]
+        done = sorted((d, ok) for p in pts for d, ok in p["readings"] if d <= at.astimezone(sensor_risk.MSK).date())
+        eq = {"in_service": c["in_service_from"], "life": c["service_life_years"], "points": pts}
+        items.append({
+            **{k: c[k] for k in ("channel_id", "name", "sensor_kind", "picket", "section_id")},
+            **sensor_risk.score(
+                starts.get(c["channel_id"], []), eq, at,
+                sensor_risk.plan_windows(node, c["sensor_kind"]),
+            ),
+            "equipment": {
+                **{k: c[k] for k in (
+                    "equipment_no", "manufacturer", "model_no", "in_service_from",
+                    "service_life_years",
+                )},
+                "last_check_at": done[-1][0] if done else None,
+                "last_check_ok": done[-1][1] if done else None,
+            },
+        })
+    items.sort(key=lambda i: (-i["score"], i["channel_id"]))
+    return {"node": node, "node_name": name, "as_of": at, "synthetic": bool(items), "items": items}
 
 
 def _selfcheck():
