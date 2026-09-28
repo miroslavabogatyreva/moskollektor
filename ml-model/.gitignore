@@ -1,6 +1,6 @@
 # Private inputs, external artifacts and generated research output stay local.
 /data/
-/models/
+/models/*
 /artifacts/
 /docs/research/
 *.log
@@ -17,3 +17,5 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# Веса модели, работающей на стенде, лежат в git (MOS-145).
+!/models/lgbm-v3-bag-2026.09.21/
