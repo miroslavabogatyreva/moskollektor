@@ -26,9 +26,12 @@ export interface SensorRow {
   channel_id: number
   name: string
   sensor_kind: string
-  collector_id: number
-  collector_name: string
-  picket: number
+  // Ответ SL.4 (backend/app/api/schemas.py, SensorRiskItem). Имени коллектора
+  // в строке нет — экран берёт его из /data/sections.json по collector_id.
+  node_id: number | null
+  collector_id: number | null
+  // null у каналов без «ПК» в названии: охранная зона, здание ДП — 765 из 11 485 (миграция 031).
+  picket: number | null
   section_id: number | null
   score: number
   level: SensorLevel
@@ -37,23 +40,34 @@ export interface SensorRow {
   equipment: SensorEquipment | null
 }
 
+// as_of null — worker ещё не посчитал ни одного среза pred.sensor_risk.
 export interface SensorRiskPage {
-  node?: number
-  as_of: string
   synthetic: boolean
+  as_of: string | null
+  node: number | null
+  node_name: string | null
+  collector: number | null
+  collector_name: string | null
   total: number
+  limit: number
+  offset: number
   items: SensorRow[]
 }
 
 export interface SensorSummary {
   synthetic: boolean
-  as_of: string
+  as_of: string | null
   high: number
   watch: number
   normal: number
   collectors_with_high: number
+  // Сервер отдаёт не больше пяти, остальные — collectors_with_high минус длина списка.
   top_collectors: { collector_id: number; name: string; high: number }[]
 }
+
+// «расчёт на 30.06.2026 23:59» или «расчёта ещё не было», если срезов нет.
+export const срезРасчёта = (as_of: string | null, fmt: (v: string) => string): string =>
+  as_of ? `расчёт на ${fmt(as_of)}` : 'расчёта ещё не было'
 
 // Переключатель «Учитывать паспорт оборудования (синтетика)»: по умолчанию включён,
 // в адресе живёт только выключенное состояние — ?synthetic=0. Так ссылка без

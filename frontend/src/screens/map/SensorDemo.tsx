@@ -8,6 +8,7 @@ import {
   БЕЗ_ЛИНИИ,
   линииДатчиков,
   sensorRiskUrl,
+  срезРасчёта,
   шагСтопки,
   type SensorLevel,
   type SensorRiskPage,
@@ -41,6 +42,10 @@ const ЛИМИТ = 5000
 const ORDER: SensorLevel[] = ['high', 'watch', 'normal']
 const PAD = 24
 const BASE_GAP = 34 // от оси до низа чертежа: деления и подписи ПК
+
+// На ось пикетов встают только датчики с пикетом; у канала охранной зоны или
+// здания ДП пикета нет (picket null, миграция 031) — их считаем строкой под схемой.
+type ПоПикету = SensorRow & { picket: number }
 
 interface Выбор {
   prefix: string
@@ -152,7 +157,12 @@ export function SensorDemo({
     () => new Map(sections.map((s) => [s.section_id, s.smvu_key])),
     [sections],
   )
-  const lines = useMemo(() => линииДатчиков(data?.items ?? [], ключУчастка), [data, ключУчастка])
+  const наОси = useMemo(
+    () => (data?.items ?? []).filter((s): s is ПоПикету => s.picket != null),
+    [data],
+  )
+  const безПикета = (data?.items.length ?? 0) - наОси.length
+  const lines = useMemo(() => линииДатчиков(наОси, ключУчастка), [наОси, ключУчастка])
   const prefixOf = (id: number) => lines.find(([, v]) => v.some((s) => s.channel_id === id))?.[0]
 
   // Выбор после ответа: датчик из адреса; иначе прошлый выбор, если он ещё есть
@@ -160,7 +170,7 @@ export function SensorDemo({
   // датчика (items отсортированы сервером по баллу).
   useEffect(() => {
     if (!data) return
-    const изАдреса = channel != null ? data.items.find((s) => s.channel_id === channel) : undefined
+    const изАдреса = channel != null ? наОси.find((s) => s.channel_id === channel) : undefined
     if (изАдреса && применён.current !== channel) {
       применён.current = channel
       const prefix = prefixOf(изАдреса.channel_id)!
@@ -181,7 +191,7 @@ export function SensorDemo({
       lines.some(([p, v]) => p === pick.prefix && v.some((s) => s.picket === pick.picket))
     )
       return
-    const top = data.items[0]
+    const top = наОси[0]
     setPick(top ? { prefix: prefixOf(top.channel_id)!, picket: top.picket } : null)
     setOpen(top?.channel_id ?? null)
   }, [data, channel])
@@ -220,8 +230,8 @@ export function SensorDemo({
         </h2>
         {data && (
           <span class="text-sm" style="color:var(--text-secondary)">
-            расчёт на {formatDateTime(data.as_of)} · {data.items.length} датчиков: {count('high')}{' '}
-            высокий риск, {count('watch')} наблюдать, {count('normal')} норма
+            {срезРасчёта(data.as_of, formatDateTime)} · {data.items.length} датчиков:{' '}
+            {count('high')} высокий риск, {count('watch')} наблюдать, {count('normal')} норма
           </span>
         )}
       </div>
@@ -239,6 +249,7 @@ export function SensorDemo({
           <p class="text-sm" style="color:var(--text-secondary)">
             {lines.length} {lines.length === 1 ? 'линия' : 'линии'} · нажмите на стопку, чтобы
             открыть датчики пикета
+            {безПикета > 0 && ` · без пикета (охранная зона, здание) ${безПикета} — на оси их нет`}
           </p>
           {lines.map(([prefix, items]) => (
             <SensorLine
@@ -292,7 +303,7 @@ function SensorLine({
   onPick,
 }: {
   prefix: string
-  items: SensorRow[]
+  items: ПоПикету[]
   picket: number | null
   view: ViewRange | null
   onView: (v: ViewRange | null) => void

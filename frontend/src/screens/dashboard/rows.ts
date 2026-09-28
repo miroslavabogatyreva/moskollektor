@@ -22,6 +22,7 @@ export interface SectionRef {
   section_id: number
   smvu_key: string
   collector: number
+  collector_name?: string
   picket: number
 }
 
