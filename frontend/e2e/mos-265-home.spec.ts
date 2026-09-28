@@ -53,7 +53,7 @@ test('US-01 сц. 6: смена начинается со схемы пикет�
   await expect(наблюдать.locator('.stat-value')).toHaveText(s.watch.toLocaleString('ru-RU'))
   await expect(полоса.getByRole('link', { name: /Заявки в работе/ })).toHaveAttribute(
     'href',
-    '/orders',
+    '/orders?status=active',
   )
   expect(ошибки).toEqual([])
 })
