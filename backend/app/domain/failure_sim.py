@@ -1,11 +1,13 @@
+#!/usr/bin/env python3
 """Симулированные отказы и их предвестники по синтетическому паспорту. SL.10 (MOS-263).
 
 Что делает. По паспорту канала (вид оборудования, дата ввода, срок службы) и датам
-поверок или ТО считает, в какие сутки канал отказал бы, если бы оборудование
-ломалось по Вейбуллу с параметрами из регламента и книг по надёжности. К каждому
-симулированному отказу добавляет предвестник — «предупреждение прибора» за P-F
-до отказа (интервал P-F из RCM), и ещё ложные предвестники, за которыми отказа
-нет. Таблица параметров с источником каждого числа —
+поверок или ТО моделирует начало ухудшения по интенсивности Вейбулла. В этот
+момент появляется «предупреждение прибора», а через P-F — искусственный отказ.
+Есть и ложные предупреждения без запланированного отказа. Интенсивность зависит
+только от проверок, известных до суток предупреждения. Более поздняя поверка
+не меняет уже наблюдённое предупреждение и не отменяет назначенный отказ — это
+допущение демонстрации, не модель эффективности ремонта. Таблица параметров —
 docs/proof/2026-09-28-sensor-model/simulation.md, словарь PARAMS обязан с ней совпадать.
 
 Чего НЕ читает. Реальные отказы (failures.csv, smvu.model_failure_*). Вход — только
@@ -32,7 +34,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 MSK = timezone(timedelta(hours=3))
-SALT = "sim-v2"
+SALT = "sim-v3-causal"
 DAY = 365.25  # суток в году для η
 
 M = math.sqrt(10)  # ГОСТ Р 27.303-2021, табл. В.4: один ранг O = ×√10
@@ -97,8 +99,9 @@ def overdue(d, age, checks, interval):
 
 
 def day_prob(d, in_service, beta, eta, checks=(), interval=None, mult=1.0):
-    """Вероятность отказа в сутки d: 1 − exp(−M·ΔH), ΔH — прирост накопленной
-    интенсивности Вейбулла за сутки; до ввода — 0."""
+    """Вероятность начала ухудшения в сутки d: 1 − exp(−M·ΔH), ΔH — прирост
+    интенсивности Вейбулла. Истинный предвестник назначит отказ через P-F;
+    до ввода оборудования вероятность равна нулю."""
     a = (d - in_service).days
     if a < 0:
         return 0.0
@@ -114,28 +117,34 @@ def _at(d, frac):
 
 def channel(cid, in_service, beta, eta, start, end, checks=(), interval=None,
             mult=1.0, salt=SALT, pf_days=PF_DAYS, false_ratio=FALSE_RATIO):
-    """Отказы и предвестники канала: отказы с началом в сутках [start, end]
-    и предвестники, истинные и ложные, с моментом в [start, end].
-    Отдаёт (отказы, [(момент предвестника, истинный ли)])."""
+    """Причинный поток предупреждений и назначенных ими отказов в [start, end].
+
+    Сначала наблюдение, затем исход через pf_days: future checks не могут
+    переписать наблюдение. Смена P-F сдвигает отказы, а не предвестники.
+    Полный прогон и короткое окно дают одни и те же события внутри окна.
+    """
+    if not math.isfinite(pf_days) or pf_days < 0:
+        raise ValueError("pf_days должен быть конечным неотрицательным числом")
+    if not math.isfinite(false_ratio) or false_ratio < 0:
+        raise ValueError("false_ratio должен быть конечным неотрицательным числом")
     checks = sorted(checks)
     pf = timedelta(days=pf_days)
     fails, pre = [], []
-    # Отказы до end + P-F: их предвестники видны уже в [start, end].
-    d = start
-    last = end + timedelta(days=math.ceil(pf_days))
-    while d <= last:
+    # Предвестники до start тоже могут назначить отказ внутри запрошенного окна.
+    d = start - timedelta(days=math.ceil(pf_days))
+    while d <= end:
         p = day_prob(d, in_service, beta, eta, checks, interval, mult)
         if p > 0:
             u = uniform(salt, cid, d)
             if u < p:
                 t = _at(d, u / p)
-                if d <= end:
-                    fails.append(t)
-                if start <= (t - pf).date() <= end:
-                    pre.append((t - pf, True))
+                if start <= (t + pf).date() <= end:
+                    fails.append(t + pf)
+                if start <= d:
+                    pre.append((t, True))
             q = min(false_ratio * p, 1.0)
             v = uniform(salt + ":false", cid, d)
-            if d <= end and v < q:
+            if start <= d and v < q:
                 pre.append((_at(d, v / q), False))
         d += timedelta(days=1)
     pre.sort()
@@ -232,9 +241,9 @@ def _selfcheck():
     assert a[0] != simulate(pp, {}, date(2022, 4, 1), date(2026, 6, 30), salt="другая")[0]
     b = simulate(pp, {}, date(2024, 1, 1), date(2024, 12, 31))
     assert b[0] == [x for x in a[0] if x[1].year == 2024]
-    # P-F сдвигает предвестники, а не отказы
+    # P-F сдвигает назначенные отказы, а наблюдения остаются прежними.
     c = simulate(pp, {}, date(2022, 4, 1), date(2026, 6, 30), pf_days=4)
-    assert c[0] == a[0] and c[1] != a[1]
+    assert c[0] != a[0] and c[1] == a[1]
     # просрочка считается по последней проверке раньше суток
     assert not overdue(date(2024, 6, 1), 999, [date(2024, 1, 1)], 365)
     assert overdue(date(2025, 6, 1), 999, [date(2024, 1, 1)], 365)

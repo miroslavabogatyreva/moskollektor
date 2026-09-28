@@ -12,12 +12,11 @@
   real      — признаки только из журнала СМВУ (smvu.model_failure_event):
               давность последнего отказа, число отказов за 7/30/90 сут, отказы
               соседей на том же пикете и коллекторе за 7 сут, вид датчика;
-  synthetic — те же плюс СИНТЕТИЧЕСКИЙ паспорт (source_system='synthetic-demo'):
+  synthetic — отдельная модель СИНТЕТИЧЕСКОГО паспорта (source_system='synthetic-demo'):
               доля выработки срока службы, давность поверки или ТО к интервалу,
-              флаг просрочки. Учена на «симулированном мире»: к реальным отказам
-              добавлены отказы, досимулированные из паспорта по нормам регламента
-              (code/failure_sim.py, docs/proof/2026-09-28-sensor-model/simulation.md).
-              Это не качество на реальных данных.
+              флаг просрочки и искусственные предвестники. Предвестник назначает
+              искусственный отказ через P-F (app.domain.failure_sim). Для экрана
+              результат объединяется с real. Это не качество на реальных данных.
 
 Эпизод, начатый внутри окна планового демонтажа по графику ППР заказчика,
 в признаки не идёт: это не отказ, датчик сняли на поверку.
@@ -33,6 +32,9 @@ SRC = "synthetic-demo"
 MODEL_PATH = Path(__file__).with_name("sensor_model.json")
 
 CAP = 365  # сутки: давность больше года — «давно», и вклад её уже ноль
+# D5 — длительность строго больше часа. В журнале точность до секунды: первое
+# доступное мгновение — started_at + 3601 с, не ретроспективное начало эпизода.
+CONFIRM_SECONDS = 3601
 # Интервал проверки по виду точки измерения: поверка газоанализатора и датчика
 # температуры раз в год, ТО насоса и вентилятора (снимают моточасы) раз в полгода.
 # Источники — docs/proof/2026-09-28-sensor-model/simulation.md.
@@ -89,14 +91,21 @@ def in_plan(s, plan):
     return next((w for w in plan if w["from"] <= s <= w["to"]), None)
 
 
+def confirmed(start, at):
+    """Архивный эпизод уже можно назвать отказом на срезе `at`."""
+    return (at - start).total_seconds() >= CONFIRM_SECONDS
+
+
 def features(starts, at, eq=None, nb=(0, 0), pre=()):
     """Признаки строки «канал × срез». starts — начала отказов канала без эпизодов
     ППР (datetime с поясом); nb — (отказов соседей на том же пикете, на том же
     коллекторе) за 7 сут до at, без самого канала; eq — синтетический паспорт
     {"in_service": date, "life": лет, "points": [{"kind", "readings": [(date, …)]}]}
     или None; pre — моменты синтетических предвестников канала (datetime).
+    Эпизод доступен только после подтверждения D5; давность отсчитывается от
+    начала. nb уже должен содержать только подтверждённые к at эпизоды.
     Отдаёт {имя: число} и служебные поля для текста причин."""
-    past = [s for s in starts if s <= at]
+    past = [s for s in starts if confirmed(s, at)]
     last = max(past, default=None)
     days = min((at - last).total_seconds() / 86400, CAP) if last else CAP
 
@@ -245,7 +254,7 @@ def score(starts, eq, at, plan=(), nb=(0, 0), kind=None, mode=None, pre=()):
     M = model()["modes"]
     faults, plan_reasons = [], []
     for s in starts:
-        if s > at:
+        if not confirmed(s, at):
             continue
         w = in_plan(s, plan)
         if w is None:
@@ -348,10 +357,14 @@ def _selfcheck():
     assert fresh["score"] > old["score"] > здоровый["score"], (fresh, old)
     assert fresh["reasons"][0]["kind"] == "real"
     assert score([at + timedelta(hours=1)], None, at, kind=gas) == здоровый
-    # серия отказов — уровень high в обоих режимах
+    # Уровень серии определяется порогами текущего артефакта. При переобучении
+    # он может измениться: проверяем контракт, а не выдуманное попадание в high.
     many = [at - timedelta(hours=h) for h in (3, 20, 50, 100, 200)]
-    assert score(many, None, at, kind=gas)["level"] == "high"
-    assert score(many, eq, at, kind=gas)["level"] == "high"
+    x_many = features(many, at)
+    probability, _ = _part(M["modes"]["real"], x_many, gas)
+    assert score(many, None, at, kind=gas)["level"] == level(probability, M["modes"]["real"])
+    assert RANK[score(many, eq, at, kind=gas)["level"]] >= RANK[level(probability, M["modes"]["real"])]
+    assert score([at - timedelta(hours=1)], None, at, kind=gas) == здоровый
     # сумма весов причин — разница с тем же видом без отказов
     r = score(many, None, at, kind=gas)
     assert abs(sum(x["weight"] for x in r["reasons"]) - (r["score"] - здоровый["score"])) < 0.01

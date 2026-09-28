@@ -44,20 +44,20 @@ SELECT c.channel_id, c.object_id, c.sensor_kind, c.collector, c.picket,
   LEFT JOIN ref.object_kind k ON k.id = e.object_kind_id
  WHERE c.is_active AND NOT c.is_stub
 """
-# Последняя проверка каждой точки измерения не позже даты среза: score() берёт
+# Последняя проверка каждой точки измерения не позже момента среза: score() берёт
 # из истории только её, поэтому всю историю не тащим.
 ПРОВЕРКИ = """
 SELECT p.equipment_id, ch.code,
        max(timezone('Europe/Moscow', ms.measured_at)::date)
-           FILTER (WHERE timezone('Europe/Moscow', ms.measured_at)::date <= $2) AS last
+           FILTER (WHERE ms.measured_at <= $2::timestamptz) AS last
   FROM asset.measuring_point p
   JOIN asset.equipment e ON e.id = p.equipment_id AND e.source_system = $1
   JOIN ref.characteristic ch ON ch.id = p.characteristic_id
   LEFT JOIN asset.measurement ms ON ms.point_id = p.id
  GROUP BY p.id, p.equipment_id, ch.code
 """
-# Все даты проверок синтетического паспорта: генератору симуляции нужна просрочка
-# на каждые сутки окна предвестника, а не только последняя проверка.
+# Все даты проверок синтетического паспорта: причинный генератор сам использует
+# только проверки до суток наблюдения предвестника, будущие даты его не меняют.
 ДАТЫ_ПРОВЕРОК = """
 SELECT p.equipment_id, array_agg(timezone('Europe/Moscow', ms.measured_at)::date
                                  ORDER BY ms.measured_at) AS dates
@@ -96,7 +96,7 @@ SELECT e.channel_id, e.started_at, c.object_id, c.sensor_kind, c.collector, c.pi
   JOIN smvu.channel c USING (channel_id)
  CROSS JOIN pred.weight_window() w
  WHERE timezone('Europe/Moscow', e.started_at)::date >= w.date_from
-   AND e.started_at <= $1
+   AND e.started_at <= $1::timestamptz - make_interval(secs => $2)
 """
 
 
@@ -104,7 +104,7 @@ async def баллы(conn, at) -> list[tuple]:
     """Строки pred.sensor_risk на срез `at` — без записи, для тика и для проверок."""
     день = at.astimezone(sensor_risk.MSK).date()
     точки: dict[int, list] = {}
-    for r in await conn.fetch(ПРОВЕРКИ, sensor_risk.SRC, день):
+    for r in await conn.fetch(ПРОВЕРКИ, sensor_risk.SRC, at):
         точки.setdefault(r["equipment_id"], []).append(
             {
                 "kind": "calib" if r["code"] == "SYN_CALIB_ERR" else "motohours",
@@ -119,8 +119,10 @@ async def баллы(conn, at) -> list[tuple]:
     свои: Counter = Counter()
     по_коллектору: Counter = Counter()
     по_пикету: Counter = Counter()
-    for r in await conn.fetch(ОТКАЗЫ, at):
+    for r in await conn.fetch(ОТКАЗЫ, at, sensor_risk.CONFIRM_SECONDS):
         s = r["started_at"]
+        if not sensor_risk.confirmed(s, at):
+            continue
         starts.setdefault(r["channel_id"], []).append(s)
         if not timedelta(0) <= at - s < НЕДЕЛЯ or sensor_risk.in_plan(
             s, окна.get((r["object_id"], r["sensor_kind"]), ())
