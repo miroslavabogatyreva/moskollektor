@@ -70,7 +70,7 @@ fi
 # docker compose config разбирает файл и подстановки без демона Docker.
 if docker compose version > /dev/null 2>&1; then
   # Два секрета compose требует обязательно (${VAR:?}); эксперт задаёт их сам
-  # по delivery/INSTALL.md разд. 4, здесь подставляем заглушки только для разбора.
+  # по delivery/INSTALL.md разд. 2, здесь подставляем заглушки только для разбора.
   sed -e 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=check/' -e 's/^AUTH_SECRET=$/AUTH_SECRET=check/' \
     "$root/deploy/.env.example" > "$root/deploy/.env"
   if (cd "$root/deploy" && docker compose --profile app --profile ldap config -q 2> "$tmp/compose.log"); then
