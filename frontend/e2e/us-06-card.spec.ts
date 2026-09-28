@@ -4,6 +4,10 @@
 // Участок берём первый на дашборде: у него прогноз есть всегда, а сц. 3 и 4
 // ему не пусты (объяснение модели, последняя запись до момента расчёта).
 import { expect, test, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — карточку проверяем своей сборкой, а не фронтом стенда.
+test.beforeEach(({ page }) => свойБандл(page))
 
 interface Объект {
   section_id: number
