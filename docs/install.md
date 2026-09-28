@@ -229,8 +229,11 @@ DB_CONTAINER=moskollektor-db-1 sh deploy/check-backup.sh
 # метрики М-18…М-21: Precision, Recall, упреждение, время расчёта
 docker compose exec api python code/check_metrics.py
 
-# программа минимум, 21 строка М-01…М-21
-docker compose exec api python code/check_minimum.py
+# программа минимум, 21 строка М-01…М-21 — из worker, а не из api:
+# выдача модели score.json смонтирована только в worker (М-10, М-13),
+# а схему /data/sections.json отдаёт nginx, а не api (М-05)
+docker compose exec -e BASE_URL=https://nginx -e CURL_OPTS=-k worker \
+  sh -c 'SCORE_JSON=$SCORE_V3_PATH python code/check_minimum.py'
 
 # схема базы: порядок миграций и целостность
 docker compose exec api python code/check_schema.py
@@ -241,6 +244,16 @@ docker compose exec api python code/check_api_paging.py
 # блокировка расчёта: два экземпляра не считают одно и то же
 docker compose exec api python code/check_lock.py
 ```
+
+**В контейнере программа минимум закрывается не вся, и это честно.** Две строки
+контейнер сам проверить не может и пишет про них «РУЧНАЯ» с командой, а не «СБОЙ»:
+М-01 — модель он проверит по базе и по ответу образа `ml`, а отчёт об обучении
+`docs/ml-training-report.md` лежит в пакете, в образе каталога `docs/` нет; М-05 —
+браузерной проверке схемы `delivery/check-map.mjs` нужны Node и Chrome. Обе строки
+целиком закрывает `bash delivery/check-all.sh` из распакованного пакета. Замер на
+стенде 28.09.2026 этой командой: машинно OK 15, вручную 3 (М-01, М-02, М-05), открыто 3
+(М-18, М-19 — MOS-167, М-20 — MOS-219), сбоев 0. Без переменных из примера выше та же
+команда в `api` давала 4 сбоя на исправном продукте (MOS-156).
 
 Каждый скрипт **по умолчанию отказывает**, а не соглашается: без `DATABASE_URL`
 он печатает `СБОЙ` и выходит с ненулевым кодом. Зелёный ответ означает, что
