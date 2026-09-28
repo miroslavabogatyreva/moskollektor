@@ -571,7 +571,7 @@ function HomeStrip({
         value={orders ? String(orders.open) : '…'}
         sub={orders ? (orders.overdue > 0 ? undefined : 'просроченных нет') : undefined}
         warn={orders && orders.overdue > 0 ? `из них просрочено ${orders.overdue}` : undefined}
-        href="/orders"
+        href="/orders?status=active"
       />
     </div>
   )
