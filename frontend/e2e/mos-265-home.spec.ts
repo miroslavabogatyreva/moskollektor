@@ -39,7 +39,22 @@ test('US-01 сц. 6: смена начинается со схемы пикет�
   await expect(ось.locator('[data-level="normal"]')).toHaveCount(0)
 
   await expect(page.getByRole('heading', { name: 'Ждут квитирования' })).toBeVisible()
-  await expect(page.getByTestId('home-strip')).toBeVisible()
+  // Сводная полоса: плитка-ссылка целиком, число — из того же ответа сводки.
+  const полоса = page.getByTestId('home-strip')
+  const s = (await (await page.request.get('/api/sensor-risk/summary?synthetic=1')).json()) as {
+    high: number
+    watch: number
+  }
+  const высокий = полоса.getByRole('link', { name: /Высокий риск/ })
+  await expect(высокий).toHaveAttribute('href', '/dashboard?level=high')
+  await expect(высокий.locator('.stat-value')).toHaveText(s.high.toLocaleString('ru-RU'))
+  const наблюдать = полоса.getByRole('link', { name: /Наблюдать/ })
+  await expect(наблюдать).toHaveAttribute('href', '/dashboard?level=watch')
+  await expect(наблюдать.locator('.stat-value')).toHaveText(s.watch.toLocaleString('ru-RU'))
+  await expect(полоса.getByRole('link', { name: /Заявки в работе/ })).toHaveAttribute(
+    'href',
+    '/orders?status=active',
+  )
   expect(ошибки).toEqual([])
 })
 
