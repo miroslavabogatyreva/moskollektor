@@ -156,6 +156,28 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
         </div>
       </section>
 
+      {/* История заявки (US-19 сц. 1, Ф-87): смена статуса строкой, и видно, откуда
+          он пришёл — из системы учёта или проставлен человеком. */}
+      {data.status_history.length > 0 && (
+        <section data-testid="order-history" class="text-sm flex flex-col gap-1">
+          <h2 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
+            История заявки
+          </h2>
+          <ol class="flex flex-col gap-1">
+            {data.status_history.map((с, i) => (
+              <li key={i}>
+                <span class="num">{formatDateTime(с.changed_at)}</span> — статус «{с.status}»
+                {с.assignee && <> · {с.assignee}</>}{' '}
+                <span style="color:var(--text-muted)">
+                  ·{' '}
+                  {с.source === 'order_system' ? 'получен из системы учёта' : 'проставлен вручную'}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       <section>
         <a
           href={`/forecasts/${data.forecast.forecast_id}`}
