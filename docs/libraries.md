@@ -149,9 +149,11 @@ JS без метаданных пакета, заглянуть внутрь г�
 оттуда нечем, поэтому здесь предмет проверки — дерево `npm ci` (сама стадия
 сборки, `docs/HLD.md` разд. 7.4), а не то, что получает заказчик.
 
-`dependencies` и `devDependencies` вместе, 103 пакета. В шипуемый бандл
+`dependencies` и `devDependencies` вместе, 104 пакета. В шипуемый бандл
 (`frontend/dist`, копируется в образ `nginx` — `docs/HLD.md` разд. 7.4) из них
-попадают только **`preact`** и **`preact-router`**: остальное — инструменты сборки
+попадают только **`preact`**, **`preact-router`** и с 28.09.2026 **`driver.js`**
+(тур по системе, MIT, своих зависимостей нет, отдельный файл `dist/assets/tour-*.js`,
+браузер грузит его по кнопке «Тур по системе»): остальное — инструменты сборки
 (Babel, Rolldown, esbuild-цепочка Vite, TypeScript, Tailwind, Prettier),
 транспилируют и бандлят код, в собранные файлы сами не попадают; `@playwright/test`
 с `playwright` и `playwright-core` (Apache-2.0, с 22.09.2026) гоняют E2E-тесты
@@ -221,6 +223,7 @@ GPL, LGPL и AGPL — MPL-2.0 в него не входит, и правило �
 | domelementtype | 2.3.0 | BSD-2-Clause |
 | domhandler | 5.0.3 | BSD-2-Clause |
 | domutils | 3.2.2 | BSD-2-Clause |
+| driver.js | 1.8.0 | MIT |
 | electron-to-chromium | 1.5.430 | ISC |
 | enhanced-resolve | 5.25.1 | MIT |
 | entities | 4.5.0 | BSD-2-Clause |

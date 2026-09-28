@@ -278,7 +278,7 @@ export function LogScreen(_props: Record<string, unknown>) {
       )}
 
       <SkipTable targetId="log-table-end" />
-      <div class="card p-0 overflow-x-auto">
+      <div data-tour="log-table" class="card p-0 overflow-x-auto">
         <table class="w-full text-sm" style="border-collapse:collapse">
           <thead>
             <tr>

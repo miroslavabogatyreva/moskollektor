@@ -308,7 +308,7 @@ export function ObjectCard({
           и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
           и без двух экранов прокрутки их не было видно. */}
       {risk && (
-        <section class="card">
+        <section class="card" data-tour="risk">
           <h2 class="card-title mb-2">Уровень риска</h2>
           <div class="text-sm flex flex-col gap-1">
             <div>
@@ -406,7 +406,7 @@ export function ObjectCard({
         </table>
       </section>
 
-      <section class="card">
+      <section class="card" data-tour="faults">
         <h2 class="card-title mb-2">Отказы по каналам</h2>
         {channelFaultsError && (
           <p style="color:var(--state-error)">
@@ -502,7 +502,7 @@ export function ObjectCard({
         sensorKinds={[...new Set(data.channels.map((c) => c.sensor_kind))].sort()}
       />
 
-      <section class="card">
+      <section class="card" data-tour="readings">
         <h2 class="card-title mb-1">Показания датчиков</h2>
         <p class="text-sm mb-2" style="color:var(--text-secondary)">
           {risk
