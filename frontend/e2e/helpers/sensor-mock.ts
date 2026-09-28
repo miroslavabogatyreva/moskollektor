@@ -11,9 +11,12 @@
 //
 // Сверх контракта мок понимает channel=<id>: по нему /map?channel= узнаёт коллектор.
 //
-// Форма ответа и пороги — как у бэкенда SL.4 (backend/app/api/schemas.py SensorRisk,
-// SensorRiskSummary; backend/app/domain/sensor_risk.py): high от 0,5, watch от 0,25,
-// limit по умолчанию 500, в top_collectors не больше пяти. Имени коллектора в строке
+// Форма ответа и правила — как у бэкенда (backend/app/api/schemas.py SensorRisk,
+// SensorRiskSummary; backend/app/domain/sensor_risk.py rule_split): уровень и балл
+// выдуманного датчика берутся по давности последнего отказа из
+// backend/app/domain/sensor_rules.json — порогов по баллу у правил нет, high с 1,9 %
+// бывает ниже watch с 7,5 %. Предвестник (синтетика) — у 5 % датчиков. Сортировка —
+// уровень, потом балл, как ORDER BY сервера; limit по умолчанию 500, в top_collectors не больше пяти. Имени коллектора в строке
 // сервер не отдаёт — collector_name здесь только для теста, в ответ он не уходит.
 import { readFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
@@ -50,8 +53,27 @@ export const МЮ = 3828
 export const ДАТЧИКОВ_МЮ = 1487
 const ПК632_ВЫСОКИЙ_С_ПАСПОРТОМ = new Set([267051, 267058, 267072])
 
-const уровень = (score: number): Level =>
-  score >= 0.5 ? 'high' : score >= 0.25 ? 'watch' : 'normal'
+const ПРАВИЛА = JSON.parse(readFileSync('../backend/app/domain/sensor_rules.json', 'utf8')) as {
+  horizon_h: number
+  recency: {
+    high_h: number
+    watch_h: number
+    table: { from_h: number; to_h: number | null; score: number }[]
+  }
+  precursor: { score: { due: number } }
+}
+const РАНГ: Level[] = ['high', 'watch', 'normal']
+// Давность последнего отказа, часы → уровень и балл правила давности.
+function давность(часов: number): { level: Level; score: number } {
+  const { high_h, watch_h, table } = ПРАВИЛА.recency
+  const b = table.find((t) => часов >= t.from_h && (t.to_h == null || часов < t.to_h))!
+  return {
+    level: часов < high_h ? 'high' : часов < watch_h ? 'watch' : 'normal',
+    score: +b.score.toFixed(4),
+  }
+}
+// Уровни мока без синтетики: срез(synthetic=0) берёт их отсюда, а не из балла.
+const УРОВЕНЬ_БЕЗ = new Map<number, Level>()
 
 // Линейный конгруэнтный генератор: один и тот же парк на каждом прогоне.
 function генератор(seed: number) {
@@ -88,10 +110,21 @@ function парк(): Item[] {
         : secs.flatMap((s) => [s, s])
     for (const s of участки) {
       const r = rnd()
-      const real = +(r ** 6 * 0.55).toFixed(3)
-      const synth = +(rnd() * 0.1).toFixed(3)
-      const score = +(real + synth).toFixed(3)
+      const { high_h, watch_h } = ПРАВИЛА.recency
+      // 5 % — отказ меньше high_h назад, ещё 10 % — до watch_h, остальные давно
+      const часов =
+        r > 0.95
+          ? rnd() * high_h
+          : r > 0.85
+            ? high_h + rnd() * (watch_h - high_h)
+            : watch_h + rnd() * 24 * 365
+      const { level: levelReal, score: real } = давность(часов)
+      // предвестник: отказ в ближайшие horizon_h часов — high
+      const пред = rnd() < 0.05 ? ПРАВИЛА.precursor.score.due : 0
+      const score = +(1 - (1 - real) * (1 - пред)).toFixed(4)
+      const synth = +(score - real).toFixed(4)
       id += 1
+      УРОВЕНЬ_БЕЗ.set(id, levelReal)
       items.push({
         channel_id: id,
         node_id: null,
@@ -102,18 +135,22 @@ function парк(): Item[] {
         picket: s.picket,
         section_id: s.section_id,
         score,
-        level: уровень(score),
+        level: пред ? 'high' : levelReal,
         reasons: [
           {
-            text: `отказов дольше 1 ч за 90 сут: ${Math.round(real * 30)}`,
+            text: `последний отказ канала ${Math.round(часов)} ч назад`,
             weight: real,
             kind: 'real',
           },
-          {
-            text: `выработано ${Math.round(synth * 1000)}% срока службы (синтетика)`,
-            weight: synth,
-            kind: 'synthetic',
-          },
+          ...(пред
+            ? [
+                {
+                  text: 'симуляция, правило предвестника (высокий риск): P-F 2 сут',
+                  weight: synth,
+                  kind: 'synthetic' as const,
+                },
+              ]
+            : []),
         ],
         equipment: {
           equipment_no: `SD-${id}`,
@@ -151,16 +188,21 @@ function срез(items: Item[], synthetic: boolean): Item[] {
       const synth = s.reasons
         .filter((r) => r.kind === 'synthetic')
         .reduce((a, r) => a + r.weight, 0)
-      const score = +(s.score - synth).toFixed(3)
+      const score = +(s.score - synth).toFixed(4)
       return {
         ...s,
         score,
-        level: уровень(score),
+        level: УРОВЕНЬ_БЕЗ.get(s.channel_id) ?? s.level,
         reasons: s.reasons.filter((r) => r.kind !== 'synthetic'),
         equipment: null,
       }
     })
-    .sort((a, b) => b.score - a.score || a.channel_id - b.channel_id)
+    .sort(
+      (a, b) =>
+        РАНГ.indexOf(a.level) - РАНГ.indexOf(b.level) ||
+        b.score - a.score ||
+        a.channel_id - b.channel_id,
+    )
 }
 
 export interface SensorMock {
