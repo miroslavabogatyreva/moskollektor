@@ -10,6 +10,11 @@
 // как на стенде, с перекосом в плотные пикеты; у прочих — по два на участок.
 //
 // Сверх контракта мок понимает channel=<id>: по нему /map?channel= узнаёт коллектор.
+//
+// Форма ответа и пороги — как у бэкенда SL.4 (backend/app/api/schemas.py SensorRisk,
+// SensorRiskSummary; backend/app/domain/sensor_risk.py): high от 0,5, watch от 0,25,
+// limit по умолчанию 500, в top_collectors не больше пяти. Имени коллектора в строке
+// сервер не отдаёт — collector_name здесь только для теста, в ответ он не уходит.
 import { readFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
 
@@ -23,6 +28,7 @@ interface Item {
   channel_id: number
   name: string
   sensor_kind: string
+  node_id: number | null
   collector_id: number
   collector_name: string
   picket: number
@@ -45,7 +51,7 @@ export const ДАТЧИКОВ_МЮ = 1487
 const ПК632_ВЫСОКИЙ_С_ПАСПОРТОМ = new Set([267051, 267058, 267072])
 
 const уровень = (score: number): Level =>
-  score >= 0.5 ? 'high' : score >= 0.4 ? 'watch' : 'normal'
+  score >= 0.5 ? 'high' : score >= 0.25 ? 'watch' : 'normal'
 
 // Линейный конгруэнтный генератор: один и тот же парк на каждом прогоне.
 function генератор(seed: number) {
@@ -58,11 +64,12 @@ function генератор(seed: number) {
 
 function парк(): Item[] {
   const fixture = JSON.parse(readFileSync('e2e/fixtures/sensor-risk-5657.json', 'utf8')) as {
-    items: Omit<Item, 'collector_id' | 'collector_name'>[]
+    items: Omit<Item, 'node_id' | 'collector_id' | 'collector_name'>[]
   }
   const sections = JSON.parse(readFileSync('public/data/sections.json', 'utf8')) as Section[]
   const items: Item[] = fixture.items.map((s) => ({
     ...s,
+    node_id: 5657,
     collector_id: КАППА,
     collector_name: 'объект Каппа',
   }))
@@ -87,6 +94,7 @@ function парк(): Item[] {
       id += 1
       items.push({
         channel_id: id,
+        node_id: null,
         name: `ДТ${id % 1000} ПК${s.picket}`,
         sensor_kind: виды[id % виды.length],
         collector_id: c,
@@ -195,7 +203,8 @@ export async function mockSensorRisk(page: Page): Promise<SensorMock> {
           collectors_with_high: high.size,
           top_collectors: [...high.entries()]
             .map(([collector_id, g]) => ({ collector_id, ...g }))
-            .sort((a, b) => b.high - a.high || a.collector_id - b.collector_id),
+            .sort((a, b) => b.high - a.high || a.collector_id - b.collector_id)
+            .slice(0, 5),
         },
       })
     }
@@ -209,14 +218,20 @@ export async function mockSensorRisk(page: Page): Promise<SensorMock> {
     if (channel) отбор = отбор.filter((s) => s.channel_id === Number(channel))
     if (level) отбор = отбор.filter((s) => s.level === level)
     const offset = Number(q.get('offset') ?? 0)
-    const limit = Number(q.get('limit') ?? 100)
+    const limit = Number(q.get('limit') ?? 500)
+    const имя = (id: number) => срезПарка.find((s) => s.collector_id === id)?.collector_name
     return route.fulfill({
       json: {
-        ...(node && { node: Number(node) }),
-        as_of,
         synthetic,
+        as_of,
+        node: node ? Number(node) : null,
+        node_name: node ? 'объект Каппа ДУ' : null,
+        collector: collector ? Number(collector) : null,
+        collector_name: collector ? (имя(Number(collector)) ?? null) : null,
         total: отбор.length,
-        items: отбор.slice(offset, offset + limit),
+        limit,
+        offset,
+        items: отбор.slice(offset, offset + limit).map(({ collector_name: _, ...s }) => s),
       },
     })
   })

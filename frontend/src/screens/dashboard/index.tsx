@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { RiskBadge } from '../../components/RiskBadge'
 import { SyntheticToggle } from '../../components/SyntheticToggle'
-import { синтетикаВключена, type SensorSummary } from '../../lib/sensorRisk'
+import { синтетикаВключена, срезРасчёта, type SensorSummary } from '../../lib/sensorRisk'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchMe } from '../../lib/auth'
 import {
@@ -119,6 +119,12 @@ export function DashboardScreen({
   )
 
   const имена = useMemo(() => указатель(sections ?? []), [sections])
+  // Имя коллектора для таблицы датчиков: в строке GET /api/sensor-risk только collector_id.
+  const коллекторы = useMemo(
+    () =>
+      new Map((sections ?? []).map((s) => [s.collector, s.collector_name ?? String(s.collector)])),
+    [sections],
+  )
   const горячие = useMemo(() => (rows ? очаги(rows, имена) : []), [rows, имена])
 
   const stats = useMemo(() => {
@@ -219,6 +225,7 @@ export function DashboardScreen({
             плиткиСмены={плиткиСмены}
             ждутКвитирования={ждутКвитирования}
             dataEdge={<DataEdgeTile status={status} error={statusError} />}
+            коллекторы={коллекторы}
           />
         </>
       )}
@@ -417,6 +424,7 @@ function SensorsDashboard({
   плиткиСмены,
   ждутКвитирования,
   dataEdge,
+  коллекторы,
 }: {
   синтетика: boolean
   tick: number
@@ -425,6 +433,7 @@ function SensorsDashboard({
   плиткиСмены: preact.ComponentChildren
   ждутКвитирования: preact.ComponentChildren
   dataEdge: preact.ComponentChildren
+  коллекторы: Map<number, string>
 }) {
   const всего = summary ? summary.high + summary.watch + summary.normal : 0
   const top = summary?.top_collectors.filter((c) => c.high > 0) ?? []
@@ -453,7 +462,7 @@ function SensorsDashboard({
               label="Наблюдать"
               value={String(summary.watch)}
               sub={`в норме ${summary.normal}`}
-              note={`расчёт на ${formatDateTime(summary.as_of)}`}
+              note={срезРасчёта(summary.as_of, formatDateTime)}
               accent={summary.watch > 0 ? 'var(--risk-medium-border)' : undefined}
             />
           </>
@@ -479,7 +488,7 @@ function SensorsDashboard({
               </p>
             ) : (
               <ol data-testid="sensor-hotspots" class="flex flex-col gap-2 text-sm">
-                {top.slice(0, 6).map((c) => (
+                {top.map((c) => (
                   <li key={c.collector_id}>
                     <a
                       href={наСхему(`collector=${c.collector_id}`, синтетика)}
@@ -503,16 +512,16 @@ function SensorsDashboard({
                 ))}
               </ol>
             )}
-            {top.length > 6 && (
+            {summary.collectors_with_high > top.length && top.length > 0 && (
               <p class="text-xs mt-2" style="color:var(--text-muted)">
-                и ещё {коллекторах(top.length - 6)} — в таблице ниже
+                и ещё {коллекторах(summary.collectors_with_high - top.length)} — в таблице ниже
               </p>
             )}
           </Panel>
           {ждутКвитирования}
         </div>
       )}
-      <SensorTable synthetic={синтетика} tick={tick} />
+      <SensorTable synthetic={синтетика} tick={tick} коллекторы={коллекторы} />
     </>
   )
 }

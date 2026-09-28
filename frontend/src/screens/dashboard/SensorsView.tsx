@@ -57,7 +57,16 @@ export function useSensorSummary(synthetic: boolean, tick: number, enabled: bool
 export const наСхему = (q: string, synthetic: boolean) =>
   `/map?${q}${synthetic ? '' : '&synthetic=0'}`
 
-export function SensorTable({ synthetic, tick }: { synthetic: boolean; tick: number }) {
+export function SensorTable({
+  synthetic,
+  tick,
+  коллекторы,
+}: {
+  synthetic: boolean
+  tick: number
+  // collector_id → имя из /data/sections.json: в ответе метода имени коллектора нет.
+  коллекторы: Map<number, string>
+}) {
   const [level, setLevel] = useState<SensorLevel | ''>('')
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState<SensorRiskPage | null>(null)
@@ -186,7 +195,10 @@ export function SensorTable({ synthetic, tick }: { synthetic: boolean; tick: num
                         {s.sensor_kind}
                       </td>
                       <td class="px-2 py-2 whitespace-nowrap">
-                        {s.collector_name} · ПК{s.picket}
+                        {s.collector_id == null
+                          ? '—'
+                          : (коллекторы.get(s.collector_id) ?? String(s.collector_id))}
+                        {s.picket != null && ` · ПК${s.picket}`}
                       </td>
                       <td class="px-2 py-1.5">
                         <SensorBadge level={s.level} />
