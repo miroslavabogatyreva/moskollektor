@@ -485,3 +485,26 @@ html {
     box-shadow: none;
   }
 }
+
+/* Кнопка «Тур по системе» мерцает, пока её ни разу не нажимали в этом браузере
+   (Nav.tsx, localStorage «tour-seen»). При «уменьшить движение» — только подсветка. */
+@keyframes tour-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(56 189 248 / 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgb(56 189 248 / 0);
+    background: rgb(56 189 248 / 0.25);
+  }
+}
+.tour-pulse {
+  border-color: var(--brand-nav-marker) !important;
+  animation: tour-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-pulse {
+    animation: none;
+    background: rgb(56 189 248 / 0.25) !important;
+  }
+}
