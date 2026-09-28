@@ -124,7 +124,11 @@ function OrdersTab() {
     <>
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
 
-      <div class="flex flex-wrap items-end gap-3 text-sm mb-3" style="color:var(--text-secondary)">
+      <div
+        data-tour="orders-search"
+        class="flex flex-wrap items-end gap-3 text-sm mb-3"
+        style="color:var(--text-secondary)"
+      >
         <label class="flex flex-col gap-1">
           Номер заявки
           <input

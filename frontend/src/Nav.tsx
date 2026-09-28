@@ -74,7 +74,11 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           пока экран без опроса.
           Вторая строка — период выгрузки: начало 01.01.2019 (docs/day-one.md), конец —
           срез, на котором считает worker; раньше это была плитка «Срез данных» на главной. */}
-      <div class="num text-xs leading-tight text-right" style="color:#B9CCE6; min-width:30ch">
+      <div
+        data-tour="header-time"
+        class="num text-xs leading-tight text-right"
+        style="color:#B9CCE6; min-width:30ch"
+      >
         <div style="min-height:1.25em">{at && `система обновлена в ${formatTime(at)}`}</div>
         <div data-testid="data-period">
           {asOf ? `данные ${ДАННЫЕ_С} — ${formatDate(asOf)}` : `данные с ${ДАННЫЕ_С}`}
@@ -85,6 +89,15 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           <span>
             {me.full_name || me.login} · {roleLabels(me.roles)}
           </span>
+          {/* Тур грузится по клику (src/lib/tour.ts): driver.js не входит в основной бандл. */}
+          <button
+            type="button"
+            onClick={() => import('./lib/tour').then((m) => m.запуститьТур())}
+            class="px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10"
+            style="background:transparent; border:1px solid #6F8DB8; color:#fff"
+          >
+            Тур по системе
+          </button>
           <button
             type="button"
             onClick={() => logout().then(() => (window.location.href = '/login'))}
