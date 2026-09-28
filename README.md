@@ -70,7 +70,7 @@
 
 ## Где посмотреть
 
-**[Все материалы решения и архив установки — версия v1.0](delivery.md).**
+**[Скачать архив установки](https://github.com/miroslavabogatyreva/moskollektor/releases/tag/v1.0.1)** · **[Инструкция установки](delivery/INSTALL.md)** · **[Видеодемонстрация](delivery-materials/brag.mp4)**
 
 | | |
 |---|---|
