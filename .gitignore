@@ -96,3 +96,9 @@ docs/project-structure.md
 /diagrams/
 ml-model/docs/
 ml-model/requirements/ml-serving-licenses.md
+
+# Данные и побочные выходы обучения правил датчика: CSV выгружает export_data.sh из базы.
+ml-model/sensor/data/
+ml-model/sensor/run.json
+ml-model/sensor/sim_failures*.csv
+ml-model/sensor/SHA256SUMS
