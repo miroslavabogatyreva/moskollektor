@@ -450,19 +450,42 @@ class SensorEquipment(BaseModel):
 
 class SensorRiskItem(BaseModel):
     channel_id: int
-    name: str
+    name: str | None
     sensor_kind: str | None
     picket: int | None
     section_id: int | None
+    node_id: int | None
+    collector_id: int | None
     score: float
     level: Literal["high", "watch", "normal"]
     reasons: list[SensorRiskReason]
-    equipment: SensorEquipment | None
+    equipment: SensorEquipment | None  # null при synthetic=false: паспорт синтетический
 
 
 class SensorRisk(BaseModel):
-    node: int
-    node_name: str
-    as_of: IsoDatetime
-    synthetic: bool
+    synthetic: bool  # эхо параметра: true — балл с синтетическим паспортом
+    as_of: IsoDatetime | None  # срез pred.sensor_risk; null — тик ещё не считал
+    node: int | None
+    node_name: str | None
+    collector: int | None
+    collector_name: str | None
+    total: int
+    limit: int
+    offset: int
     items: list[SensorRiskItem]
+
+
+class SensorCollectorHigh(BaseModel):
+    collector_id: int
+    name: str
+    high: int
+
+
+class SensorRiskSummary(BaseModel):
+    synthetic: bool
+    as_of: IsoDatetime | None
+    high: int
+    watch: int
+    normal: int
+    collectors_with_high: int
+    top_collectors: list[SensorCollectorHigh]

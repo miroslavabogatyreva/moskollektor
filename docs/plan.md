@@ -711,10 +711,10 @@ flowchart LR
 | № | Задача | Jira | Статус |
 |---|---|---|---|
 | SL.0 | Демо на Каппе ДУ (узел 5657, 188 датчиков): `GET /api/sensor-risk?node=5657`, `backend/app/domain/sensor_risk.py`, сид `db/seed/sensor_demo.sql`, блок `frontend/src/screens/map/SensorDemo.tsx` на `/map?demo=sensors`. До 28.09.2026 стояла строкой 5.41 блока Q5 | MOS-249 | ✓ 28.09.2026, на стенде `b6ef3f9`: ПК632 — 5 high, 1 watch, 36 normal; `e2e/sensor-demo.spec.ts` зелёный против стенда |
-| SL.1 | Синтетический паспорт на весь парк: генерация в SQL от хеша `channel_id`, строка `asset.equipment` на каждый активный канал | MOS-250 | ☐ |
+| SL.1 | Синтетический паспорт на весь парк: генерация в SQL от хеша `channel_id`, строка `asset.equipment` на каждый активный канал | MOS-250 | в PR ветки `sl-backend` 28.09.2026: `db/seed/sensor_demo.sql` 13 КБ вместо 400, все 19 видов датчика, метка — хеш тела; самопроверка `code/synth_sensor_level.py` (`--selfcheck` и `--db`: отказы паспорт не меняют); локально на 11 500 выдуманных каналах сид 2,7 с. На стенде не проверено |
 | SL.2 | 26 строк графика ППР сопоставить с пачками газовых эпизодов → `docs/proof/2026-09-28-sensor-level/ppr-match.md`, окна ППР в базу вместо константы | MOS-251 | ☐ |
-| SL.3 | Таблица `pred.sensor_risk` (новая миграция), тик worker, балл по всем датчикам меньше 5 минут | MOS-252 | ☐ |
-| SL.4 | `GET /api/sensor-risk?synthetic=0\|1` с фильтрами и `GET /api/sensor-risk/summary` для плиток | MOS-253 | ☐ |
+| SL.3 | Таблица `pred.sensor_risk` (новая миграция), тик worker, балл по всем датчикам меньше 5 минут | MOS-252 | в PR ветки `sl-backend` 28.09.2026: `db/migrations/059_sensor_risk.sql`, `backend/app/worker/sensor_scores.py` после прогноза в `scheduler.тик_расчёт`, блокировка 48219; локально 11 499 строк за 0,4 с. На стенде не проверено |
+| SL.4 | `GET /api/sensor-risk?synthetic=0\|1` с фильтрами и `GET /api/sensor-risk/summary` для плиток | MOS-253 | в PR ветки `sl-backend` 28.09.2026: `backend/app/api/objects.py`, фильтры `node`, `collector`, `level`, `limit`/`offset`, роль — как у `/api/risks`; тест `backend/tests/test_sensor_risk_db.py`. На стенде не проверено |
 | SL.5 | Дашборд по датчикам: плитки, «Где риск сосредоточен», «Все датчики по риску», переключатель синтетики, вид «по участкам» остаётся вторым | MOS-254 | ☐ |
 | SL.6 | Схема по датчикам на любом из 16 коллекторов, адрес `/map?channel=<id>` | MOS-255 | ☐ |
 | SL.7 | `frontend/e2e/sensor-level.spec.ts`: переключатель, дашборд, схема, против стенда | MOS-256 | ☐ |
@@ -830,6 +830,7 @@ flowchart LR
 | `040_data_outage_reason.sql` | Колонка `smvu.data_outage.reason` (`export_gap` или `vendor_migration`) и третье окно — календарный 2021 год по Москве с цитатой заказчика в `note`. Построители ставят `spans_outage` только по `export_gap`: в 2021 году данные есть, и без фильтра следующая пересборка пометила бы 3 566 эпизодов D5 из 12 139 как испорченные тишиной. Уже построенные эпизоды не пересобираются | `Q2.12` |
 | `044_roles_scope.sql` | `ref.user_role` и `ref.user_scope`: четыре роли заказчика (`dispatcher`, `ods_dispatcher`, `technician`, `admin`), роли складываются, область видимости по узлам `smvu.object_tree`. Переносит роли из `ref.app_user.role_code` и снимает колонку; `analyst` и `engineer` убраны, их учётки отключены. Номера 041–043 заняты черновыми ветками | `Q4.11` |
 | `046_synthetic_geometry.sql` | Вид `geo.object_kind` `collector` с типом `MULTILINESTRING`, CHECK `geom_type` расширен. Линии рисует не миграция, а `backend/app/ingest/synthetic_geometry.py` на проходе `--channels`: 16 коллекторов, 32 части, 3 173 участка. Номер 045 занят MOS-42 | `Q4.8` |
+| `059_sensor_risk.sql` | `pred.sensor_risk` — балл риска по каждому датчику на срез прогноза: `score_real`, `score_synth`, `level_real`, `level_full`, `reasons`; пишет `backend/app/worker/sensor_scores.py` после прогноза | `SL.3` |
 | `023_refresh_run.sql` | `feat.refresh_run` — журнал прогонов свёртки: когда шла, сколько строк обновила, чем кончилась. Без него пропуск свёртки не виден ничем, а задержку нельзя померить запросом: в `feat.section_daily` нет ни одной временнóй колонки, кроме `day`, а `day` — дата показания, не время расчёта | `Q3.4` |
 
 **Повторный накат: считает журнал, а не файл. Решено 15.09.2026.** Миграцию пишем
@@ -863,6 +864,7 @@ flowchart LR
 | `GET /api/audit` | `Q4` |
 | `GET /api/settings`, `PUT /api/settings/{key}` | `Q4.12` |
 | `GET /api/notifications` (`?acked=false`) | `Q6.9` |
+| `GET /api/sensor-risk`, `GET /api/sensor-risk/summary` | `SL.4` (эпик MOS-248) |
 | `GET /docs`, `GET /openapi.json` | `Q4` |
 
 ## Документы
