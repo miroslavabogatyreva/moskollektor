@@ -20,6 +20,22 @@ code/*
 # в определении модели). Под маску check_* файл не подходит, и без этой
 # строки команда приёмки в образе падает ModuleNotFoundError.
 !code/model_failure.py
+# Эти одиннадцать проверок читают не базу, а файлы репозитория — docs/, frontend/src,
+# backend/app как исходники — и в образе падали трассировкой FileNotFoundError на
+# исправном продукте (MOS-156, 28.09.2026). Их место — распакованный пакет поставки,
+# где docs/ и frontend/ лежат рядом: docs/install.md разд. 8. check_metrics_report.py
+# остаётся в образе: из него берёт константы окна check_orders.py.
+code/check_contrast.py
+code/check_dependency_pins.py
+code/check_deploy_set.py
+code/check_licenses.py
+code/check_no_auto_verdict.py
+code/check_pg_version.py
+code/check_plan.py
+code/check_stale_fetch.py
+code/check_structure.py
+code/check_unmet.py
+code/check_write_policy.py
 .DS_Store
 **/__pycache__/
 *.pyc

@@ -174,6 +174,8 @@ def самопроверка():
 if __name__ == "__main__":
     if "--selfcheck" in sys.argv:
         sys.exit(самопроверка())
+    if not os.environ.get("DATABASE_URL"):
+        sys.exit("СБОЙ: не задана переменная DATABASE_URL, подключаться не к чему")
     ок, текст = asyncio.run(проверить())
     print(текст)
     sys.exit(0 if ок else 1)
