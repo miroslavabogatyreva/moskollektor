@@ -139,3 +139,52 @@ export function эпизодыПотериСвязи(
   закрыть(winEndMs)
   return out
 }
+
+// Лента состояний (визуальный проход 28.09.2026): цвет — по смыслу слова, которое
+// прибор пишет в журнал. Раньше цвет давал только is_alarm, и «Включен»/«Выключен»
+// одного канала были одинаково серыми. Порядок проверок важен: «Выключен» содержит
+// «ключ», а «Снято с охраны» — «охран», поэтому «выключено» проверяем раньше «включено».
+export type StateKind = 'fault' | 'off' | 'ok' | 'other'
+export function видСостояния(слово: string): StateKind {
+  const т = слово.toLowerCase()
+  if (/неисправ|неопредел|не определ|нет связи|потер|обрыв/.test(т)) return 'fault'
+  if (/выключ|отключ|обесточ|нет питан|снят|открыт|не замкнут|разомкн/.test(т)) return 'off'
+  if (/включ|питани|на охране|норм|закрыт|замкнут|движения нет|в работе/.test(т)) return 'ok'
+  return 'other'
+}
+
+// Цвет и штриховка каждого слова ленты одного канала. Второе слово того же вида
+// (например, «Норма» и «Движения нет») получает штриховку, третье — второй оттенок:
+// два состояния одного канала никогда не рисуются одинаково.
+export interface Раскраска {
+  kind: StateKind
+  fill: string
+  hatch: boolean
+}
+const ОТТЕНКИ: Record<StateKind, [string, string]> = {
+  ok: ['var(--ribbon-ok)', 'var(--ribbon-ok-2)'],
+  off: ['var(--ribbon-off)', 'var(--ribbon-off-2)'],
+  fault: ['var(--ribbon-fault)', 'var(--ribbon-fault-2)'],
+  other: ['var(--ribbon-other)', 'var(--ribbon-other-2)'],
+}
+export function раскраскаСостояний(слова: string[]): Map<string, Раскраска> {
+  const out = new Map<string, Раскраска>()
+  const счёт: Record<StateKind, number> = { ok: 0, off: 0, fault: 0, other: 0 }
+  for (const с of слова) {
+    if (out.has(с)) continue
+    const kind = видСостояния(с)
+    const n = счёт[kind]++
+    out.set(с, { kind, fill: ОТТЕНКИ[kind][Math.floor(n / 2) % 2], hatch: n % 2 === 1 })
+  }
+  return out
+}
+
+// Границы оси значений не уже minSpan (для °C — 10 градусов): иначе колебание
+// 24–25 °C растягивается на всю высоту и выглядит как кардиограмма.
+export function границыОси(values: number[], minSpan: number): [number, number] {
+  const lo = Math.min(...values)
+  const hi = Math.max(...values)
+  const span = Math.max(hi - lo, minSpan)
+  const mid = (lo + hi) / 2
+  return [mid - span / 2, mid + span / 2]
+}

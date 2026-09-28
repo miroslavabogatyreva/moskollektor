@@ -2,7 +2,8 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
 import { usePoll, свежо } from '../../lib/poll'
-import { PRIORITY_LABEL, STATUS_LABEL, type OrderListItem, type UnackedNotification } from './types'
+import type { OrderListItem, UnackedNotification } from './types'
+import { OrderStatusBadge, PriorityBadge } from '../../components/Badge'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { isoDate } from '../../components/ObjectCard.logic'
@@ -49,16 +50,9 @@ export function OrdersScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Заявки на превентивное обслуживание
-      </h1>
+      <h1 style="font-family:var(--font-display)">Заявки на превентивное обслуживание</h1>
 
-      <div
-        role="tablist"
-        aria-label="Вкладки заявок"
-        class="flex gap-2"
-        style="border-bottom:1px solid var(--border-subtle)"
-      >
+      <div role="tablist" aria-label="Вкладки заявок" class="tabs">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -68,8 +62,7 @@ export function OrdersScreen(_props: Record<string, unknown>) {
             aria-selected={tab === t.id}
             aria-controls={`orders-panel-${t.id}`}
             onClick={() => setTab(t.id)}
-            class="px-3 py-2 text-sm"
-            style={`border-bottom:2px solid ${tab === t.id ? 'var(--brand)' : 'transparent'}; color:var(--text-${tab === t.id ? 'primary' : 'muted'})`}
+            class="tab"
           >
             {t.label}
           </button>
@@ -170,18 +163,12 @@ function OrdersTab() {
         <button
           type="button"
           onClick={() => период(isoDate(new Date()), isoDate(new Date(Date.now() + 6 * СУТКИ_МС)))}
-          class="px-2 py-1 rounded"
-          style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          class="btn btn-secondary"
         >
           7 дней вперёд
         </button>
         {(dueFrom || dueTo) && (
-          <button
-            type="button"
-            onClick={() => период('', '')}
-            class="px-2 py-1 rounded"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-          >
+          <button type="button" onClick={() => период('', '')} class="btn btn-secondary">
             Все сроки
           </button>
         )}
@@ -194,55 +181,59 @@ function OrdersTab() {
       </div>
 
       <SkipTable targetId="orders-table-end" />
-      <table class="w-full text-sm" style="border-collapse:collapse">
-        <thead>
-          <tr>
-            {['№', 'Объект', 'Вид работ', 'Срок', 'Реакция', 'Статус'].map((h) => (
-              <th
-                key={h}
-                // Список всегда идёт по сроку, ближайший сверху (ORDER BY n.due_at
-                // в backend/app/api/orders.py) — заголовок это и называет (US-18 сц. 1).
-                aria-sort={h === 'Срок' ? 'ascending' : undefined}
-                class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-              >
-                {h === 'Срок' ? 'Срок ↑' : h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items?.map((o) => (
-            <tr
-              key={o.id}
-              {...rowLink(() => route(`/orders/${o.id}`))}
-              style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${PRIORITY_BORDER[o.priority_code] ?? 'transparent'}; cursor:pointer`}
-            >
-              <td class="px-2 py-2 num">{o.id}</td>
-              <td class="px-2 py-2">
-                {o.object_name}{' '}
-                <span style="color:var(--text-muted)" class="num">
-                  · {o.smvu_key}
-                </span>
-              </td>
-              <td class="px-2 py-2">{o.work_type_name}</td>
-              <td class="px-2 py-2 num">
-                {formatDateTime(o.due_at)}
-                {просрочена(o, сейчас) && (
-                  <span style="color:var(--state-error)"> · {насколько(o, сейчас)}</span>
-                )}
-              </td>
-              <td class="px-2 py-2 num">{o.deadline_hours.toFixed(1)} ч</td>
-              <td class="px-2 py-2">
-                {STATUS_LABEL[o.status] ?? o.status}{' '}
-                <span style="color:var(--text-muted)">
-                  · {PRIORITY_LABEL[o.priority_code] ?? o.priority_code}
-                </span>
-              </td>
+      <div class="card p-0 overflow-x-auto">
+        <table class="w-full text-sm" style="border-collapse:collapse">
+          <thead>
+            <tr>
+              {['№', 'Объект', 'Вид работ', 'Срок', 'Реакция', 'Статус'].map((h) => (
+                <th
+                  key={h}
+                  // Список всегда идёт по сроку, ближайший сверху (ORDER BY n.due_at
+                  // в backend/app/api/orders.py) — заголовок это и называет (US-18 сц. 1).
+                  aria-sort={h === 'Срок' ? 'ascending' : undefined}
+                  class="th"
+                >
+                  {h === 'Срок' ? 'Срок ↑' : h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items?.map((o) => (
+              <tr
+                key={o.id}
+                {...rowLink(() => route(`/orders/${o.id}`))}
+                style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${PRIORITY_BORDER[o.priority_code] ?? 'transparent'}; cursor:pointer`}
+              >
+                <td class="px-2 py-2 num">{o.id}</td>
+                <td class="px-2 py-2">
+                  <span class="font-semibold">{o.object_name}</span>{' '}
+                  <span style="color:var(--text-muted)" class="num">
+                    · {o.smvu_key}
+                  </span>
+                </td>
+                <td class="px-2 py-2">{o.work_type_name}</td>
+                <td class="px-2 py-2 num">
+                  {formatDateTime(o.due_at)}
+                  {просрочена(o, сейчас) && (
+                    <span class="font-semibold" style="color:var(--state-error)">
+                      {' '}
+                      · {насколько(o, сейчас)}
+                    </span>
+                  )}
+                </td>
+                <td class="px-2 py-2 num">{o.deadline_hours.toFixed(1)} ч</td>
+                <td class="px-2 py-2">
+                  <span class="inline-flex flex-wrap gap-1.5">
+                    <OrderStatusBadge status={o.status} />
+                    <PriorityBadge code={o.priority_code} />
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div id="orders-table-end" tabindex={-1} />
 
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
@@ -258,8 +249,7 @@ function OrdersTab() {
             type="button"
             disabled={offset === 0}
             onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-secondary"
           >
             ← Раньше
           </button>
@@ -270,8 +260,7 @@ function OrdersTab() {
             type="button"
             disabled={offset + items.length >= total}
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            class="px-2 py-1 rounded disabled:opacity-50"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="btn btn-secondary"
           >
             Позже →
           </button>
@@ -333,50 +322,47 @@ function UnackedTab() {
       {loadError && <p style="color:var(--state-error)">Не удалось загрузить: {loadError}</p>}
       {ackError && <p style="color:var(--state-error)">Не удалось квитировать: {ackError}</p>}
 
-      <table class="w-full text-sm" style="border-collapse:collapse">
-        <thead>
-          <tr>
-            {['Объект', 'Вероятность', 'Горизонт', ''].map((h) => (
-              <th
-                key={h}
-                class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {items?.map((n) => (
-            <tr
-              key={n.id}
-              data-notification-id={n.id}
-              style="border-bottom:1px solid var(--border-subtle)"
-            >
-              <td class="px-2 py-2">
-                {n.object_name}{' '}
-                <span style="color:var(--text-muted)" class="num">
-                  · {n.smvu_key}
-                </span>
-              </td>
-              <td class="px-2 py-2 num">{(n.probability * 100).toFixed(0)} %</td>
-              <td class="px-2 py-2 num">{n.horizon_h} ч</td>
-              <td class="px-2 py-2">
-                <button
-                  type="button"
-                  disabled={busyId === n.id}
-                  onClick={() => квитировать(n.id)}
-                  class="px-2 py-1 rounded disabled:opacity-50"
-                  style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-                >
-                  Квитировать
-                </button>
-              </td>
+      <div class="card p-0 overflow-x-auto">
+        <table class="w-full text-sm" style="border-collapse:collapse">
+          <thead>
+            <tr>
+              {['Объект', 'Вероятность', 'Горизонт', ''].map((h) => (
+                <th key={h} class="th">
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items?.map((n) => (
+              <tr
+                key={n.id}
+                data-notification-id={n.id}
+                style="border-bottom:1px solid var(--border-subtle)"
+              >
+                <td class="px-2 py-2">
+                  {n.object_name}{' '}
+                  <span style="color:var(--text-muted)" class="num">
+                    · {n.smvu_key}
+                  </span>
+                </td>
+                <td class="px-2 py-2 num">{(n.probability * 100).toFixed(0)} %</td>
+                <td class="px-2 py-2 num">{n.horizon_h} ч</td>
+                <td class="px-2 py-2">
+                  <button
+                    type="button"
+                    disabled={busyId === n.id}
+                    onClick={() => квитировать(n.id)}
+                    class="btn btn-secondary"
+                  >
+                    Квитировать
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {items === null && !loadError && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && items.length === 0 && (
@@ -397,8 +383,7 @@ function UnackedTab() {
               // экран показывает СЕЙЧАС, а не с арифметики прошлых кликов,
               // иначе ровно одна строка на стыке никогда не попадёт на экран.
               onClick={() => setOffset(items.length)}
-              class="px-2 py-1 rounded"
-              style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+              class="btn btn-secondary"
             >
               Показать ещё
             </button>

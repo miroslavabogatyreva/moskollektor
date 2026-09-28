@@ -182,9 +182,7 @@ export function DashboardScreen({
   return (
     <main class="p-5 flex flex-col gap-4">
       <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Дашборд рисков
-        </h1>
+        <h1 style="font-family:var(--font-display)">Дашборд рисков</h1>
         <NowStrip
           roles={roles}
           коллекторов={поУчасткам ? (stats?.коллекторов ?? null) : null}
@@ -265,15 +263,14 @@ export function DashboardScreen({
                     Участков высокого риска нет.
                   </p>
                 ) : (
-                  <ol class="flex flex-col gap-2 text-sm">
+                  <ol class="flex flex-col text-sm -mx-2">
                     {горячие.slice(0, 6).map((о) => (
                       <li key={о.коллектор}>
                         <a
                           href={`/map?section=${о.top}`}
-                          class="flex items-center gap-3"
-                          style="color:inherit; text-decoration:none"
+                          class="list-link flex items-center gap-3 px-2 py-1.5 rounded-md"
                         >
-                          <span class="w-32 shrink-0">Коллектор {о.коллектор}</span>
+                          <span class="w-32 shrink-0 font-semibold">Коллектор {о.коллектор}</span>
                           <span
                             class="flex-1 h-2 rounded"
                             style="background:var(--bg-table-alt)"
@@ -309,55 +306,55 @@ export function DashboardScreen({
 
           {sorted.length > 0 && stats && (
             <>
-              <h2 id="risk-table" class="text-sm font-semibold mt-2">
+              <h2 id="risk-table" class="card-title mt-2">
                 Все участки по риску{' '}
                 <span class="font-normal" style="color:var(--text-muted)">
                   · высокий риск {stats.high} · низкий {stats.total - stats.high}
                 </span>
               </h2>
               <SkipTable targetId="dashboard-table-end" />
-              <table class="w-full text-sm" style="border-collapse:collapse">
-                <thead>
-                  <tr>
-                    {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
-                      <th
-                        key={h}
-                        class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                        style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((r) => (
-                    <tr
-                      key={r.section_id}
-                      {...rowLink(() => route(`/objects/${r.section_id}`))}
-                      style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
-                    >
-                      <td class="px-2 py-2 num">{r.risk_rank}</td>
-                      <td class="px-2 py-2">
-                        {имяОбъекта(имена.get(r.section_id), r.section_id)}{' '}
-                        <span style="color:var(--text-muted)" class="num">
-                          · {r.section_id}
-                        </span>
-                      </td>
-                      <td class="px-2 py-1.5">
-                        <RiskBadge cls={r.risk_class}>{словоРиска(r.risk_class)}</RiskBadge>
-                        {r.is_stale && (
-                          <span style="color:var(--state-warning)">
-                            {' '}
-                            · расчёт не прошёл, показан прошлый
-                          </span>
-                        )}
-                      </td>
-                      <td class="px-2 py-2 num">{процент(r.probability)}</td>
+              <div class="card p-0 overflow-x-auto">
+                <table class="w-full text-sm" style="border-collapse:collapse">
+                  <thead>
+                    <tr>
+                      {['Ранг', 'Объект', 'Риск', 'Вероятность'].map((h) => (
+                        <th key={h} class="th">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {sorted.map((r) => (
+                      <tr
+                        key={r.section_id}
+                        {...rowLink(() => route(`/objects/${r.section_id}`))}
+                        style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${цветРиска(r.risk_class)}; cursor:pointer`}
+                      >
+                        <td class="px-2 py-2 num">{r.risk_rank}</td>
+                        <td class="px-2 py-2">
+                          <span class="font-semibold">
+                            {имяОбъекта(имена.get(r.section_id), r.section_id)}
+                          </span>{' '}
+                          <span style="color:var(--text-muted)" class="num">
+                            · {r.section_id}
+                          </span>
+                        </td>
+                        <td class="px-2 py-1.5">
+                          <RiskBadge cls={r.risk_class}>{словоРиска(r.risk_class)}</RiskBadge>
+                          {r.is_stale && (
+                            <span style="color:var(--state-warning)">
+                              {' '}
+                              · расчёт не прошёл, показан прошлый
+                            </span>
+                          )}
+                        </td>
+                        <td class="px-2 py-2 num">{процент(r.probability)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               <div id="dashboard-table-end" tabindex={-1} />
             </>
           )}
@@ -375,19 +372,9 @@ function ViewSwitch({ поУчасткам }: { поУчасткам: boolean })
     ['По участкам', '/dashboard?view=sections', поУчасткам],
   ]
   return (
-    <nav
-      aria-label="Режим дашборда"
-      class="inline-flex self-start rounded-md overflow-hidden text-sm"
-      style="border:1px solid var(--border-strong)"
-    >
-      {пункты.map(([имя, href, выбран], i) => (
-        <a
-          key={href}
-          href={href}
-          aria-current={выбран ? 'page' : undefined}
-          class="px-3 py-1"
-          style={`text-decoration:none; ${выбран ? 'background:var(--brand); color:var(--text-on-brand)' : 'background:var(--bg-surface); color:var(--text-primary)'}${i > 0 ? '; border-left:1px solid var(--border-strong)' : ''}`}
-        >
+    <nav aria-label="Режим дашборда" class="seg self-start">
+      {пункты.map(([имя, href, выбран]) => (
+        <a key={href} href={href} aria-current={выбран ? 'page' : undefined}>
           {имя}
         </a>
       ))}
@@ -470,15 +457,14 @@ function SensorsDashboard({
                 Датчиков высокого риска нет.
               </p>
             ) : (
-              <ol data-testid="sensor-hotspots" class="flex flex-col gap-2 text-sm">
+              <ol data-testid="sensor-hotspots" class="flex flex-col text-sm -mx-2">
                 {top.map((c) => (
                   <li key={c.collector_id}>
                     <a
                       href={наСхему(`collector=${c.collector_id}`, синтетика)}
-                      class="flex items-center gap-3"
-                      style="color:inherit; text-decoration:none"
+                      class="list-link flex items-center gap-3 px-2 py-1.5 rounded-md"
                     >
-                      <span class="w-36 shrink-0">{c.name}</span>
+                      <span class="w-36 shrink-0 font-semibold">{c.name}</span>
                       <span
                         class="flex-1 h-2 rounded"
                         style="background:var(--bg-table-alt)"

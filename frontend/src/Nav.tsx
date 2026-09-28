@@ -39,11 +39,11 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
               key={r.path}
               href={r.path}
               aria-current={active ? 'page' : undefined}
-              class="text-[13.5px] no-underline px-3 py-1.5 rounded-sm border-b-[3px]"
+              class={`text-sm no-underline px-3 py-1.5 rounded-md border-b-[3px] transition-colors font-semibold ${active ? '' : 'hover:bg-white/10 hover:!text-white'}`}
               style={
                 active
                   ? `background:var(--brand-nav-active); color:#fff; border-bottom-color:var(--brand-nav-marker)`
-                  : `color:#CFE0F5; border-bottom-color:transparent`
+                  : `color:#DCE8F7; border-bottom-color:transparent`
               }
             >
               {r.label}
@@ -68,8 +68,8 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           <button
             type="button"
             onClick={() => logout().then(() => (window.location.href = '/login'))}
-            class="px-2 py-1 rounded-sm no-underline"
-            style="background:transparent; border:1px solid #4A6690; color:#CFE0F5"
+            class="px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10"
+            style="background:transparent; border:1px solid #6F8DB8; color:#fff"
           >
             Выйти
           </button>

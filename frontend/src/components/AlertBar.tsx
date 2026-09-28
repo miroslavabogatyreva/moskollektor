@@ -124,8 +124,8 @@ export function AlertBar({ login }: { login: string }) {
       <button
         type="button"
         onClick={принял}
-        class="px-2 py-1 rounded-sm"
-        style="background:transparent; border:1px solid currentColor; color:inherit"
+        class="px-3 py-1 rounded-md font-semibold hover:opacity-90"
+        style="background:var(--risk-critical-text); border:1px solid var(--risk-critical-text); color:var(--risk-critical)"
       >
         Принял
       </button>

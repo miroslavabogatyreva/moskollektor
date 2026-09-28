@@ -182,14 +182,14 @@ export function AxisLine({
           role="group"
           aria-label={`Масштаб линии ${prefix}`}
           class="inline-flex flex-wrap rounded-md overflow-hidden"
-          style="border:1px solid var(--border-strong)"
+          style="border:1px solid var(--accent-border)"
         >
           {кнопки.map(([имя, выключена, действие], i) => (
             <button
               key={имя}
               type="button"
-              class="px-3 py-1 text-sm bg-[var(--bg-surface)] enabled:hover:bg-[var(--bg-row-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-              style={`color:var(--text-primary)${i > 0 ? '; border-left:1px solid var(--border-subtle)' : ''}`}
+              class="px-3 py-1 text-sm font-semibold bg-[var(--bg-surface)] enabled:hover:bg-[var(--accent-tint)] disabled:opacity-40"
+              style={`color:var(--accent-text)${i > 0 ? '; border-left:1px solid var(--accent-border)' : ''}`}
               disabled={выключена}
               onClick={действие}
             >

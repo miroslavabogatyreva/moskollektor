@@ -7,13 +7,8 @@ import type { Unacked } from '../screens/dashboard/types'
 
 export function Panel({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
-    <section
-      class="p-3 rounded flex flex-col gap-2"
-      style="background:var(--bg-surface); border:1px solid var(--border-subtle)"
-    >
-      <h2 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
-        {title}
-      </h2>
+    <section class="card flex flex-col gap-3">
+      <h2 class="card-title">{title}</h2>
       {children}
     </section>
   )
@@ -32,17 +27,17 @@ export function UnackedPanel({ unacked }: { unacked: Unacked | null }) {
           Неквитированных уведомлений нет.
         </p>
       ) : (
-        <ul class="flex flex-col gap-2 text-sm">
+        <ul class="flex flex-col text-sm -mx-2">
           {unacked.items.map((n) => (
             <li key={n.id}>
               <a
                 href={`/objects/${n.section_id}`}
-                class="flex justify-between gap-3"
-                style="color:inherit; text-decoration:none"
+                class="list-link flex justify-between items-baseline gap-3 px-2 py-1.5 rounded-md"
               >
-                <span>{n.object_name}</span>
-                <span class="num shrink-0" style="color:var(--text-secondary)">
-                  {процент(n.probability)} за {n.horizon_h} ч · {formatDateTime(n.reported_at)}
+                <span class="font-semibold">{n.object_name}</span>
+                <span class="num shrink-0 text-right" style="color:var(--text-secondary)">
+                  <b style="color:var(--text-primary)">{процент(n.probability)}</b> за {n.horizon_h}{' '}
+                  ч · {formatDateTime(n.reported_at)}
                 </span>
               </a>
             </li>
@@ -72,13 +67,16 @@ export function Tile({
 }) {
   return (
     <article
-      class="p-3 rounded flex flex-col gap-1 relative"
-      style={`background:var(--bg-surface); border:1px solid var(--border-subtle)${accent ? `; border-left:4px solid ${accent}` : ''}`}
+      class={`card flex flex-col gap-1 relative${href ? ' tile-link' : ''}`}
+      style={`padding:14px 16px${accent ? `; border-left:4px solid ${accent}` : ''}`}
     >
-      <h3 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
+      <h3 class="text-[13px] font-semibold" style="color:var(--text-secondary)">
         {label}
       </h3>
-      <div class="num text-2xl font-semibold" style="font-family:var(--font-display)">
+      <div
+        class="num text-[28px] leading-tight font-bold"
+        style="font-family:var(--font-display); letter-spacing:-0.01em"
+      >
         {value}
       </div>
       {sub && (
@@ -92,7 +90,7 @@ export function Tile({
         </div>
       )}
       {warn && (
-        <div class="text-xs" style="color:var(--state-warning)">
+        <div class="text-xs font-semibold" style="color:var(--state-warning)">
           {warn}
         </div>
       )}

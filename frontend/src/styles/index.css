@@ -6,3 +6,313 @@
 html {
   scrollbar-gutter: stable;
 }
+
+/* Общие детали вида (визуальный проход 28.09.2026). Всё в слоях Tailwind: base идёт
+   до utilities, поэтому класс вида text-lg у конкретного экрана по-прежнему сильнее.
+   Цвета — только токены из tokens.css. */
+
+@layer base {
+  h1 {
+    font-size: 1.375rem;
+    line-height: 1.25;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-weight: 600;
+  }
+  /* Ссылку видно без наведения: цвет действия и подчёркивание. Шапка и плитки,
+     где ссылка — вся плашка, снимают подчёркивание своим классом или style. */
+  a {
+    color: var(--link);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--link-hover);
+    text-decoration-thickness: 2px;
+  }
+  button:not(:disabled),
+  select:not(:disabled),
+  summary,
+  label:has(> input[type='checkbox']),
+  label:has(> input[type='radio']) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@layer components {
+  /* Поверхность раздела: белая карточка с тенью на серо-голубой странице. */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    box-shadow: var(--shadow-card);
+    padding: 16px 20px;
+  }
+  @media (max-width: 480px) {
+    .card {
+      padding: 12px 14px;
+    }
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+  }
+
+  /* Кнопки: главная — заливка цветом действия, второстепенная — обводка. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      background-color 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      transform 0.1s;
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--text-on-accent);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    color: var(--text-on-accent);
+  }
+  .btn-secondary {
+    background: var(--bg-surface);
+    color: var(--accent-text);
+    border-color: var(--accent-border);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
+
+  /* Бейдж: цветная плашка со словом — статус читается и без цвета. */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 9px;
+    border-radius: 999px;
+    border: 1px solid;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 18px;
+    white-space: nowrap;
+    vertical-align: baseline;
+  }
+  .badge-info {
+    background: var(--badge-info-bg);
+    color: var(--badge-info-fg);
+    border-color: var(--badge-info-border);
+  }
+  .badge-success {
+    background: var(--badge-success-bg);
+    color: var(--badge-success-fg);
+    border-color: var(--badge-success-border);
+  }
+  .badge-warning {
+    background: var(--badge-warning-bg);
+    color: var(--badge-warning-fg);
+    border-color: var(--badge-warning-border);
+  }
+  .badge-danger {
+    background: var(--badge-danger-bg);
+    color: var(--badge-danger-fg);
+    border-color: var(--badge-danger-border);
+  }
+  .badge-neutral {
+    background: var(--badge-neutral-bg);
+    color: var(--badge-neutral-fg);
+    border-color: var(--badge-neutral-border);
+  }
+
+  /* Поле карточки: подпись слева, значение справа; на телефоне — друг под другом.
+     Подпись и значение — соседние div (на это опираются E2E: following-sibling::div). */
+  .field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 20px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .field:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .field > :first-child {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .field > :last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  @media (min-width: 640px) {
+    .field {
+      grid-template-columns: 12.5rem minmax(0, 1fr);
+    }
+  }
+
+  /* Заголовок колонки таблицы. */
+  .th {
+    text-align: left;
+    padding: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+  }
+
+  /* Строка таблицы, которая открывает карточку (rowLink в lib/a11y.tsx):
+     курсор, подсветка и шеврон справа видны без наведения. «/ ''» — пустой
+     альтернативный текст: шеврон не попадает в имя ячейки для чтения с экрана. */
+  .row-link {
+    cursor: pointer;
+    transition: background-color 0.12s;
+  }
+  .row-link:hover,
+  .row-link:focus-visible {
+    background: var(--bg-row-hover);
+  }
+  .row-link > td:last-child::after {
+    content: '›' / '';
+    float: right;
+    margin-left: 8px;
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--accent-text);
+  }
+
+  /* Сегментный переключатель (вид дашборда, линии схемы): выбранный — заливка. */
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--accent-border);
+    border-radius: 7px;
+    overflow: hidden;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  .seg > * {
+    padding: 5px 12px;
+    background: var(--bg-surface);
+    color: var(--accent-text);
+    text-decoration: none;
+  }
+  .seg > * + * {
+    border-left: 1px solid var(--accent-border);
+  }
+  .seg > :hover {
+    background: var(--accent-tint);
+    color: var(--accent-text);
+  }
+  .seg > [aria-current],
+  .seg > [aria-pressed='true'],
+  .seg > [aria-selected='true'] {
+    background: var(--accent);
+    color: var(--text-on-accent);
+  }
+
+  /* Плитка-ссылка: шеврон у подписи, при наведении плитка приподнимается. */
+  .tile-link {
+    transition:
+      box-shadow 0.15s,
+      border-color 0.15s;
+  }
+  .tile-link:hover {
+    box-shadow: var(--shadow-raised);
+    border-color: var(--accent-border);
+  }
+  .tile-link > h3::after {
+    content: ' ›' / '';
+    color: var(--accent-text);
+    font-weight: 700;
+  }
+
+  /* Строка списка, которая целиком — ссылка (панель «Ждут квитирования»). */
+  .list-link {
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background-color 0.12s;
+  }
+  .list-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-row-hover);
+  }
+  .list-link::after {
+    content: '›' / '';
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--accent-text);
+  }
+
+  /* Вкладки: выбранная — цвет действия и толстая черта снизу. */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .tab {
+    padding: 8px 14px;
+    margin-bottom: -1px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 3px solid transparent;
+  }
+  .tab:hover {
+    color: var(--text-primary);
+    border-bottom-color: var(--border-subtle);
+  }
+  .tab[aria-selected='true'] {
+    color: var(--accent-text);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Поле ввода и выпадающий список. */
+  .input {
+    min-height: 32px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+}
+
+@layer components {
+  /* Таблица внутри карточки раздела — без второй тени. */
+  .card .card {
+    box-shadow: none;
+  }
+}

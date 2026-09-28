@@ -42,9 +42,7 @@ export function DirectoryScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Служба каталогов
-      </h1>
+      <h1 style="font-family:var(--font-display)">Служба каталогов</h1>
 
       {forbidden && (
         <p style="color:var(--state-error)">Доступ запрещён: раздел виден только администратору.</p>
@@ -69,42 +67,34 @@ export function DirectoryScreen(_props: Record<string, unknown>) {
             <dd>{info.user_template}</dd>
           </dl>
 
-          <table class="w-full text-sm" style="border-collapse:collapse">
-            <thead>
-              <tr>
-                {['Группа каталога', 'Роль / область'].map((h) => (
-                  <th
-                    key={h}
-                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {info.role_map.map((row) => (
-                <tr key={row.group_cn} style="border-bottom:1px solid var(--border-subtle)">
-                  <td class="px-2 py-2">{row.group_cn}</td>
-                  <td class="px-2 py-2">
-                    {row.role_code
-                      ? `роль: ${ROLE_LABELS[row.role_code] ?? row.role_code}`
-                      : `область видимости: объект №${row.object_id}`}
-                  </td>
+          <div class="card p-0 overflow-x-auto">
+            <table class="w-full text-sm" style="border-collapse:collapse">
+              <thead>
+                <tr>
+                  {['Группа каталога', 'Роль / область'].map((h) => (
+                    <th key={h} class="th">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {info.role_map.map((row) => (
+                  <tr key={row.group_cn} style="border-bottom:1px solid var(--border-subtle)">
+                    <td class="px-2 py-2">{row.group_cn}</td>
+                    <td class="px-2 py-2">
+                      {row.role_code
+                        ? `роль: ${ROLE_LABELS[row.role_code] ?? row.role_code}`
+                        : `область видимости: объект №${row.object_id}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div class="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={checking}
-              onClick={runCheck}
-              class="px-3 py-1.5 rounded text-sm disabled:opacity-50"
-              style="background:var(--brand-action); color:var(--text-on-brand)"
-            >
+            <button type="button" disabled={checking} onClick={runCheck} class="btn btn-primary">
               {checking ? 'Проверяем…' : 'Проверить соединение'}
             </button>
             {checkError && <span style="color:var(--state-error)">{checkError}</span>}
