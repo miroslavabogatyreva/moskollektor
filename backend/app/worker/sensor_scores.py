@@ -4,11 +4,14 @@
 же срезе, что отдаёт GET /api/risks: max(as_of) в pred.forecast_current. Прогноза нет —
 считать не на что, тик молчит.
 
-Формула одна — `app.domain.sensor_risk`: отказы smvu.model_failure_event (как
-у карточки участка, от нижней границы pred.weight_window()), синтетический паспорт
-из db/seed/sensor_demo.sql, окна графика ППР из maint.ppr_window (MOS-251). Здесь
-только чтение входа четырьмя запросами и запись результата: на 11,5 тыс. каналов это
-четыре выборки и один COPY.
+Балл и уровень считают правила `app.domain.sensor_risk.rule_split()` (SL.10, MOS-263;
+пороги — backend/app/domain/sensor_rules.json): правило давности по отказам
+smvu.model_failure_event (как у карточки участка, от нижней границы
+pred.weight_window()) и, в режиме «с синтетикой», правило предвестника по
+синтетическому паспорту из db/seed/sensor_demo.sql; окна графика ППР — из
+maint.ppr_window (MOS-251). Логистическую регрессию тик не зовёт: она проверена
+и отвергнута (docs/proof/2026-09-28-sensor-model/metrics.md). Здесь чтение входа
+и запись результата: на 11,5 тыс. каналов это несколько выборок и один COPY.
 
 Блокировка своя — `pg_try_advisory_lock(48219)`, рядом с 48217 расчёта (run.py)
 и 48218 самопроверки планировщика: занято — тик выходит сразу, без ожидания.
@@ -25,7 +28,7 @@ import os
 import time
 from datetime import timedelta
 
-from app.domain import sensor_risk
+from app.domain import failure_sim, sensor_risk
 
 БЛОКИРОВКА = 48219
 # Сколько срезов держим: сутки до текущего. Всё новее текущего удаляем — при
@@ -34,30 +37,65 @@ from app.domain import sensor_risk
 ХРАНИТЬ = timedelta(days=1)
 
 КАНАЛЫ = """
-SELECT c.channel_id, c.object_id, c.sensor_kind,
-       e.id AS eq_id, e.in_service_from, e.service_life_years
+SELECT c.channel_id, c.object_id, c.sensor_kind, c.collector, c.picket,
+       e.id AS eq_id, e.in_service_from, e.service_life_years, k.code AS object_kind
   FROM smvu.channel c
   LEFT JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $1
+  LEFT JOIN ref.object_kind k ON k.id = e.object_kind_id
  WHERE c.is_active AND NOT c.is_stub
 """
-# Последняя проверка каждой точки измерения не позже даты среза: score() берёт
+# Последняя проверка каждой точки измерения не позже момента среза: score() берёт
 # из истории только её, поэтому всю историю не тащим.
 ПРОВЕРКИ = """
 SELECT p.equipment_id, ch.code,
        max(timezone('Europe/Moscow', ms.measured_at)::date)
-           FILTER (WHERE timezone('Europe/Moscow', ms.measured_at)::date <= $2) AS last
+           FILTER (WHERE ms.measured_at <= $2::timestamptz) AS last
   FROM asset.measuring_point p
   JOIN asset.equipment e ON e.id = p.equipment_id AND e.source_system = $1
   JOIN ref.characteristic ch ON ch.id = p.characteristic_id
   LEFT JOIN asset.measurement ms ON ms.point_id = p.id
  GROUP BY p.id, p.equipment_id, ch.code
 """
+# Все даты проверок синтетического паспорта: причинный генератор сам использует
+# только проверки до суток наблюдения предвестника, будущие даты его не меняют.
+ДАТЫ_ПРОВЕРОК = """
+SELECT p.equipment_id, array_agg(timezone('Europe/Moscow', ms.measured_at)::date
+                                 ORDER BY ms.measured_at) AS dates
+  FROM asset.measuring_point p
+  JOIN asset.equipment e ON e.id = p.equipment_id AND e.source_system = $1
+  JOIN asset.measurement ms ON ms.point_id = p.id
+ GROUP BY p.equipment_id
+"""
+# Предвестник смотрим на 5 сут назад: столько покрывают признаки pre0…pre3.
+ОКНО_ПРЕДВЕСТНИКА = 5
+
+
+def предвестники(channel_id, eq, object_kind, даты, день, at):
+    """Синтетические «предупреждения прибора» канала за 5 сут до среза — тот же
+    генератор app.domain.failure_sim, по которому выбраны правила; реальные отказы
+    он не читает. Нет паспорта или вида — предвестников нет."""
+    if not eq or object_kind not in failure_sim.PARAMS:
+        return []
+    beta, eta, iv, mult = failure_sim.params_of(
+        {"object_kind": object_kind, "life": eq["life"]}
+    )
+    m = sensor_risk.rules()["precursor"]
+    _, pre = failure_sim.channel(
+        channel_id, eq["in_service"], beta, eta,
+        день - timedelta(days=ОКНО_ПРЕДВЕСТНИКА), день, даты, iv, mult,
+        pf_days=m["pf_days"], false_ratio=m["false_ratio"],
+    )
+    return [t for t, _ in pre if t <= at]
+
+
+# Отказы с началом не позже среза минус час подтверждения (эпизод дольше часа).
 ОТКАЗЫ = """
-SELECT e.channel_id, e.started_at
+SELECT e.channel_id, e.started_at, c.object_id, c.sensor_kind, c.collector, c.picket
   FROM smvu.model_failure_event e
+  JOIN smvu.channel c USING (channel_id)
  CROSS JOIN pred.weight_window() w
  WHERE timezone('Europe/Moscow', e.started_at)::date >= w.date_from
-   AND e.started_at <= $1
+   AND e.started_at <= $1::timestamptz - make_interval(secs => $2)
 """
 
 
@@ -65,17 +103,19 @@ async def баллы(conn, at) -> list[tuple]:
     """Строки pred.sensor_risk на срез `at` — без записи, для тика и для проверок."""
     день = at.astimezone(sensor_risk.MSK).date()
     точки: dict[int, list] = {}
-    for r in await conn.fetch(ПРОВЕРКИ, sensor_risk.SRC, день):
+    for r in await conn.fetch(ПРОВЕРКИ, sensor_risk.SRC, at):
         точки.setdefault(r["equipment_id"], []).append(
             {
                 "kind": "calib" if r["code"] == "SYN_CALIB_ERR" else "motohours",
                 "readings": [(r["last"],)] if r["last"] else [],
             }
         )
-    starts: dict[int, list] = {}
-    for r in await conn.fetch(ОТКАЗЫ, at):
-        starts.setdefault(r["channel_id"], []).append(r["started_at"])
+    даты = dict(await conn.fetch(ДАТЫ_ПРОВЕРОК, sensor_risk.SRC))
     окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
+    starts: dict[int, list] = {}
+    for r in await conn.fetch(ОТКАЗЫ, at, sensor_risk.CONFIRM_SECONDS):
+        if sensor_risk.confirmed(r["started_at"], at):
+            starts.setdefault(r["channel_id"], []).append(r["started_at"])
     строки = []
     for c in await conn.fetch(КАНАЛЫ, sensor_risk.SRC):
         eq = c["eq_id"] and {
@@ -83,11 +123,14 @@ async def баллы(conn, at) -> list[tuple]:
             "life": c["service_life_years"],
             "points": точки.get(c["eq_id"], []),
         }
-        b = sensor_risk.split(
+        b = sensor_risk.rule_split(
             starts.get(c["channel_id"], []),
             eq or None,
             at,
             окна.get((c["object_id"], c["sensor_kind"]), ()),
+            предвестники(
+                c["channel_id"], eq, c["object_kind"], даты.get(c["eq_id"], []), день, at
+            ),
         )
         строки.append(
             (
@@ -98,6 +141,7 @@ async def баллы(conn, at) -> list[tuple]:
                 b["level_real"],
                 b["level_full"],
                 json.dumps(b["reasons"], ensure_ascii=False),
+                json.dumps(b["reasons_real"], ensure_ascii=False),
             )
         )
     return строки
@@ -131,6 +175,7 @@ async def посчитать(conn) -> dict:
                     "level_real",
                     "level_full",
                     "reasons",
+                    "reasons_real",
                 ],
             )
         return {

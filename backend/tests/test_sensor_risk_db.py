@@ -14,9 +14,12 @@ pred.sensor_risk (SL.3, MOS-252) и методы GET /api/sensor-risk (SL.4, MOS
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
+from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -116,7 +119,7 @@ def database():
             """.replace("$1", str(КАНАЛОВ))
             )
             # Отказы: газ узла 5657 — в окне ППР 04.06.2026 (не отказ), каждый 7-й
-            # канал — свежий отказ 29.06, каждый 11-й — отказ позже среза (не видим).
+            # канал — свежий отказ 30.06 за 3601 с до среза (D5 уже подтверждён), каждый 11-й — отказ позже среза (не видим).
             await conn.execute("""
                 INSERT INTO smvu.model_failure_episode
                        (channel_id, section_id, started_at, ended_at, fault_value, model_version)
@@ -124,7 +127,7 @@ def database():
                        'Неисправен', 'lgbm-v3-bag-2026.09.21'
                   FROM smvu.channel c
                   JOIN (VALUES (timestamptz '2026-06-04 09:30+03', 'ppr'),
-                               (timestamptz '2026-06-29 10:00+03', 'fresh'),
+                               (timestamptz '2026-06-30 22:59:58+03', 'fresh'),
                                (timestamptz '2026-07-10 10:00+03', 'future')) AS s(t, what)
                     ON (s.what = 'ppr' AND c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик')
                     OR (s.what = 'fresh' AND c.channel_id % 7 = 0)
@@ -242,7 +245,7 @@ def test_ppr_seed_rows_nodes_and_rerun(database):
 
 
 def test_tick_writes_every_channel_on_forecast_as_of(database):
-    """SL.3: строка на каждый активный канал, срез — как у /api/risks, формула — одна."""
+    """SL.3: строка на каждый активный канал, срез — как у /api/risks, модель — одна."""
 
     async def тело(conn):
         t0 = time.monotonic()
@@ -271,42 +274,128 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         finally:
             await держатель.close()
         assert other
-        # формула одна: строка совпадает с sensor_risk.split() на тех же входах
+        # правила одни: строка совпадает с sensor_risk.rule_split() на тех же входах
         строки = {r[0]: r for r in await sensor_scores.баллы(conn, срез)}
         for r in await conn.fetch("SELECT * FROM pred.sensor_risk"):
             s = строки[r["channel_id"]]
-            assert (
-                round(r["score_real"], 3),
-                round(r["score_synth"], 3),
-                r["level_real"],
-                r["level_full"],
-            ) == (s[2], s[3], s[4], s[5])
-        # ППР: газ 5657 без свежего отказа — причина plan, реальной части нет
+            assert abs(r["score_real"] - s[2]) < 1e-6 and abs(r["score_synth"] - s[3]) < 1e-6
+            assert (r["level_real"], r["level_full"]) == (s[4], s[5])
+            assert 0 <= r["score_real"] + r["score_synth"] <= 1
+        # миграция 061 сняла CHECK score_synth >= 0 (разница двух режимов), а score_real
+        # по-прежнему в [0, 1]
+        import asyncpg
+
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            await conn.execute(
+                "UPDATE pred.sensor_risk SET score_synth = -score_real WHERE channel_id = $1",
+                min(строки),
+            )
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(
+                    "UPDATE pred.sensor_risk SET score_real = 1.5 WHERE channel_id = $1",
+                    min(строки),
+                )
+        finally:
+            await tr.rollback()
+
+        виды = dict(await conn.fetch("SELECT channel_id, sensor_kind FROM smvu.channel"))
+
+        def здоровый(channel_id):
+            """Балл правила давности у канала без отказов (одинаковый у всех видов)."""
+            assert виды[channel_id] is None or виды[channel_id]
+            return sensor_risk.rule_split([], None, срез)["score_real"]
+
+        # ППР: газ 5657 без свежего отказа — причина plan, балл как у здорового
         ппр = await conn.fetchrow("""
             SELECT r.* FROM pred.sensor_risk r JOIN smvu.channel c USING (channel_id)
              WHERE c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик'
-               AND c.channel_id % 7 <> 0 LIMIT 1""")
-        assert ппр["score_real"] == 0
-        assert "plan" in {x["kind"] for x in __import__("json").loads(ппр["reasons"])}
+               AND c.channel_id % 7 <> 0 AND c.channel_id % 11 <> 0 LIMIT 1""")
+        assert abs(ппр["score_real"] - здоровый(ппр["channel_id"])) < 1e-6
+        assert "plan" in {x["kind"] for x in json.loads(ппр["reasons"])}
+        assert "plan" in {x["kind"] for x in json.loads(ппр["reasons_real"])}
+        assert not any(x["kind"] == "synthetic" for x in json.loads(ппр["reasons_real"]))
         # отказ позже среза не виден, свежий — виден
-        свежий = await conn.fetchval(
-            "SELECT min(score_real) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+        for r in await conn.fetch(
+            "SELECT channel_id, score_real, reasons_real FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+        ):
+            assert r["score_real"] > здоровый(r["channel_id"]), r
+            assert json.loads(r["reasons_real"])[0]["kind"] == "real"
+        # подтверждённый отказ меньше суток назад — high по правилу давности
+        assert await conn.fetchval(
+            "SELECT bool_and(level_real = 'high') FROM pred.sensor_risk WHERE channel_id % 7 = 0"
         )
-        assert свежий > 0.4
-        будущий = await conn.fetchval(
-            "SELECT max(score_real) FROM pred.sensor_risk "
+        assert all(
+            json.loads(r)[0]["text"].startswith("правило давности (высокий риск)")
+            for r in await conn.fetchval(
+                "SELECT array_agg(reasons_real::text) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+            )
+        )
+        # синтетический предвестник доходит до причин и уровня режима «с синтетикой»,
+        # а режим без синтетики его не видит
+        пред = await conn.fetch(
+            "SELECT * FROM pred.sensor_risk WHERE reasons::text LIKE '%правило предвестника%'"
+        )
+        assert пред, "ни у одного канала нет наблюдённого предвестника"
+        assert all(r["level_full"] in ("high", "watch") and r["score_synth"] > 0 for r in пред)
+        assert not any("предвестник" in r["reasons_real"] for r in пред)
+        for r in await conn.fetch(
+            "SELECT channel_id, score_real FROM pred.sensor_risk "
             "WHERE channel_id % 11 = 0 AND channel_id % 7 <> 0 AND channel_id NOT IN "
             "(SELECT channel_id FROM smvu.channel WHERE object_id = 5657 AND sensor_kind = 'Газовый датчик')"
-        )
-        assert будущий == 0
+        ):
+            assert abs(r["score_real"] - здоровый(r["channel_id"])) < 1e-6, r
+
+    _в_базе(database, тело)
+
+
+def test_worker_sql_waits_for_confirmation_and_check_observation(database):
+    """Архивное окончание эпизода и поверка позже среза не доступны раньше."""
+
+    async def тело(conn):
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            at = datetime(2026, 6, 30, 21, tzinfo=sensor_risk.MSK)
+            await conn.execute("""
+                INSERT INTO smvu.channel (channel_id, tag, object_id, section_id,
+                                          sensor_kind, collector, picket)
+                VALUES (999011, 'causal-confirmed', 5657, 1, 'Газовый датчик', 'test', 1),
+                       (999012, 'causal-unconfirmed', 5657, 1, 'Газовый датчик', 'test', 1);
+                INSERT INTO smvu.model_failure_episode
+                       (channel_id, section_id, started_at, ended_at, fault_value, model_version)
+                VALUES (999011, 1, '2026-06-30 19:59:59+03', '2026-06-30 23:00:00+03',
+                        'Неисправен', 'lgbm-v3-bag-2026.09.21'),
+                       (999012, 1, '2026-06-30 20:00:00+03', '2026-06-30 23:00:00+03',
+                        'Неисправен', 'lgbm-v3-bag-2026.09.21');
+            """)
+            rows = await conn.fetch(sensor_scores.ОТКАЗЫ, at, sensor_risk.CONFIRM_SECONDS)
+            assert {r["channel_id"] for r in rows if r["channel_id"] in (999011, 999012)} == {999011}
+
+            point = await conn.fetchrow("""
+                SELECT p.id, p.equipment_id FROM asset.measuring_point p
+                JOIN asset.equipment e ON e.id = p.equipment_id
+                WHERE e.source_system = 'synthetic-demo' ORDER BY p.id LIMIT 1
+            """)
+            await conn.execute("DELETE FROM asset.measurement WHERE point_id = $1", point["id"])
+            await conn.execute("""
+                INSERT INTO asset.measurement (point_id, measured_at, value_num)
+                VALUES ($1, '2026-06-29 10:00+03', 1), ($1, '2026-06-30 22:00+03', 1)
+            """, point["id"])
+            checks = await conn.fetch(sensor_scores.ПРОВЕРКИ, sensor_risk.SRC, at)
+            assert next(r["last"] for r in checks if r["equipment_id"] == point["equipment_id"]) == date(2026, 6, 29)
+        finally:
+            await tr.rollback()
 
     _в_базе(database, тело)
 
 
 async def _список(conn, user, **kw):
-    параметры = dict(
-        synthetic=1, node=None, collector=None, channel=None, level=None, limit=500, offset=0
-    )
+    параметры = {
+        "synthetic": 1, "node": None, "collector": None, "channel": None,
+        "level": None, "limit": 500, "offset": 0,
+    }
     параметры.update(kw)
     return await objects.get_sensor_risk(**параметры, conn=conn, user=user)
 
@@ -334,13 +423,22 @@ def test_api_reads_table_with_filters_and_scope(database):
         )
         по_таблице = dict(
             await conn.fetch(
-                "SELECT channel_id, round(score_real::numeric, 3) FROM pred.sensor_risk"
+                "SELECT channel_id, round(score_real::numeric, 6) FROM pred.sensor_risk"
             )
         )
         assert all(
             i["score"] == float(по_таблице[i["channel_id"]]) for i in реальный["items"]
         )
-        assert sum(i["score"] for i in реальный["items"]) < sum(баллы)
+        полные = dict(
+            await conn.fetch(
+                "SELECT channel_id, round((score_real + score_synth)::numeric, 6) FROM pred.sensor_risk"
+            )
+        )
+        assert all(i["score"] == float(полные[i["channel_id"]]) for i in полный["items"])
+        # причины при synthetic=0 — reasons_real, а не отфильтрованные reasons
+        причины = dict(await conn.fetch("SELECT channel_id, reasons_real FROM pred.sensor_risk"))
+        i = next(i for i in реальный["items"] if i["reasons"])
+        assert i["reasons"] == json.loads(причины[i["channel_id"]])
 
         узел = await _список(conn, ADMIN, node=5657)
         assert узел["node_name"] == "объект Каппа ДУ"
@@ -398,26 +496,35 @@ def test_api_reads_table_with_filters_and_scope(database):
         with pytest.raises(objects.HTTPException):
             await _список(conn, ADMIN, collector=5657)  # узел, а не коллектор
 
+        stored = await conn.fetch("""
+            SELECT c.object_id, r.level_real, r.level_full
+            FROM pred.sensor_risk r JOIN smvu.channel c USING (channel_id)
+        """)
+        expected_collectors = {}
         for syn in (0, 1):
             сводка = await objects.get_sensor_risk_summary(
                 synthetic=syn, conn=conn, user=ADMIN
             )
             assert сводка["synthetic"] is bool(syn)
             assert сводка["high"] + сводка["watch"] + сводка["normal"] == КАНАЛОВ - 1
-            высоких = sum(
-                1
-                for i in (полный if syn else реальный)["items"]
-                if i["level"] == "high"
+            field = "level_full" if syn else "level_real"
+            expected_levels = Counter(r[field] for r in stored)
+            assert {k: сводка[k] for k in ("high", "watch", "normal")} == {
+                k: expected_levels[k] for k in ("high", "watch", "normal")
+            }
+            # Высоких рисков может не быть: количество определяет артефакт,
+            # а API обязан точно агрегировать сохранённые уровни всего парка.
+            expected_collectors[syn] = Counter(
+                15 if r["object_id"] == 5657 else 16 for r in stored if r[field] == "high"
             )
-            assert сводка["high"] == высоких
-            assert сводка["collectors_with_high"] == 2
-            assert [c["collector_id"] for c in сводка["top_collectors"]] and sum(
-                c["high"] for c in сводка["top_collectors"]
-            ) == высоких
+            assert сводка["collectors_with_high"] == len(expected_collectors[syn])
+            assert {c["collector_id"]: c["high"] for c in сводка["top_collectors"]} == expected_collectors[syn]
         сводка = await objects.get_sensor_risk_summary(
             synthetic=1, conn=conn, user=DISP
         )
-        assert [c["collector_id"] for c in сводка["top_collectors"]] == [15]
+        assert {c["collector_id"]: c["high"] for c in сводка["top_collectors"]} == {
+            k: v for k, v in expected_collectors[1].items() if k == 15
+        }
         assert sensor_risk.SRC == "synthetic-demo"
 
     _в_базе(database, тело)
