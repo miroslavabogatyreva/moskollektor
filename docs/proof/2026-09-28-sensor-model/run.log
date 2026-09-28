@@ -1,27 +1,25 @@
 [     0 c] реальных отказов с 2022-04-01: 4917, из них в окнах ППР sure: 73
-[     0 c] симулированных отказов: 4424
-[     6 c] признаки готовы (11485, 1552, 10)
-[     8 c] признаки совпали с sensor_risk.features() на 2 000 строках
-[     8 c] выбор: учим на 2022-04-01…2025-12-31, смотрим 2026-01-01…2026-03-31
-[    72 c]   real H=12: строк 15,734,450, положительных 794, обучено на 1,572,747, итераций 338
-[    73 c]   real H=12: модель {'tp': 8, 'fp': 242, 'fn': 284, 'dup': 0, 'alerts': 250, 'incidents': 292, 'precision': 0.032, 'recall': 0.027}, недавность 1 сут {'tp': 9, 'fp': 253, 'fn': 283, 'dup': 0, 'alerts': 262, 'incidents': 292, 'precision': 0.034, 'recall': 0.031}
-[   102 c]   synthetic H=12: строк 15,734,450, положительных 2,715, обучено на 1,575,764, итераций 132
-[   103 c]   synthetic H=12: модель {'tp': 9, 'fp': 284, 'fn': 570, 'dup': 0, 'alerts': 293, 'incidents': 579, 'precision': 0.031, 'recall': 0.016}, недавность 1 сут {'tp': 9, 'fp': 253, 'fn': 570, 'dup': 0, 'alerts': 262, 'incidents': 579, 'precision': 0.034, 'recall': 0.016}
-[   154 c]   real H=24: строк 15,734,450, положительных 3,199, обучено на 1,577,084, итераций 330
-[   155 c]   real H=24: модель {'tp': 21, 'fp': 1551, 'fn': 271, 'dup': 0, 'alerts': 1572, 'incidents': 292, 'precision': 0.013, 'recall': 0.072}, недавность 1 сут {'tp': 12, 'fp': 250, 'fn': 280, 'dup': 0, 'alerts': 262, 'incidents': 292, 'precision': 0.046, 'recall': 0.041}
-[   184 c]   synthetic H=24: строк 15,734,450, положительных 7,028, обучено на 1,578,148, итераций 128
-[   185 c]   synthetic H=24: модель {'tp': 18, 'fp': 1105, 'fn': 565, 'dup': 0, 'alerts': 1123, 'incidents': 583, 'precision': 0.016, 'recall': 0.031}, недавность 1 сут {'tp': 12, 'fp': 250, 'fn': 571, 'dup': 0, 'alerts': 262, 'incidents': 583, 'precision': 0.046, 'recall': 0.021}
-[   242 c]   real H=36: строк 15,722,965, положительных 3,538, обучено на 1,574,538, итераций 354
-[   243 c]   real H=36: модель {'tp': 25, 'fp': 1546, 'fn': 267, 'dup': 0, 'alerts': 1571, 'incidents': 292, 'precision': 0.016, 'recall': 0.086}, недавность 1 сут {'tp': 13, 'fp': 249, 'fn': 279, 'dup': 0, 'alerts': 262, 'incidents': 292, 'precision': 0.05, 'recall': 0.045}
-[   268 c]   synthetic H=36: строк 15,722,965, положительных 9,280, обучено на 1,580,581, итераций 108
-[   269 c]   synthetic H=36: модель {'tp': 20, 'fp': 1103, 'fn': 559, 'dup': 0, 'alerts': 1123, 'incidents': 579, 'precision': 0.018, 'recall': 0.035}, недавность 1 сут {'tp': 13, 'fp': 249, 'fn': 566, 'dup': 0, 'alerts': 262, 'incidents': 579, 'precision': 0.05, 'recall': 0.022}
-[   309 c]   real H=48: строк 15,722,965, положительных 5,808, обучено на 1,577,539, итераций 242
-[   311 c]   real H=48: модель {'tp': 12, 'fp': 555, 'fn': 280, 'dup': 7, 'alerts': 574, 'incidents': 292, 'precision': 0.021, 'recall': 0.041}, недавность 1 сут {'tp': 14, 'fp': 248, 'fn': 278, 'dup': 0, 'alerts': 262, 'incidents': 292, 'precision': 0.053, 'recall': 0.048}
-[   332 c]   synthetic H=48: строк 15,722,965, положительных 13,457, обучено на 1,585,064, итераций 91
-[   333 c]   synthetic H=48: модель {'tp': 20, 'fp': 922, 'fn': 563, 'dup': 7, 'alerts': 949, 'incidents': 583, 'precision': 0.021, 'recall': 0.034}, недавность 1 сут {'tp': 14, 'fp': 248, 'fn': 569, 'dup': 0, 'alerts': 262, 'incidents': 583, 'precision': 0.053, 'recall': 0.024}
-[   333 c] выбран горизонт 12 ч; переучиваем на 2022-04-01…2026-03-31 и меряем апрель–июнь
-[   393 c]   real H=12: строк 16,768,100, положительных 848, обучено на 1,676,451, итераций 364
-[   394 c]   тест real: {'model': {'tp': 10, 'fp': 495, 'fn': 591, 'dup': 0, 'alerts': 505, 'incidents': 601, 'precision': 0.02, 'recall': 0.017}, 'model_watch': {'tp': 36, 'fp': 4951, 'fn': 565, 'dup': 0, 'alerts': 4987, 'incidents': 601, 'precision': 0.007, 'recall': 0.06}, 'recency': {'tp': 11, 'fp': 484, 'fn': 590, 'dup': 0, 'alerts': 495, 'incidents': 601, 'precision': 0.022, 'recall': 0.018}}
-[   421 c]   synthetic H=12: строк 16,768,100, положительных 2,915, обучено на 1,680,042, итераций 124
-[   421 c]   тест synthetic: {'model': {'tp': 13, 'fp': 587, 'fn': 885, 'dup': 0, 'alerts': 600, 'incidents': 898, 'precision': 0.022, 'recall': 0.014}, 'model_watch': {'tp': 22, 'fp': 3361, 'fn': 876, 'dup': 0, 'alerts': 3383, 'incidents': 898, 'precision': 0.007, 'recall': 0.024}, 'recency': {'tp': 11, 'fp': 484, 'fn': 887, 'dup': 0, 'alerts': 495, 'incidents': 898, 'precision': 0.022, 'recall': 0.012}}
-[   421 c] готово: backend/app/domain/sensor_model.json, run.json
+[     0 c] отказов на неактивных каналах и заглушках (в метрики не входят): 23
+[     0 c] forward synthetic simulation; real outcomes are not read by generator
+[    20 c] simulated failures 4341, precursors 8678
+[    29 c]     H=12: строк 15,734,450, положительных 794, обучено на 1,575,417, итераций 347
+[    30 c] validation real H=12: P=0.0323, R=0.0274
+[    33 c]     H=12: строк 15,734,450, положительных 1,811, обучено на 1,573,157, итераций 159
+[    34 c] validation sim H=12: P=0.2369, R=0.5018
+[    39 c]     H=24: строк 15,734,450, положительных 3,199, обучено на 1,578,060, итераций 261
+[    40 c] validation real H=24: P=0.0137, R=0.0445
+[    42 c]     H=24: строк 15,734,450, положительных 3,746, обучено на 1,576,831, итераций 71
+[    43 c] validation sim H=24: P=0.4756, R=1.0000
+[    51 c]     H=36: строк 15,722,965, положительных 3,538, обучено на 1,574,931, итераций 477
+[    52 c] validation real H=36: P=0.0176, R=0.0411
+[    55 c]     H=36: строк 15,722,965, положительных 5,555, обучено на 1,576,861, итераций 129
+[    56 c] validation sim H=36: P=0.4610, R=0.9594
+[    65 c]     H=48: строк 15,722,965, положительных 5,808, обучено на 1,578,380, итераций 456
+[    66 c] validation real H=48: P=0.0167, R=0.0890
+[    69 c]     H=48: строк 15,722,965, положительных 7,489, обучено на 1,578,023, итераций 123
+[    70 c] validation sim H=48: P=0.3189, R=1.0000
+[    71 c] validation real, selected H=12: 8 TP, 240 FP, 284 FN
+[    71 c] test real, selected H=12: 10 TP, 520 FP, 591 FN
+[    72 c] validation sim, selected H=12: 136 TP, 438 FP, 135 FN
+[    72 c] test sim, selected H=12: 146 TP, 505 FP, 166 FN
+[    72 c] complete: both mandatory modes exported, retrospective replay and hashes written
