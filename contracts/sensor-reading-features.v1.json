@@ -1,0 +1,32 @@
+{
+  "schema": "sensor-readings.v1",
+  "purpose": "Offline feature input for sensor-model experiments (MOS-225); not a serving or failure-label contract",
+  "producer": "python -m ml.reading_features",
+  "files": ["features.csv", "audit.json"],
+  "key": ["day", "channel_id"],
+  "timezone": "Europe/Moscow",
+  "availability": "available_at is next day 00:00 MSK; only complete days strictly before as_of's MSK date are emitted",
+  "inputs": "Nonoverlapping raw journal CSVs containing full days and the customer's channel dictionary. Do not use the state dictionary to infer sensor kind. Counts are source CSV rows, not deduplicated DB events.",
+  "coverage": "Gas-channel days with any readings and non-gas days with epoch markers. Missing feature rows do not imply sensor silence or failure.",
+  "columns": {
+    "day": "ISO date of journal registration, MSK",
+    "channel_id": "Customer channel ID; not necessarily a physical device",
+    "available_at": "ISO timestamp with +03:00 offset; join only when available_at <= decision time",
+    "selected_rows": "All rows on gas channels; only epoch-marker rows on other channels. Not an all-channel activity or silence feature.",
+    "epoch_marker": "Count of exact 01.01.1970 03:00:00 or 01.01.1970 03:00:01 values; audit only, not missing/error/failure",
+    "methane_valid": "Finite numeric readings in inclusive [0, 15] volume percent",
+    "methane_invalid": "Numeric readings excluded for negative, above 15, or nonfinite values; quality counter, not a D5 label",
+    "methane_ge1": "Count of valid numeric methane >= 1 volume percent; independent of alarm flag",
+    "gas_alarm_text": "Raw count of Обнаружен газ; retained even on calibration candidate days; not a confirmed leak label",
+    "methane_mean": "Mean valid methane, volume percent; empty if methane_valid = 0",
+    "methane_max": "Maximum valid methane, volume percent; empty if methane_valid = 0",
+    "calibration_candidate": "Day-level heuristic: at least 10 distinct gas channels with valid methane >= 1; propagated to every emitted row for that day. Not an official calibration schedule or confirmation of no leak."
+  },
+  "policy": {
+    "methane_upper_inclusive": 15,
+    "upper_bound_authority": "Team quality policy following Miroslava's proposal; customer only confirmed units and 1 percent alarm threshold. Flammability range is not a measurement validity specification.",
+    "calibration_handling": "Retain original numeric/text features with explicit flag. Do not relabel suspected calibration as a confirmed gas incident; D5 and smvu.fault_rule are unchanged.",
+    "no_future_imputation": true,
+    "source_journal_is_immutable": true
+  }
+}

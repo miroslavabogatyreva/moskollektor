@@ -1,0 +1,17 @@
+{
+  "generated_on": "2026-09-28",
+  "producer": "ml-model/src/ml/reading_features.py",
+  "producer_sha256": "77c8503b98e62a6a0517aa0c77351074ac330d3fbff7466b16efc289d186cbe8",
+  "runtime": "Python 3.12.3 (server), standard library only",
+  "as_of": "2026-07-01T00:00:00+03:00",
+  "inputs_sha256": {
+    "справочник_каналов_датчиков.csv": "87b3230e93ae00e3f03d915336acde6b3990c8b58d7378175cf02c000f67a45f",
+    "ext-journal-2025.csv": "0537185661eb5841d898e7d47607650e36a9fbb368b09263e5d8370a25492553",
+    "ext-journal-2026.csv": "3ecdc8fcc5b08c8238fa74fadb35e9b6439bce3f2f8fe8697da5e483aae55880"
+  },
+  "output_gzip_sha256": "9a5db363692f4d61ff0ed0f6436d136bd4cfa407f99f29858bb2ea44653417fb",
+  "output_csv_sha256": "5e25a6acc075be02b012f47dedee9d34a7fc8d9d1f28e1efb93caa36b57f04ba",
+  "output_csv_bytes": 9838837,
+  "output_gzip_bytes": 1657116,
+  "audit_sha256": "6a7d9df2d715f6068b6bf9d7d11ee3ef4b0f42583cdd143e4fcc924b4aef3154"
+}
