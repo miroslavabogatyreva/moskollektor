@@ -7,6 +7,7 @@
 (MOS-148). Модуль выбран потому, что его импортируют обе стороны — и API, и worker, —
 а сам он не тянет ни apscheduler, ни клиента модели.
 """
+import asyncio
 import json
 import os
 
@@ -22,6 +23,11 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 
 
 _pool: asyncpg.Pool | None = None
+# Замок на заведение пула (задача 1.4). Без него одновременные первые запросы
+# к свежему api заводили по пулу каждый: пока первый ждёт create_pool, _pool
+# ещё None. Нагрузочный прогон 27.09.2026 — 30 запросов разом выбрали все
+# 100 соединений базы, nginx отвечал 504. Тест — code/tests/test_db_pool.py.
+_pool_lock = asyncio.Lock()
 
 # Потолок одного запроса API — минута, столько же, сколько НФ-89 даёт экрану
 # на обновление: ответ позже минуты экрану уже не нужен. Без потолка пул
@@ -37,13 +43,48 @@ _pool: asyncpg.Pool | None = None
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(
-            os.environ["DATABASE_URL"],
-            init=_init_conn,
-            command_timeout=ПОТОЛОК_ЗАПРОСА_С,
-            server_settings={"statement_timeout": f"{ПОТОЛОК_ЗАПРОСА_С}s"},
-        )
+        async with _pool_lock:
+            if _pool is None:
+                _pool = await asyncpg.create_pool(
+                    os.environ["DATABASE_URL"],
+                    init=_init_conn,
+                    command_timeout=ПОТОЛОК_ЗАПРОСА_С,
+                    server_settings={"statement_timeout": f"{ПОТОЛОК_ЗАПРОСА_С}s"},
+                )
     return _pool
+
+
+# Отдельный пул журнала действий (задача 1.4): middleware write_audit_log
+# (backend/app/api/main.py) пишет строку, пока запрос ещё держит своё соединение
+# из get_conn — FastAPI отдаёт его только после отправки ответа. Из общего пула
+# это второе соединение на запрос, и когда десять запросов разом держат по одному,
+# все десять ждут второе и не дождутся никогда: нагрузочный прогон 27.09.2026 —
+# 30 запросов разом, 30 ответов 504 по минуте. Свой пул на два соединения
+# ни у кого ничего не ждёт, поэтому и не блокируется.
+# ПОТОЛОК_ЗАПРОСА_С от этой блокировки не спасает: он режет выполняющийся запрос,
+# а здесь никто ничего не выполняет — все ждут pool.acquire(), у которого потолка
+# нет. Зависание на 25 минут после прогона всех E2E 27.09.2026 (выше) по признакам
+# то же самое: отвечал только /health без базы, лечил только перезапуск api.
+_audit_pool: asyncpg.Pool | None = None
+
+
+async def get_audit_pool() -> asyncpg.Pool:
+    global _audit_pool
+    if _audit_pool is None:
+        async with _pool_lock:
+            if _audit_pool is None:
+                # Тот же потолок, что у общего пула: middleware ждёт INSERT журнала,
+                # прежде чем отдать ответ, и без потолка зависшая запись повесила бы
+                # ответ API вместе с ней.
+                _audit_pool = await asyncpg.create_pool(
+                    os.environ["DATABASE_URL"],
+                    init=_init_conn,
+                    min_size=1,
+                    max_size=2,
+                    command_timeout=ПОТОЛОК_ЗАПРОСА_С,
+                    server_settings={"statement_timeout": f"{ПОТОЛОК_ЗАПРОСА_С}s"},
+                )
+    return _audit_pool
 
 
 async def get_conn():
