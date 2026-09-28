@@ -134,7 +134,9 @@ test('SL.6: /map?channel= выбирает коллектор и пикет, р�
       .filter((s) => s.collector_id === КАППА && s.picket === 632 && s.level === 'high').length
   const [сПаспортом, безПаспорта] = [highНаПК632(true), highНаПК632(false)]
   expect(безПаспорта).toBeGreaterThanOrEqual(1)
-  expect(безПаспорта).toBeLessThanOrEqual(сПаспортом)
+  // «Без паспорта high не больше, чем с паспортом» было свойством ручной формулы:
+  // паспорт только прибавлял. С SL.10 (MOS-263) режимы считают две разные модели
+  // со своими порогами, и число high с паспортом бывает и меньше.
   await page.goto('/map?channel=267052')
   const демо = page.getByTestId('sensor-demo')
   await expect(page.locator('main select').first()).toHaveValue(String(КАППА))
@@ -147,7 +149,7 @@ test('SL.6: /map?channel= выбирает коллектор и пикет, р�
   await expect(пикет.locator('button [data-level="high"]')).toHaveCount(сПаспортом)
   await expect(демо.getByRole('note')).toContainText('Демо: паспорта синтетические')
 
-  // Без паспорта high на пикете не больше, чем с ним; датчик остаётся раскрытым.
+  // Без паспорта — своё число high на пикете; датчик остаётся раскрытым.
   await демо.getByTestId('synthetic-toggle').uncheck()
   await expect(page).toHaveURL(/\/map\?channel=267052&synthetic=0$/)
   await expect(пикет.locator('button [data-level="high"]')).toHaveCount(безПаспорта)

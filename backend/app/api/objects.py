@@ -369,14 +369,16 @@ async def list_channel_episodes(
 # Балл по датчикам (MOS-253): строки pred.sensor_risk последнего среза с узлом
 # и коллектором канала. Коллектор — узел уровня 2 дерева: сам узел канала или его
 # родитель, так же, как у GET /api/objects/tree. $1 — synthetic: при false балл
-# и уровень — реальная часть (score_real, level_real). $2 — участки роли.
+# и уровень — модель без синтетики (score_real, level_real, reasons_real; MOS-263).
+# $2 — участки роли.
 ДАТЧИКИ = """
 WITH s AS (
-  SELECT r.channel_id, r.as_of, r.reasons, c.name, c.sensor_kind, c.picket, c.section_id,
+  SELECT r.channel_id, r.as_of, CASE WHEN $1 THEN r.reasons ELSE r.reasons_real END AS reasons,
+         c.name, c.sensor_kind, c.picket, c.section_id,
          c.object_id AS node_id,
          CASE WHEN n.level = 2 THEN n.object_id WHEN p.level = 2 THEN p.object_id END
              AS collector_id,
-         round((r.score_real + CASE WHEN $1 THEN r.score_synth ELSE 0 END)::numeric, 3)
+         round((r.score_real + CASE WHEN $1 THEN r.score_synth ELSE 0 END)::numeric, 6)
              AS score,
          CASE WHEN $1 THEN r.level_full ELSE r.level_real END AS level
     FROM pred.sensor_risk r
@@ -417,11 +419,13 @@ async def get_sensor_risk(
 ):
     """Балл риска по каждому датчику (MOS-253, эпик MOS-248). Балл считает worker
     после прогноза (app.worker.sensor_scores → pred.sensor_risk), метод только читает
-    последний срез — тот же as_of, что у GET /api/risks. Формула — app.domain.sensor_risk.
+    последний срез — тот же as_of, что у GET /api/risks. Модель — app.domain.sensor_risk
+    (SL.10, MOS-263): балл — вероятность отказа канала на горизонте модели.
 
     `synthetic=1` (по умолчанию): балл = score_real + score_synth, уровень level_full,
     причины всех видов, `equipment` — синтетический паспорт. `synthetic=0`: балл =
-    score_real, уровень level_real, причин вида synthetic нет, `equipment` = null —
+    score_real, уровень level_real, причины reasons_real модели без синтетики,
+    причин вида synthetic нет, `equipment` = null —
     паспорт выдуман, и без синтетики его показывать нечем.
 
     Область видимости — как у GET /api/risks: каналы участков вне роли выпадают

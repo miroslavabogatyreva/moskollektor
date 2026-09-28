@@ -33,7 +33,8 @@ export function SyntheticToggle({ on }: { on: boolean }) {
           style="background:var(--risk-medium); color:var(--risk-medium-text); border:1px solid var(--risk-medium-border)"
         >
           <strong>Демо: паспорта синтетические.</strong> Номера, даты ввода и поверки выдуманы,
-          история отказов реальная.
+          история отказов реальная. Модель этого режима учена на симуляции: к реальным отказам
+          добавлены отказы по нормам регламента, её точность — не качество на реальных данных.
         </p>
       )}
     </div>
