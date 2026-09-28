@@ -88,7 +88,7 @@ export function AlertBar({ login }: { login: string }) {
       class="flex flex-wrap items-center gap-3 px-5 py-2 text-sm"
       style="background:var(--risk-critical); color:var(--risk-critical-text); border-bottom:1px solid var(--risk-critical-border)"
     >
-      <b>Критический прогноз:</b>
+      <b>Высокий риск отказа датчика:</b>
       {alert.section_id != null ? (
         <a href={`/objects/${alert.section_id}`} style="color:inherit; text-decoration:underline">
           {место}
@@ -100,7 +100,7 @@ export function AlertBar({ login }: { login: string }) {
           участка показывает текущую. Разошлись — пишем обе, иначе «91 %» на плашке
           и 0,8169 в карточке выглядят как ошибка. */}
       {/* Слава 28.09.2026: «вероятность чего?» — называем событие и срок словами.
-          Цель модели — эпизод «Неисправен» дольше часа на канале участка (D5),
+          Цель прогноза — эпизод «Неисправен» дольше часа на канале участка (D5),
           на экране это «отказ датчика», как в направлении прогноза. */}
       <span class="num">
         отказ датчика на участке в ближайшие {alert.horizon_h} ч: вероятность{' '}
