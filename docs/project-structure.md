@@ -176,7 +176,7 @@ moskollektor/
 │                        python3 -m pytest backend/tests code/tests — 35 тестов.
 │                        requirements-dev.txt ставит pytest, в образ он не идёт
 ├── ml-stub/         3   заглушка модели: отвечает по контракту, пока модели нет
-├── ml-model/       78   исходники модели v3 (MOS-145, PR #11): обучение, расчёт score.json,
+├── ml-model/       80   исходники модели v3 (MOS-145, PR #11): обучение, расчёт score.json,
 │                        образ ml-score; веса стенда lgbm-v3-bag-2026.09.21 —
 │                        models/lgbm-v3-bag-2026.09.21/ (MOS-145), данных нет.
 │                        Горизонт 720 ч — дефект, 24 ч — MOS-219
