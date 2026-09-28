@@ -186,7 +186,10 @@ def to_sql(eqs):
         f"DELETE FROM asset.measurement WHERE source_system = '{SRC}';",
         f"DELETE FROM asset.measuring_point WHERE equipment_id IN "
         f"(SELECT id FROM asset.equipment WHERE source_system = '{SRC}');",
-        f"DELETE FROM asset.equipment_install_history WHERE created_by = '{SRC}';",
+        # created_by — внешний ключ на app_user (001_assets.sql, eq_install_hist_created_by_fk):
+        # метку туда писать нельзя, чистим по синтетическому оборудованию.
+        f"DELETE FROM asset.equipment_install_history WHERE equipment_id IN "
+        f"(SELECT id FROM asset.equipment WHERE source_system = '{SRC}');",
         f"DELETE FROM asset.equipment WHERE source_system = '{SRC}';",
         "",
         "INSERT INTO ref.equipment_type (code, name, number_range_from, number_range_to) VALUES "
@@ -238,7 +241,7 @@ def to_sql(eqs):
         out.append(
             "INSERT INTO asset.equipment_install_history (equipment_id, func_location_id, "
             f"installed_at, reason, created_by) VALUES ({eq_id(q(e['equipment_no']))}, {fl}, "
-            f"{q(e['in_service'])}, 'Первичный монтаж', {q(SRC)});"
+            f"{q(e['in_service'])}, 'Первичный монтаж ({SRC})', NULL);"
         )
         for p in e["points"]:
             calib = p["kind"] == "calib"
