@@ -291,6 +291,143 @@ def split(starts, eq, at, plan=(), nb=(0, 0), kind=None, pre=()):
     }
 
 
+# ---------------------------------------------------------------- правила на экране
+# С доработки 28.09.2026 вечером (MOS-263 после проверки MOS-264) балл и уровень
+# на экране считают два правила, а не логистическая регрессия выше: регрессия не лучше
+# их ни на реальных отказах, ни в симуляции (docs/proof/2026-09-28-sensor-model/metrics.md).
+# Функции регрессии остаются для скрипта обучения и тестов причинности; тик их не зовёт.
+# Пороги и таблицы балла — sensor_rules.json, их пишет
+# docs/proof/2026-09-28-sensor-model/rules.py (выбор на 2026-01-01…2026-03-31).
+RULES_PATH = Path(__file__).with_name("sensor_rules.json")
+_RULES = None
+
+
+def rules():
+    global _RULES
+    if _RULES is None:
+        _RULES = json.loads(RULES_PATH.read_text())
+    return _RULES
+
+
+def _recency_score(hours, table):
+    """Частота отказа в ближайшие H часов в корзине давности (обучающее окно)."""
+    for b in table:
+        if hours >= b["from_h"] and (b["to_h"] is None or hours < b["to_h"]):
+            return b["score"]
+    return table[-1]["score"]
+
+
+def _lvl(value, high, watch):
+    return "high" if value < high else "watch" if value < watch else "normal"
+
+
+def rule_split(starts, eq, at, plan=(), pre=()):
+    """Строка pred.sensor_risk по правилам.
+
+    Без синтетики — правило давности: последний отказ канала, уже подтверждённый
+    (начало + 3601 с) и не из окна ППР, был меньше high_h часов назад — high, меньше
+    watch_h — watch. Балл — частота отказа в ближайшие H часов при такой давности.
+    С синтетикой — ещё правило предвестника: наблюдено синтетическое «предупреждение
+    прибора» (pre, момент ≤ at), и назначенный им отказ (момент + P-F) не наступил;
+    отказ в ближайшие H часов — high, позже — watch. Балл режима —
+    1 − (1 − давность)(1 − предвестник), уровень — выше из двух. Паспорта нет (eq
+    пустой) — предвестника нет."""
+    R = rules()
+    rc, pc = R["recency"], R["precursor"]
+    faults, plan_reasons = [], []
+    for s in starts:
+        if not confirmed(s, at):
+            continue
+        w = in_plan(s, plan)
+        if w is None:
+            faults.append(s)
+        elif not any(r["text"] == w["text"] for r in plan_reasons):
+            plan_reasons.append({"text": w["text"], "weight": 0.0, "kind": "plan"})
+    last = max(faults, default=None)
+    hours = (at - last).total_seconds() / 3600 if last else math.inf
+    real = _recency_score(hours, rc["table"])
+    level_real = _lvl(hours, rc["high_h"], rc["watch_h"])
+    reasons_real = []
+    if last:
+        какое = (
+            f"правило давности ({level_real}): " if level_real != "normal" else ""
+        )
+        давно = f"{hours:.0f} ч" if hours < 72 else f"{hours / 24:.0f} сут"
+        reasons_real.append({
+            "text": f"{какое}последний отказ канала {давно} назад "
+            f"({last.astimezone(MSK):%d.%m %H:%M})",
+            "weight": round(real, 6),
+            "kind": "real",
+        })
+    full, level_full, reasons = real, level_real, list(reasons_real)
+    if eq:
+        pf = timedelta(days=pc["pf_days"])
+        pending = sorted(t for t in pre if t <= at and t + pf > at)
+        if pending:
+            p0 = pending[0]
+            due = p0 + pf
+            state = "due" if due - at <= timedelta(hours=R["horizon_h"]) else "pending"
+            ps = pc["score"][state]
+            full = 1 - (1 - real) * (1 - ps)
+            lp = "high" if state == "due" else "watch"
+            level_full = max(level_real, lp, key=RANK.get)
+            reasons.append({
+                "text": f"симуляция, правило предвестника ({lp}): предвестник "
+                f"{p0.astimezone(MSK):%d.%m %H:%M}, P-F {pc['pf_days']:g} сут — отказ "
+                f"ожидается до {due.astimezone(MSK):%d.%m %H:%M}",
+                "weight": round(full - real, 6),
+                "kind": "synthetic",
+            })
+    reasons = sorted(reasons + plan_reasons, key=lambda r: -r["weight"])
+    reasons_real = sorted(reasons_real + plan_reasons, key=lambda r: -r["weight"])
+    return {
+        "score_real": round(real, 6),
+        "score_synth": round(full - real, 6),
+        "level_real": level_real,
+        "level_full": level_full,
+        "reasons": reasons,
+        "reasons_real": reasons_real,
+    }
+
+
+def _rules_selfcheck():
+    R = rules()
+    at = datetime(2026, 6, 27, 21, tzinfo=MSK)
+    eq = {"in_service": date(2015, 3, 1), "life": 10, "points": []}
+    hi, wa = R["recency"]["high_h"], R["recency"]["watch_h"]
+    нет = rule_split([], eq, at)
+    assert (нет["level_real"], нет["level_full"], нет["score_synth"]) == ("normal", "normal", 0)
+    свежий = rule_split([at - timedelta(hours=3)], eq, at)
+    assert свежий["level_real"] == ("high" if 3 < hi else "watch")
+    assert "последний отказ канала 3 ч назад" in свежий["reasons_real"][0]["text"]
+    # отказ виден только после подтверждения: через 3600 с ещё нет, через 3601 — есть
+    assert rule_split([at - timedelta(seconds=3600)], None, at)["reasons_real"] == []
+    assert rule_split([at - timedelta(seconds=3601)], None, at)["reasons_real"]
+    assert rule_split([at - timedelta(hours=(hi + wa) / 2)], None, at)["level_real"] == "watch"
+    assert rule_split([at - timedelta(hours=wa + 1)], None, at)["level_real"] == "normal"
+    assert свежий["score_real"] > нет["score_real"]
+    # предвестник: отказ через 6 ч — high, через 30 ч — watch (при H = 12), только с паспортом
+    pf = timedelta(days=R["precursor"]["pf_days"])
+    H = timedelta(hours=R["horizon_h"])
+    скоро = rule_split([], eq, at, pre=[at - pf + H / 2])
+    позже = rule_split([], eq, at, pre=[at - pf + H * 2.5]) if H * 2.5 < pf else None
+    assert скоро["level_full"] == "high" and скоро["level_real"] == "normal"
+    assert скоро["score_synth"] > 0 and скоро["reasons"][0]["kind"] == "synthetic"
+    assert "P-F" in скоро["reasons"][0]["text"] and скоро["reasons_real"] == []
+    if позже:
+        assert позже["level_full"] == "watch"
+    assert rule_split([], None, at, pre=[at - pf + H / 2])["level_full"] == "normal"
+    # отказ уже наступил или предвестник ещё не наблюдён — правило молчит
+    assert rule_split([], eq, at, pre=[at - pf - timedelta(hours=1)])["level_full"] == "normal"
+    assert rule_split([], eq, at, pre=[at + timedelta(hours=1)])["level_full"] == "normal"
+    # ППР: эпизод в окне — не отказ, причина plan с весом 0
+    plan = plan_windows([{"plan_row": "Объект 14", "object_id": 5657, "sensor_kind": "Газовый датчик",
+                          "dismantle_from": date(2026, 6, 26), "return_to": date(2026, 6, 28)}])
+    ппр = rule_split([at - timedelta(hours=3)], eq, at, plan[(5657, "Газовый датчик")])
+    assert ппр["level_real"] == "normal" and ппр["reasons_real"][0]["kind"] == "plan"
+    print("sensor_risk rules selfcheck ok")
+
+
 def _selfcheck():
     M = model()
     assert set(M["modes"]) == {"real", "sim"}, M.keys()
@@ -396,3 +533,4 @@ def _selfcheck():
 
 if __name__ == "__main__":
     _selfcheck()
+    _rules_selfcheck()
