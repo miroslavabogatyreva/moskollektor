@@ -51,11 +51,15 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
           )
         })}
       </nav>
-      {at && (
-        <span class="num text-xs" style="color:#B9CCE6">
-          обновлено в {formatTime(at)}
-        </span>
-      )}
+      {/* Место под «обновлено в» держим всегда: экран без опроса его не пишет, и
+          появление подписи сдвигало всё меню на 131 px при переходе (28.09.2026). */}
+      <span
+        class="num text-xs"
+        style={`color:#B9CCE6${at ? '' : '; visibility:hidden'}`}
+        aria-hidden={at ? undefined : 'true'}
+      >
+        обновлено в {at ? formatTime(at) : '00:00:00'}
+      </span>
       {me && (
         <div class="flex flex-wrap items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
           <span>
