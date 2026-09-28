@@ -99,15 +99,18 @@ export function AlertBar({ login }: { login: string }) {
       {/* MOS-247: вероятность уведомления — на срез прогноза, поднявшего его; карточка
           участка показывает текущую. Разошлись — пишем обе, иначе «91 %» на плашке
           и 0,8169 в карточке выглядят как ошибка. */}
+      {/* Слава 28.09.2026: «вероятность чего?» — называем событие и срок словами.
+          Цель модели — эпизод «Неисправен» дольше часа на канале участка (D5),
+          на экране это «отказ датчика», как в направлении прогноза. */}
       <span class="num">
-        вероятность {Math.round(alert.probability * 100)} %
-        {alert.as_of && <> на {formatDateTime(alert.as_of)}</>}
+        отказ датчика на участке в ближайшие {alert.horizon_h} ч: вероятность{' '}
+        {Math.round(alert.probability * 100)} %
+        {alert.as_of && <> по расчёту {formatDateTime(alert.as_of)}</>}
         {alert.current_probability != null &&
           Math.round(alert.current_probability * 100) !== Math.round(alert.probability * 100) && (
             <>, сейчас {Math.round(alert.current_probability * 100)} %</>
           )}
       </span>
-      <span class="num">горизонт {alert.horizon_h} ч</span>
       {/* Ф-90: «за локацией стоит переход на карту» (MOS-245) — схема выберет
           коллектор участка, приблизит линию к пикету и обведёт метку. */}
       {alert.section_id != null && (

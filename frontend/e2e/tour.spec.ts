@@ -48,6 +48,17 @@ async function пройти(page: Page) {
       }),
       `шаг «${заголовок}»: элемент в окне через секунду`,
     ).toBe(true)
+    // Вырез подсветки стоит на самом элементе, а не там, где элемент был до догрузки
+    // экрана (дашборд, 28.09.2026: подсветка осталась над таблицей). Вырез — второй
+    // контур пути оверлея driver.js: «M x,y …», отступ stagePadding 6 px.
+    const сдвиг = await page.evaluate(() => {
+      const d = document.querySelector('.driver-overlay path')?.getAttribute('d') ?? ''
+      const м = d.split('M')[2]?.match(/^\s*([-\d.]+),([-\d.]+)/)
+      const r = document.querySelector('.driver-active-element')!.getBoundingClientRect()
+      return м ? Math.abs(Number(м[2]) - (r.top - 6)) : null
+    })
+    expect(сдвиг, `шаг «${заголовок}»: вырез подсветки на элементе`).not.toBeNull()
+    expect(сдвиг!, `шаг «${заголовок}»: вырез подсветки на элементе`).toBeLessThan(4)
     заголовки.push(заголовок)
     const далее = поповер.locator('.driver-popover-next-btn')
     const надпись = (await далее.textContent())?.trim()
@@ -71,12 +82,12 @@ for (const ширина of [1440, 390]) {
     page.on('console', (m) => m.type() === 'error' && ошибки.push(m.text()))
     page.on('pageerror', (e) => ошибки.push(e.message))
     const заголовки = await пройти(page)
-    expect(заголовки.length, заголовки.join(' | ')).toBe(14)
+    expect(заголовки.length, заголовки.join(' | ')).toBe(16)
     expect(ошибки).toEqual([])
   })
 }
 
-// Положительный контроль пропуска: под живыми ролями стенда видны все 14 шагов,
+// Положительный контроль пропуска: под живыми ролями стенда видны все 16 шагов,
 // поэтому участок для карточки отнимаем подменой ответа — три шага карточки
 // должны пропасть, а тур дойти до «Готово».
 test('шаги экрана, которого нет, пропускаются', async ({ page }) => {
@@ -87,7 +98,7 @@ test('шаги экрана, которого нет, пропускаются',
   )
   const заголовки = await пройти(page)
   expect(заголовки).not.toContain('Отказы по каналам')
-  expect(заголовки.length).toBe(11)
+  expect(заголовки.length).toBe(13)
 })
 
 test('Esc закрывает тур, фокус внутри подсказки', async ({ page }) => {

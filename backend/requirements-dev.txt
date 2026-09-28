@@ -2,3 +2,8 @@
 # Тесты чистых функций без базы: backend/tests и code/tests.
 #   python3 -m pytest backend/tests code/tests
 pytest==8.4.2
+httpx==0.28.1
+# MOS-264: воспроизводимое обучение и его регрессионные проверки; не runtime.
+numpy==2.3.3
+pandas==2.3.3
+scikit-learn==1.7.2
