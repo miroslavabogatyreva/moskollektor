@@ -17,10 +17,19 @@ JSON, что настоящий `archive-api.open-meteo.com/v1/archive`, из н
 
 СОСТОЯНИЕ. `GET /api/weather` отдаёт последний забранный час и время последнего
 успешного забора — то, что Ф-85 велит показать.
+
+ПОГОДА СЕЙЧАС. `GET /api/weather/now` — для полосы дашборда, решение Славы 28.09.2026:
+диспетчеру нужна погода за окном, а не час среза расчёта (июнь 2026). Ходит в живой
+Open-Meteo, не в эмулятор, и в расчёт не идёт. Нет выхода в интернет — 503, экран
+пишет «погода недоступна» и работает дальше.
 """
 
+import asyncio
 import csv
 import gzip
+import json
+import time
+import urllib.request
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -28,7 +37,7 @@ from pathlib import Path
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.schemas import WeatherStatus
+from app.api.schemas import WeatherNow, WeatherStatus
 from app.auth.deps import require
 from app.db import get_conn
 
@@ -36,6 +45,27 @@ emu_router = APIRouter(prefix="/emu/open-meteo/v1")
 router = APIRouter(prefix="/api")
 
 АРХИВ = Path(__file__).with_name("weather_moscow.csv.gz")
+СЕЙЧАС_URL = (
+    "https://api.open-meteo.com/v1/forecast?latitude=55.75&longitude=37.62"
+    "&current=temperature_2m,precipitation,weather_code,wind_speed_10m"
+    "&wind_speed_unit=ms&timezone=Europe%2FMoscow"
+)
+# Коды погоды WMO, которые отдаёт Open-Meteo, — по первому коду каждой группы.
+НЕБО = [(0, "ясно"), (1, "переменная облачность"), (3, "пасмурно"), (45, "туман"),
+        (51, "морось"), (61, "дождь"), (71, "снег"), (80, "ливень"), (85, "снегопад"),
+        (95, "гроза")]
+_сейчас: dict = {"до": 0.0, "ответ": None}
+
+
+def небо(код: int) -> str:
+    return [слово for порог, слово in НЕБО if код >= порог][-1]
+
+
+def разобрать_сейчас(сырой: dict) -> dict:
+    с = сырой["current"]
+    return {"observed_at": с["time"], "temp_c": с["temperature_2m"],
+            "precip_mm": с["precipitation"], "wind_ms": с["wind_speed_10m"],
+            "sky": небо(с["weather_code"]), "source": "Open-Meteo"}
 
 
 @lru_cache(maxsize=1)
@@ -104,6 +134,23 @@ async def weather_status(
     return dict(row)
 
 
+@router.get("/weather/now", response_model=WeatherNow)
+async def weather_now(_user=Depends(require("risks.read"))):
+    """Погода в центре Москвы сейчас, из живого Open-Meteo. В расчёт не идёт."""
+    # ponytail: кэш в памяти процесса на 10 минут — Open-Meteo обновляет current
+    # раз в 15 минут, а дашборд у 20 пользователей спрашивает раз в минуту.
+    if time.monotonic() < _сейчас["до"]:
+        return _сейчас["ответ"]
+    try:
+        сырой = await asyncio.to_thread(
+            lambda: json.load(urllib.request.urlopen(СЕЙЧАС_URL, timeout=5)))
+        ответ = разобрать_сейчас(сырой)
+    except Exception as e:  # сеть, HTTP, чужой формат — для экрана это одно «недоступна»
+        raise HTTPException(503, f"погода недоступна: {e}")
+    _сейчас.update(до=time.monotonic() + 600, ответ=ответ)
+    return ответ
+
+
 if __name__ == "__main__":
     # Самопроверка без базы: сутки 06.04.2024 — те же, что в code/load_weather.py.
     о = ответ_архива(date(2024, 4, 6), date(2024, 4, 6), ["temperature_2m", "precipitation"])
@@ -122,5 +169,10 @@ if __name__ == "__main__":
         pass
     else:
         raise AssertionError("неизвестная величина прошла молча")
+    с = разобрать_сейчас({"current": {"time": "2026-09-28T10:15", "temperature_2m": 11.2,
+                                       "precipitation": 0.4, "weather_code": 63,
+                                       "wind_speed_10m": 4.1}})
+    assert с["sky"] == "дождь" and с["temp_c"] == 11.2, с
+    assert небо(0) == "ясно" and небо(2) == "переменная облачность" and небо(99) == "гроза"
     print("selfcheck эмулятора погоды ok: 24 часа за 06.04.2024, 65 712 за период, "
           "за краем пусто, неизвестная величина — отказ")

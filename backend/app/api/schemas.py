@@ -75,6 +75,17 @@ class WeatherStatus(BaseModel):
     stale: bool
 
 
+class WeatherNow(BaseModel):
+    """GET /api/weather/now — погода в Москве сейчас, для полосы дашборда."""
+
+    observed_at: str  # час наблюдения по Москве, как отдаёт Open-Meteo: 2026-09-28T10:15
+    temp_c: float
+    precip_mm: float
+    wind_ms: float
+    sky: str  # словами по коду WMO: «ясно», «дождь», «снег»…
+    source: str
+
+
 class ForecastListItem(BaseModel):
     forecast_id: int
     section_id: int
