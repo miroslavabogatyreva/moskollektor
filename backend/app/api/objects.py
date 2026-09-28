@@ -390,14 +390,16 @@ WITH s AS (
 
 
 async def _узел(conn, object_id, уровень=None):
+    """Имя узла. Несуществующий коллектор — 404; несуществующий узел — None,
+    и метод отдаёт пустой items, как у channel (MOS-251)."""
     if object_id is None:
         return None
     name = await conn.fetchval(
         "SELECT name FROM smvu.object_tree WHERE object_id = $1 AND ($2::int IS NULL OR level = $2)",
         object_id, уровень,
     )
-    if name is None:
-        raise HTTPException(404, "коллектор не найден" if уровень else "узел не найден")
+    if name is None and уровень:
+        raise HTTPException(404, "коллектор не найден")
     return name
 
 
@@ -427,6 +429,8 @@ async def get_sensor_risk(
     для экрана /map?channel= (MOS-255): канал вне роли, несуществующий и без строки
     в срезе одинаково дают пустой items, а не 404, — иначе по разнице ответов
     диспетчер узнал бы, есть ли чужой канал (тот же довод, что у проверить_участок).
+    Несуществующий `node` так же даёт пустой items и node_name = null (MOS-251);
+    несуществующий `collector` — 404.
     У элемента есть node_id, collector_id и picket, по ним экран выбирает коллектор
     и пикет. Сортировка — балл по
     убыванию, затем channel_id. Тик ещё не считал — as_of = null и items пустой.

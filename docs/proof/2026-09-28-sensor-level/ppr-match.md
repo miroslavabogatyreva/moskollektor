@@ -182,7 +182,7 @@
 
 Я прочитала `maint.plan`, `maint.plan_item` и `maint.work_order` в
 `db/migrations/001_assets.sql`. Окно ППР туда без натяжки не ложится, честнее отдельная
-таблица. Сид `db/seed/ppr_2026.sql` я поэтому не писала.
+таблица. **Сделано 28.09.2026:** таблица — `db/migrations/060_ppr_window.sql`, сид — `db/seed/ppr_2026.sql`.
 
 Почему не `maint.plan` + `maint.plan_item`. Это план ТОиР в смысле SAP (MPLA): он
 описывает **цикл**, а не окно дат. У `plan` обязательны `plan_kind` и либо
