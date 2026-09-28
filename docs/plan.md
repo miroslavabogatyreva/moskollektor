@@ -713,9 +713,9 @@ flowchart LR
 
 | № | Задача | Jira | Статус |
 |---|---|---|---|
-| SL.0 | Демо на Каппе ДУ (узел 5657, 188 датчиков): `GET /api/sensor-risk?node=5657`, `backend/app/domain/sensor_risk.py`, сид `db/seed/sensor_demo.sql`, блок `frontend/src/screens/map/SensorDemo.tsx` на `/map?demo=sensors`. До 28.09.2026 стояла строкой 5.41 блока Q5 | MOS-249 | в работе 28.09.2026 |
+| SL.0 | Демо на Каппе ДУ (узел 5657, 188 датчиков): `GET /api/sensor-risk?node=5657`, `backend/app/domain/sensor_risk.py`, сид `db/seed/sensor_demo.sql`, блок `frontend/src/screens/map/SensorDemo.tsx` на `/map?demo=sensors`. До 28.09.2026 стояла строкой 5.41 блока Q5 | MOS-249 | ✓ 28.09.2026, на стенде `b6ef3f9`: ПК632 — 5 high, 1 watch, 36 normal; `e2e/sensor-demo.spec.ts` зелёный против стенда |
 | SL.1 | Синтетический паспорт на весь парк: генерация в SQL от хеша `channel_id`, строка `asset.equipment` на каждый активный канал | MOS-250 | ☐ |
-| SL.2 | 26 строк графика ППР сопоставить с пачками газовых эпизодов → `docs/proof/2026-09-28-sensor-level/ppr-match.md`, окна ППР в базу вместо константы | MOS-251 | ☐ |
+| SL.2 | 26 строк графика ППР сопоставить с пачками газовых эпизодов → `docs/proof/2026-09-28-sensor-level/ppr-match.md`, окна ППР в базу вместо константы | MOS-251 | ◐ 28.09.2026: `ppr-match.md` — уверенно 2 пары из 26 строк, 73 эпизода 2026 года (7,4 %) — ППР, число в MOS-9; таблица `maint.ppr_window` ждёт мержа SL.3 |
 | SL.3 | Таблица `pred.sensor_risk` (новая миграция), тик worker, балл по всем датчикам меньше 5 минут | MOS-252 | ☐ |
 | SL.4 | `GET /api/sensor-risk?synthetic=0\|1` с фильтрами и `GET /api/sensor-risk/summary` для плиток | MOS-253 | ☐ |
 | SL.5 | Дашборд по датчикам: плитки, «Где риск сосредоточен», «Все датчики по риску», переключатель синтетики, вид «по участкам» остаётся вторым | MOS-254 | ☐ |
