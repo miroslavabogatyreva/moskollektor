@@ -7,6 +7,8 @@ import { usePoll } from '../../lib/poll'
 import { датчиков, линий } from '../../lib/plural'
 import {
   БЕЗ_ЛИНИИ,
+  доляПричины,
+  процент,
   линииДатчиков,
   sensorRiskUrl,
   срезРасчёта,
@@ -569,7 +571,7 @@ function SensorItem({
         <span class="ml-auto flex items-center gap-2">
           <SensorBadge level={s.level} />
           <span class="tabular-nums text-sm" style="color:var(--text-primary)">
-            {s.score.toFixed(2)}
+            {процент(s.score)}
           </span>
         </span>
       </button>
@@ -615,13 +617,13 @@ function Details({ s }: { s: SensorRow }) {
         <ul class="flex flex-col gap-1" style="list-style:none; padding:0; margin:0">
           {rest.map((r) => (
             <li key={r.text} data-kind={r.kind} class="flex items-center gap-2">
-              <span class="tabular-nums w-12 shrink-0 text-right" style="color:var(--text-primary)">
-                +{r.weight.toFixed(2)}
+              <span class="tabular-nums w-16 shrink-0 text-right" style="color:var(--text-primary)">
+                +{процент(r.weight)}
               </span>
               <span
                 aria-hidden="true"
                 class="h-2 rounded shrink-0"
-                style={`width:${Math.round(r.weight * 120)}px; background:${r.kind === 'synthetic' ? 'var(--border-strong)' : SENSOR_LEVELS[s.level].border}`}
+                style={`width:${Math.round(доляПричины(r.weight, s.score) * 120)}px; background:${r.kind === 'synthetic' ? 'var(--border-strong)' : SENSOR_LEVELS[s.level].border}`}
               />
               <span style="color:var(--text-primary)">{r.text}</span>
               {r.kind === 'synthetic' && (
