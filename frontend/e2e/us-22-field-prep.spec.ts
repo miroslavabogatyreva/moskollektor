@@ -98,17 +98,14 @@ test('US-22 сц. 3: История канала', async ({ page, request }) => 
 
 // Ссылка на канал в таблице «Отказы по каналам» открывает историю сверху карточки,
 // а таблица внизу — без прокрутки к истории клик выглядел пустым (Слава, 28.09.2026).
-test('US-22 сц. 3: клик по каналу в таблице показывает его историю', async ({
-  page,
-  request,
-}) => {
+test('US-22 сц. 3: клик по каналу в таблице показывает его историю', async ({ page, request }) => {
   const { з, к } = await заявкаСКаналом(request)
   await свойБандл(page)
   await page.goto(`/objects/${з.object.section_id}`)
   const таблица = page.locator('section', { hasText: 'Отказы по каналам' })
-  const ссылка = таблица.getByRole('link', { name: к.name.trim() }).first()
-  await ссылка.scrollIntoViewIfNeeded()
-  await ссылка.click()
+  const строка = таблица.getByRole('row', { name: к.name.trim() }).first()
+  await строка.scrollIntoViewIfNeeded()
+  await строка.click()
   const история = page.locator('section', { hasText: 'История канала' })
   await expect(история).toContainText(к.name.trim())
   await expect(история).toBeInViewport()

@@ -429,15 +429,17 @@ export function ObjectCard({
             </thead>
             <tbody>
               {channelFaults.map((c) => (
-                <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
+                // Строка канала с отказами открывает его историю — как строки «Последних
+                // прогнозов» ниже; синяя ссылка в ячейке выбивалась из таблиц (28.09.2026).
+                <tr
+                  key={c.channel_id}
+                  style="border-bottom:1px solid var(--border-subtle)"
+                  {...(c.faults_cnt > 0
+                    ? rowLink(() => route(`/objects/${sectionId}?channel=${c.channel_id}`))
+                    : {})}
+                >
                   <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2">
-                    {c.faults_cnt > 0 ? (
-                      <a href={`/objects/${sectionId}?channel=${c.channel_id}`}>{c.name}</a>
-                    ) : (
-                      c.name
-                    )}
-                  </td>
+                  <td class="px-2 py-2">{c.name}</td>
                   <td class="px-2 py-2 num">{c.faults_cnt}</td>
                   <td class="px-2 py-2 num">
                     {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
