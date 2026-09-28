@@ -227,6 +227,16 @@ loop() {
   done
 }
 
+# Выключатель (BACKUP_ENABLED=0 в deploy/.env): ни копий, ни учений, архив журнала
+# база не пишет (archive-wal.sh). Контейнер остаётся жив и пишет, почему молчит.
+# Восстановление из уже снятой копии работает и при выключенных копиях.
+if [ "${BACKUP_ENABLED:-1}" != 1 ] && [ "${1:-}" != --restore ]; then
+  msg="копии выключены: BACKUP_ENABLED=$BACKUP_ENABLED в deploy/.env; docs/restore.md, «Включить и выключить копии»"
+  if [ "${1:-}" = --loop ]; then mkdir -p "$B"; log "$msg"; exec sleep infinity; fi
+  echo "$msg" >&2
+  exit 1
+fi
+
 case "${1:-}" in
   --loop) loop ;;
   --drill) drill ;;

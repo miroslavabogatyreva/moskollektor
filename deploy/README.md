@@ -490,8 +490,10 @@ Let's Encrypt на имя `135-106-216-101.sslip.io`: это имя само у�
 **Поднять** (из `/srv/moskollektor/deploy`, основной стенд уже работает):
 
 ```
-cp demo.env.example demo.env      # вписать POSTGRES_PASSWORD из .env и свой AUTH_SECRET
-docker run --rm -v moskollektor_backups:/backups -v moskollektor-demo_pgdata:/var/lib/postgresql \
+cp demo.env.example demo.env      # вписать POSTGRES_PASSWORD из .env, свой AUTH_SECRET и PGDATA_DIR
+SRC=moskollektor_backups          # копии основного стенда: том или BACKUP_DIR из .env
+DST=moskollektor-demo_pgdata      # база демо: том или PGDATA_DIR из demo.env
+docker run --rm -v "$SRC:/backups" -v "$DST:/var/lib/postgresql" \
   -v "$PWD/backup.sh:/backup.sh:ro" -e POSTGRES_USER=x -e POSTGRES_PASSWORD=x -e POSTGRES_DB=x \
   --entrypoint sh postgis/postgis:18-3.6 /backup.sh --restore latest
 docker compose -p moskollektor-demo --env-file demo.env --profile app up -d api nginx
@@ -499,7 +501,7 @@ sh demo-cert.sh                   # сертификат Let's Encrypt, 90 су�
 sh check-demo.sh https://135-106-216-101.sslip.io:8443
 ```
 
-Вторая команда разворачивает последнюю ночную копию основной базы в том демо —
+Команда `docker run` разворачивает последнюю ночную копию основной базы в том демо —
 тот же `backup.sh --restore`, что и при аварии (`docs/restore.md`). Пароль базы
 едет вместе с копией, поэтому в `demo.env` он тот же, что в `.env`. Последняя
 команда смотрит на демо глазами комиссии: сертификат проверяется без `-k`,
