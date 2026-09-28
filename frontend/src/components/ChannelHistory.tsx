@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { apiFetch } from '../lib/api'
 import { errorMessage, formatDateTime } from '../lib/format'
 
@@ -23,6 +23,13 @@ interface Ответ {
 export function ChannelHistory({ sectionId, channelId }: { sectionId: string; channelId: string }) {
   const [data, setData] = useState<Ответ | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const блок = useRef<HTMLElement>(null)
+
+  // Ссылка на канал стоит и в таблице «Отказы по каналам» внизу карточки: без прокрутки
+  // история появлялась вне экрана и клик выглядел пустым (28.09.2026).
+  useEffect(() => {
+    блок.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [channelId])
 
   useEffect(() => {
     let отменено = false
@@ -45,7 +52,11 @@ export function ChannelHistory({ sectionId, channelId }: { sectionId: string; ch
   }, [sectionId, channelId])
 
   return (
-    <section class="card text-sm" style="border-left:4px solid var(--accent)">
+    <section
+      ref={блок}
+      class="card text-sm"
+      style="border-left:4px solid var(--accent); scroll-margin-top:16px"
+    >
       <h2 class="font-semibold mb-1">
         История канала{data && ` «${data.channel.name.trim()}» · ${data.channel.sensor_kind ?? ''}`}
       </h2>

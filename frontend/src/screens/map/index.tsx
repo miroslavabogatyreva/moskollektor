@@ -290,10 +290,11 @@ export function MapScreen({
   // а ось раскладывает участок по большинству каналов, поэтому узел может держать
   // участок с оси ДРУГОГО коллектора (так 1490 у «ДП объект Бета»): такие не рисуем
   // на чужой оси, а называем под схемой — offAxis ниже.
-  const nodeSections = useMemo(() => {
+  const узел = useMemo(() => {
     const n = tree.flatMap((c) => c.nodes).find((x) => x.object_id === node)
-    return n ? new Set(n.section_ids) : null
+    return n ? { name: n.name, sections: new Set(n.section_ids) } : null
   }, [tree, node])
+  const nodeSections = узел?.sections ?? null
 
   const filteredAxis = useMemo(
     () =>
@@ -484,6 +485,7 @@ export function MapScreen({
                   synthetic={синтетика}
                   channel={датчик}
                   scrollTo={демоДатчиков || датчик != null}
+                  node={узел}
                 />
               )}
             </div>
@@ -570,11 +572,6 @@ function HomeStrip({
         sub={orders ? (orders.overdue > 0 ? undefined : 'просроченных нет') : undefined}
         warn={orders && orders.overdue > 0 ? `из них просрочено ${orders.overdue}` : undefined}
         href="/orders"
-      />
-      <Tile
-        label="Срез данных"
-        value={summary?.as_of ? formatDate(summary.as_of) : summary ? '—' : нет}
-        sub={summary ? срезРасчёта(summary.as_of, formatDateTime) : undefined}
       />
     </div>
   )

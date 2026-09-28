@@ -126,6 +126,7 @@ export function SensorDemo({
   synthetic,
   channel,
   scrollTo,
+  node,
 }: {
   collector: number
   collectorName: string
@@ -135,6 +136,8 @@ export function SensorDemo({
   // Датчик из адреса /map?channel=<id>.
   channel?: number
   scrollTo?: boolean
+  // Узел дерева объектов слева («Шкаф ОПС объект Вита»): только датчики его участков.
+  node?: { name: string; sections: Set<number> } | null
 }) {
   const [data, setData] = useState<SensorRiskPage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -182,11 +185,16 @@ export function SensorDemo({
     () => new Map(sections.map((s) => [s.section_id, s.smvu_key])),
     [sections],
   )
-  const наОси = useMemo(
-    () => (data?.items ?? []).filter((s): s is ПоПикету => s.picket != null),
-    [data],
+  // До 28.09.2026 узел дерева отбирал только ось «по участкам», а здесь не менялось ничего.
+  const датчики = useMemo(
+    () =>
+      node
+        ? (data?.items ?? []).filter((s) => s.section_id != null && node.sections.has(s.section_id))
+        : (data?.items ?? []),
+    [data, node],
   )
-  const безПикета = (data?.items.length ?? 0) - наОси.length
+  const наОси = useMemo(() => датчики.filter((s): s is ПоПикету => s.picket != null), [датчики])
+  const безПикета = датчики.length - наОси.length
   const lines = useMemo(() => линииДатчиков(наОси, ключУчастка), [наОси, ключУчастка])
   const prefixOf = (id: number) => lines.find(([, v]) => v.some((s) => s.channel_id === id))?.[0]
 
@@ -219,7 +227,7 @@ export function SensorDemo({
     const top = наОси[0]
     setPick(top ? { prefix: prefixOf(top.channel_id)!, picket: top.picket } : null)
     setOpen(top?.channel_id ?? null)
-  }, [data, channel])
+  }, [data, channel, node])
 
   useEffect(() => {
     if (!scrollTo || !data) return
@@ -243,7 +251,7 @@ export function SensorDemo({
     s.level !== 'normal' || s.channel_id === open || s.reasons.some((r) => r.kind === 'plan')
   const shownList = allNormal ? list : list.filter(важный)
   const свёрнуто = list.length - shownList.length
-  const count = (l: SensorLevel) => data?.items.filter((s) => s.level === l).length ?? 0
+  const count = (l: SensorLevel) => датчики.filter((s) => s.level === l).length
 
   return (
     <section
@@ -256,11 +264,12 @@ export function SensorDemo({
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-base font-semibold" style="font-family:var(--font-display)">
           Прогноз по датчикам · {collectorName}
+          {node && ` · ${node.name}`}
         </h2>
         {data && (
           <span class="text-sm" style="color:var(--text-secondary)">
-            {срезРасчёта(data.as_of, formatDateTime)} · {датчиков(data.items.length)}: высокий риск
-            — {count('high')}, наблюдать — {count('watch')}, норма — {count('normal')}
+            {срезРасчёта(data.as_of, formatDateTime)} · {датчиков(датчики.length)}: высокий риск —{' '}
+            {count('high')}, наблюдать — {count('watch')}, норма — {count('normal')}
           </span>
         )}
       </div>
@@ -269,9 +278,11 @@ export function SensorDemo({
 
       {!data ? (
         <p style="color:var(--text-muted)">Загрузка прогноза по датчикам…</p>
-      ) : data.items.length === 0 ? (
+      ) : датчики.length === 0 ? (
         <p class="text-sm" style="color:var(--text-muted)">
-          На коллекторе нет датчиков с прогнозом.
+          {node
+            ? 'У этого узла нет датчиков с прогнозом.'
+            : 'На коллекторе нет датчиков с прогнозом.'}
         </p>
       ) : (
         <>

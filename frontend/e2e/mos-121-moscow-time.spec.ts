@@ -6,6 +6,10 @@
 // иначе тест проверял бы код самим собой.
 import { expect, test, type Page } from '@playwright/test'
 import { account, demoAccounts, loginAs } from './helpers/auth'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — проверка шапки до выкладки.
+test.beforeEach(async ({ page }) => свойБандл(page))
 
 test.use({ timezoneId: 'Asia/Vladivostok' })
 
@@ -63,11 +67,11 @@ test('дашборд: время расчёта и дата данных по М
   await expect(page.getByText(мскДата(статус.data_edge), { exact: true })).toBeVisible()
 })
 
-test('шапка: «обновлено в» — московские часы', async ({ page }) => {
+test('шапка: «обновлена в» — московские часы', async ({ page }) => {
   await page.goto('/dashboard')
   const шапка = page.getByRole('banner')
-  await expect(шапка).toContainText(/обновлено в \d\d:\d\d:\d\d/)
-  const [ч, м, с] = ((await шапка.textContent())?.match(/обновлено в (\d\d):(\d\d):(\d\d)/) ?? [])
+  await expect(шапка).toContainText(/обновлена в \d\d:\d\d:\d\d/)
+  const [ч, м, с] = ((await шапка.textContent())?.match(/обновлена в (\d\d):(\d\d):(\d\d)/) ?? [])
     .slice(1)
     .map(Number)
   const сейчас = мск(new Date().toISOString(), true).slice(11).split(':').map(Number)
