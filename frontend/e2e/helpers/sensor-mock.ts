@@ -138,7 +138,8 @@ function парк(): Item[] {
         level: пред ? 'high' : levelReal,
         reasons: [
           {
-            text: `последний отказ канала ${Math.round(часов)} ч назад`,
+            // Как sensor_risk.rule_split: уровень правила скобкой перед текстом.
+            text: `${levelReal === 'normal' ? '' : `правило давности (${levelReal === 'high' ? 'высокий риск' : 'наблюдать'}): `}последний отказ канала ${Math.round(часов)} ч назад`,
             weight: real,
             kind: 'real',
           },

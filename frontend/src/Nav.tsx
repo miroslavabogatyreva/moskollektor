@@ -50,7 +50,9 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
         <a href="/map" class="text-white">
           <Logo height={40} />
         </a>
-        <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>
+        <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">
+          ОДС · прогноз отказов датчиков
+        </span>
       </div>
       {/* Меню, время и пользователь — одна группа у правого края: когда места мало и
           блок пользователя переносится на вторую строку, он остаётся справа, а не
