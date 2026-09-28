@@ -130,7 +130,7 @@ PostgreSQL, Python, nginx, Debian, JavaScript (`docs/HLD.md` разд. 1.2).
 
 ## 5. REST API
 
-Под префиксом `/api` объявлено 40 методов, у каждого описание в `GET /docs`
+Под префиксом `/api` объявлено 41 метод, у каждого описание в `GET /docs`
 и в `GET /openapi.json` — их FastAPI генерирует сам из типов ответа. Живость отдаёт
 `GET /health` без входа и без записи в журнал аудита. Полная таблица методов
 с правами и полями ответа — `docs/HLD.md` разд. 3.4.
@@ -139,7 +139,7 @@ PostgreSQL, Python, nginx, Debian, JavaScript (`docs/HLD.md` разд. 1.2).
 |---|---|
 | вход | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/info`, `GET /api/auth/directory`, `POST /api/auth/directory/check`, `GET /api/auth/users`, `PATCH /api/auth/users/{login}` |
 | риск и прогнозы | `GET /api/risks`, `GET /api/data-status`, `GET /api/forecasts`, `GET /api/forecasts/{id}`, `GET /api/dispatcher-decisions`, `POST /api/forecasts/{id}/feedback`, `POST /api/forecasts/{id}/outcome`, `GET /api/forecast-outcomes` |
-| объекты | `GET /api/objects/tree`, `GET /api/objects/{id}`, `GET /api/objects/{id}/readings`, `GET /api/objects/{id}/channels`, `GET /api/objects/{id}/channels/{channel_id}/episodes`, `GET /api/geo/sections`, `GET /api/sensor-risk` (демо по датчикам, MOS-249) |
+| объекты | `GET /api/objects/tree`, `GET /api/objects/{id}`, `GET /api/objects/{id}/readings`, `GET /api/objects/{id}/channels`, `GET /api/objects/{id}/channels/{channel_id}/episodes`, `GET /api/geo/sections`, `GET /api/sensor-risk` (балл по каждому датчику, MOS-249, MOS-253), `GET /api/sensor-risk/summary` (плитки дашборда по датчикам, MOS-253) |
 | заявки и уведомления | `GET /api/orders`, `GET /api/orders/{id}`, `GET /api/notifications`, `POST /api/notifications/{id}/ack`, `GET /api/alerts/stream` |
 | приём данных | `POST /api/ingest/readings`, `POST /api/ingest/ods-events`, `POST /api/permits`, `POST /api/permits/{id}/close` |
 | источники и погода | `GET /api/sources`, `GET /api/weather`, `GET /api/weather/now` |
