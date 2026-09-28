@@ -252,22 +252,26 @@ docker compose exec api python code/check_lock.py
 до правки 21 из 38 падали в образе трассировкой `ModuleNotFoundError` или
 `FileNotFoundError` на исправном продукте.
 
-*В контейнере `api` — 27 проверок, им нужна база или стенд.* `backend/Dockerfile`
-ставит `PYTHONPATH=/app`, поэтому они видят код `app.*` без подсказок:
+*В контейнере `api` — 25 проверок, им нужна база или стенд.* `backend/Dockerfile`
+ставит `PYTHONPATH=/app`, поэтому они видят код `app.*` без подсказок, и ставит `curl`,
+которым четыре из них ходят в API (`check_minimum` через `examples.sh`,
+`check_api_paging`, `check_stable_paging`, `check_xml_response`):
 `check_api_paging`, `check_auth`, `check_block_user`, `check_card_weight`,
 `check_explain_templates`, `check_frontend`, `check_ingest`, `check_lock`,
-`check_metrics`, `check_metrics_report`, `check_migration_hashes`, `check_minimum`, `check_model_and_objects`,
+`check_metrics`, `check_metrics_report`, `check_minimum`, `check_model_and_objects`,
 `check_order_status`, `check_orders`, `check_risk_deadzone`, `check_runtime`,
 `check_schema`, `check_section_xref`, `check_seed_rbac`, `check_spread`,
-`check_stable_paging`, `check_stream`, `check_tech_events`, `check_trust_header`,
+`check_stable_paging`, `check_stream`, `check_tech_events`,
 `check_weather`, `check_xml_response`. Запуск: `docker compose exec api python code/<имя>.py`.
 
-*Из распакованного пакета — 11 проверок, им нужны файлы репозитория* (`docs/`,
-`frontend/src`, исходники `backend/app`). В образ их не пускает `.dockerignore`, чтобы
+*Из распакованного пакета — 13 проверок, им нужны файлы репозитория* (`docs/`,
+`frontend/src`, исходники `backend/app`), история git (`check_migration_hashes`) или
+ssh до сервера (`check_trust_header`, ей нужна переменная `STAND_SSH`). В образ их не пускает `.dockerignore`, чтобы
 комиссия не нашла там проверку, которая заведомо упадёт:
 `check_contrast`, `check_dependency_pins`, `check_deploy_set`, `check_licenses`,
-`check_no_auto_verdict`, `check_pg_version`, `check_plan`,
-`check_stale_fetch`, `check_structure`, `check_unmet`, `check_write_policy`. Запуск из
+`check_migration_hashes`, `check_no_auto_verdict`, `check_pg_version`, `check_plan`,
+`check_stale_fetch`, `check_structure`, `check_trust_header`, `check_unmet`,
+`check_write_policy`. Запуск из
 корня пакета: `python3 code/<имя>.py`. `check_metrics_report` лежит в обоих местах:
 в образе он нужен как модуль (`check_orders` берёт из него окно замера), а сам отчёт
 и доказательства проверяет только из пакета — в контейнере он скажет это словами; все разом с привязкой к строкам приёмки —
