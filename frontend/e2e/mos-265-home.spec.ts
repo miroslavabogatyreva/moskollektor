@@ -51,7 +51,12 @@ test('US-01 сц. 6: корень ведёт на схему, на 390 px без
   await expect(page).toHaveURL(/\/map$/)
   await expect(page.getByTestId('sensor-demo').locator('svg[role="img"]').first()).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Ждут квитирования' })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+  // Сравниваем с шириной без полосы прокрутки: с scrollbar-gutter: stable она 375, а не 390.
+  const [полная, видимая] = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    document.documentElement.clientWidth,
+  ])
+  expect(полная).toBeLessThanOrEqual(видимая)
 })
 
 // Подписи датчиков в норме у соседних пикетов не налезают друг на друга ни на одном
