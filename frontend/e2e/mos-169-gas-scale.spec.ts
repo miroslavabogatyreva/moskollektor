@@ -5,6 +5,10 @@
 // Без стенда: E2E_OFFLINE=1 BASE_URL=http://localhost:4173 (npm run build && npx vite preview).
 import { expect, test, type Locator } from '@playwright/test'
 import { mockObjectCard } from './helpers/object-card-mock'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — карточку проверяем своей сборкой, а не фронтом стенда.
+test.beforeEach(({ page }) => свойБандл(page))
 
 const УЧАСТОК = 999001
 const ГАЗ = { system_kind: 'Газовая охрана', sensor_kind: 'Газовый датчик' }
