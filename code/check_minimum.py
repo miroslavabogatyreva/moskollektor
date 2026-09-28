@@ -226,6 +226,15 @@ def collect():
         path = cmd[-1]
         name = os.path.basename(path)
         if not os.path.exists(os.path.join(ROOT, path)):
+            # В образе api нет каталога delivery/ (.dockerignore), а браузерной
+            # проверке нужны Node и Chrome — её место пакет. Нет всего каталога —
+            # значит, нас запустили в контейнере: строка РУЧНАЯ с командой (MOS-156).
+            # Каталог есть, а файла нет — проверку потеряли, это СБОЙ.
+            if not os.path.isdir(os.path.join(ROOT, path.split("/")[0])):
+                for row in rows:
+                    put(row, "РУЧНАЯ", "в образе нет %s — запускать из пакета: %s"
+                        % (path.split("/")[0] + "/", " ".join(cmd)))
+                continue
             # Отсутствие файла — это СБОЙ его строк, а не повод их пропустить.
             for row in rows:
                 put(row, "СБОЙ", "проверка не написана: нет файла %s" % path)
