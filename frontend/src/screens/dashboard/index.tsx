@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { RiskBadge } from '../../components/RiskBadge'
 import { SyntheticToggle } from '../../components/SyntheticToggle'
-import { синтетикаВключена, срезРасчёта, type SensorSummary } from '../../lib/sensorRisk'
+import { датчиков, коллекторах, коллекторов } from '../../lib/plural'
+import {
+  синтетикаВключена,
+  срезРасчёта,
+  уровеньИзАдреса,
+  type SensorLevel,
+  type SensorSummary,
+} from '../../lib/sensorRisk'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { fetchMe } from '../../lib/auth'
 import {
@@ -46,7 +53,8 @@ import type { DataStatus, OrdersSummary, RiskRow, Unacked, WeatherNow } from './
 export function DashboardScreen({
   view,
   synthetic,
-}: { view?: string; synthetic?: string } & Record<string, unknown>) {
+  level,
+}: { view?: string; synthetic?: string; level?: string } & Record<string, unknown>) {
   const поУчасткам = view === 'sections'
   const синтетика = синтетикаВключена(synthetic)
   const [rows, setRows] = useState<RiskRow[] | null>(null)
@@ -219,6 +227,7 @@ export function DashboardScreen({
           <SyntheticToggle on={синтетика} />
           <SensorsDashboard
             синтетика={синтетика}
+            уровень={уровеньИзАдреса(level)}
             tick={tick}
             summary={датчики.summary}
             error={датчики.error}
@@ -418,6 +427,7 @@ function ViewSwitch({ поУчасткам }: { поУчасткам: boolean })
    датчиков высокого риска на коллекторе, таблица всех датчиков постранично. */
 function SensorsDashboard({
   синтетика,
+  уровень,
   tick,
   summary,
   error,
@@ -427,6 +437,7 @@ function SensorsDashboard({
   коллекторы,
 }: {
   синтетика: boolean
+  уровень: SensorLevel | ''
   tick: number
   summary: SensorSummary | null
   error: string | null
@@ -521,19 +532,10 @@ function SensorsDashboard({
           {ждутКвитирования}
         </div>
       )}
-      <SensorTable synthetic={синтетика} tick={tick} коллекторы={коллекторы} />
+      <SensorTable synthetic={синтетика} level={уровень} tick={tick} коллекторы={коллекторы} />
     </>
   )
 }
-
-const правила = new Intl.PluralRules('ru-RU')
-const склонить = (n: number, [one, few, many]: [string, string, string]) => {
-  const форма = правила.select(n)
-  return `${n} ${форма === 'one' ? one : форма === 'few' ? few : many}`
-}
-const коллекторах = (n: number) => склонить(n, ['коллекторе', 'коллекторах', 'коллекторах'])
-const датчиков = (n: number) => склонить(n, ['датчик', 'датчика', 'датчиков'])
-const коллекторов = (n: number) => склонить(n, ['коллектор', 'коллектора', 'коллекторов'])
 
 // Зона видимости словами роли (Ф-94): ОДС и администратор видят весь парк,
 // диспетчер — свой район, техник — свой комплекс. Имени района API не отдаёт,

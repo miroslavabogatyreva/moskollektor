@@ -6,6 +6,7 @@
 // Запуск с локальной сборкой: BASE_URL — сервер, который отдаёт dist/ и проксирует
 // /api и /data на стенд. E2E_SHOTS=<каталог> — ещё и снимки экранов на 1440 и 390.
 import { expect, test, type Page } from '@playwright/test'
+import { слово, type Формы } from '../src/lib/plural'
 import { mockSensorRisk, КАППА, МЮ } from './helpers/sensor-mock'
 
 const ошибкиКонсоли = (page: Page) => {
@@ -50,11 +51,11 @@ test('SL.5: дашборд по датчикам — плитки, коллек�
   await expect(строки).toHaveCount(50)
   await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[0].channel_id))
   const ячейки = строки.first().locator('td')
-  await expect(ячейки.nth(0)).toContainText(парк[0].name)
-  await expect(ячейки.nth(1)).toHaveText(парк[0].sensor_kind)
-  await expect(ячейки.nth(2)).toHaveText(`${парк[0].collector_name} · ПК${парк[0].picket}`)
-  await expect(ячейки.nth(3).locator('[data-level]')).toHaveAttribute('data-level', парк[0].level)
-  await expect(ячейки.nth(4)).toHaveText(парк[0].score.toFixed(2))
+  await expect(ячейки.nth(0).locator('[data-level]')).toHaveAttribute('data-level', парк[0].level)
+  await expect(ячейки.nth(1)).toHaveText(парк[0].score.toFixed(2))
+  await expect(ячейки.nth(2)).toContainText(парк[0].name)
+  await expect(ячейки.nth(3)).toHaveText(парк[0].sensor_kind)
+  await expect(ячейки.nth(4)).toHaveText(`${парк[0].collector_name} · ПК${парк[0].picket}`)
   const главная = парк[0].reasons
     .filter((r) => r.kind !== 'plan')
     .reduce((a, b) => (b.weight > a.weight ? b : a))
@@ -66,8 +67,9 @@ test('SL.5: дашборд по датчикам — плитки, коллек�
   await expect(страница).toHaveText(/^51–100 из/)
   await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[50].channel_id))
 
-  // Отбор по уровню — с первой страницы.
+  // Отбор по уровню — с первой страницы и в адресе (MOS-262).
   await page.getByLabel('Уровень').selectOption('high')
+  await expect(page).toHaveURL(/\/dashboard\?level=high$/)
   await expect(страница).toHaveText(new RegExp(`из ${high.length}$`))
   expect(await строки.locator('[data-level="high"]').count()).toBe(Math.min(50, high.length))
 
@@ -268,3 +270,85 @@ for (const [ширина, высота] of [
     await page.getByTestId('sensor-demo').screenshot({ path: `${КАТАЛОГ}/map-mu-${ширина}.png` })
   })
 }
+
+// MOS-262 п. 1: каждое «число + слово» в подписях блока датчиков и оси участков —
+// в своей форме. На Каппе и Мю числа разные: 1 487 датчиков, линии, пикеты по 1–6.
+const ФОРМЫ: [RegExp, Формы][] = [
+  [/^датчик(а|ов)?$/, ['датчик', 'датчика', 'датчиков']],
+  [/^участ(ок|ка|ков)$/, ['участок', 'участка', 'участков']],
+  [/^лини(я|и|й)$/, ['линия', 'линии', 'линий']],
+]
+test('MOS-262: склонение — нет «1 датчиков», «1 участков», «4 высокий риск»', async ({ page }) => {
+  await mockSensorRisk(page)
+  for (const адрес of [`/map?collector=${КАППА}`, `/map?channel=267052`, `/map?collector=${МЮ}`]) {
+    await page.goto(адрес)
+    const демо = page.getByTestId('sensor-demo')
+    // Мю — 1 487 датчиков: блок на схеме появляется не сразу.
+    await expect(демо, адрес).toContainText('расчёт на', { timeout: 60_000 })
+    // Подписи на экране и всплывающие <title> над стопками пикетов.
+    const тексты = [
+      await page.locator('main').innerText(),
+      ...(await демо.locator('svg title').allTextContents()),
+    ]
+    let проверено = 0
+    for (const текст of тексты)
+      for (const [, n, w] of текст.matchAll(/(?<![\d–.,])(\d+) ([а-яё]+)/g)) {
+        // «ПК632 из 1 участка» — после «из» родительный падеж, его ведёт изУчастков.
+        const формы = ФОРМЫ.find(([re]) => re.test(w))?.[1]
+        if (!формы || /из $/.test(текст.slice(0, текст.indexOf(`${n} ${w}`)))) continue
+        expect(w, `${адрес}: «${n} ${w}»`).toBe(слово(Number(n), формы))
+        проверено += 1
+      }
+    expect(проверено, `${адрес}: подписи с числом найдены`).toBeGreaterThan(0)
+    await expect(демо).not.toContainText(/\d высокий риск/)
+  }
+})
+
+test('MOS-262: ?level= переживает перезагрузку, «Назад» возвращает прежний фильтр', async ({
+  page,
+}) => {
+  const мок = await mockSensorRisk(page)
+  const парк = мок.items(true)
+  const страница = page.getByTestId('sensor-page')
+  const уровень = page.getByLabel('Уровень')
+
+  await page.goto('/dashboard?level=high')
+  await expect(уровень).toHaveValue('high')
+  const high = парк.filter((s) => s.level === 'high').length
+  await expect(страница).toHaveText(new RegExp(`из ${high}$`))
+
+  await page.reload()
+  await expect(page).toHaveURL(/\/dashboard\?level=high$/)
+  await expect(уровень).toHaveValue('high')
+  expect(мок.urls.at(-1)).toContain('level=high')
+
+  await уровень.selectOption('watch')
+  await expect(page).toHaveURL(/\/dashboard\?level=watch$/)
+  const watch = парк.filter((s) => s.level === 'watch').length
+  await expect(страница).toHaveText(new RegExp(`из ${watch.toLocaleString('ru-RU')}$`))
+
+  await page.goBack()
+  await expect(page).toHaveURL(/\/dashboard\?level=high$/)
+  await expect(уровень).toHaveValue('high')
+  await expect(страница).toHaveText(new RegExp(`из ${high}$`))
+
+  // «все» убирает параметр, синтетика рядом с ним не теряется.
+  await page.goto('/dashboard?synthetic=0&level=high')
+  await уровень.selectOption('')
+  await expect(page).toHaveURL(/\/dashboard\?synthetic=0$/)
+})
+
+test('MOS-262: на 390 px первые колонки таблицы — «Уровень» и «Балл», видны без прокрутки', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSensorRisk(page)
+  await page.goto('/dashboard')
+  const таблица = page.getByTestId('sensor-table')
+  await expect(таблица.locator('tbody tr')).toHaveCount(50)
+  const шапка = таблица.locator('thead th')
+  await expect(шапка.nth(0)).toHaveText('Уровень')
+  await expect(шапка.nth(1)).toHaveText('Балл')
+  const балл = await шапка.nth(1).boundingBox()
+  expect(балл!.x + балл!.width).toBeLessThanOrEqual(390)
+})
