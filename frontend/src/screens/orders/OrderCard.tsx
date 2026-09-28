@@ -2,7 +2,7 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchOrder, fetchTopChannel } from './api'
-import { PRIORITY_LABEL, type OrderDetail, type TopChannel } from './types'
+import { PRIORITY_LABEL, STATUS_LABEL, type OrderDetail, type TopChannel } from './types'
 import { errorMessage, formatDateTime } from '../../lib/format'
 
 /* Карточка заявки — задачи 6.6 и 6.7 (MOS-61, MOS-62). Форма ответа —
@@ -147,7 +147,7 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
 
       <section class="text-sm flex flex-col gap-1" style="color:var(--text-secondary)">
         <div>
-          Статус <b>{data.status}</b> · приоритет{' '}
+          Статус <b>{STATUS_LABEL[data.status] ?? data.status}</b> · приоритет{' '}
           <b>{PRIORITY_LABEL[data.priority.code] ?? data.priority.name}</b> (норматив реакции{' '}
           <span class="num">{data.priority.response_hours}</span> ч)
         </div>
@@ -166,8 +166,8 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
           <ol class="flex flex-col gap-1">
             {data.status_history.map((с, i) => (
               <li key={i}>
-                <span class="num">{formatDateTime(с.changed_at)}</span> — статус «{с.status}»
-                {с.assignee && <> · {с.assignee}</>}{' '}
+                <span class="num">{formatDateTime(с.changed_at)}</span> — статус «
+                {STATUS_LABEL[с.status] ?? с.status}»{с.assignee && <> · {с.assignee}</>}{' '}
                 <span style="color:var(--text-muted)">
                   ·{' '}
                   {с.source === 'order_system' ? 'получен из системы учёта' : 'проставлен вручную'}
