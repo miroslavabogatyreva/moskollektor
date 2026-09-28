@@ -1,3 +1,4 @@
+import { FastTip } from '../../components/FastTip'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { SENSOR_LEVELS, SensorBadge } from '../../components/SensorBadge'
 import { SyntheticToggle } from '../../components/SyntheticToggle'
@@ -35,11 +36,22 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    датчиков, и 100 кружков в 140 px сливались в сплошную колонну. Все датчики пикета —
    в списке под схемой.
 
+   С MOS-265 (главная — эта схема) значками рисуются только «высокий» и «наблюдать»
+   плюс кольца ППР: на Гамме 1 075 датчиков из 1 081 в норме, и серые кружки
+   прятали шесть рискованных. Пикет, где все в норме, — серый штрих на оси; при
+   масштабе от ПОДПИСЬ_ОТ px на пикет рядом подпись «N в норме». «+N» — только
+   рискованные, не влезшие в стопку.
+
    /map?channel=<id> выбирает коллектор (index.tsx), здесь — линию и пикет
    датчика, приближает полосу к пикету и раскрывает строку датчика. */
 
 // Сколько значков рисуем в стопке пикета: красные и жёлтые сверху, остальное — «+N».
 const НА_ПИКЕТЕ = 8
+// С какого масштаба (px на пикет) у стопки серое число датчиков в норме, и с какого —
+// подпись целиком «N в норме»: при 9 px шрифта она шириной около 50 px и уже налезает
+// на соседний пикет.
+const ПОДПИСЬ_ОТ = 24
+const ПОДПИСЬ_ЦЕЛИКОМ_ОТ = 60
 
 // «объект Каппа ДУ» — узел демо SL.0; /map?demo=sensors открывает его коллектор.
 export const DEMO_NODE = 5657
@@ -59,21 +71,26 @@ interface Выбор {
   picket: number
 }
 
+const поППР = (s: Pick<SensorRow, 'reasons'>) => s.reasons.some((x) => x.kind === 'plan')
+
 // Значок датчика: high — треугольник, watch — ромб, normal — круг (форма читается
 // без цвета, как на оси). Датчик, снятый по графику ППР, обведён кольцом --state-info.
+// ringOnly — на оси у датчика в норме под ППР рисуем одно кольцо, без круга.
 function Dot({
   s,
   cx,
   cy,
   r,
+  ringOnly,
 }: {
   s: Pick<SensorRow, 'level' | 'reasons'>
   cx: number
   cy: number
   r: number
+  ringOnly?: boolean
 }) {
   const c = SENSOR_LEVELS[s.level]
-  const p = { fill: c.fill, stroke: c.border, 'stroke-width': 1 }
+  const p = { fill: c.fill, stroke: c.border, 'stroke-width': 1, 'data-level': s.level }
   const shape =
     s.level === 'high' ? (
       <polygon
@@ -90,8 +107,8 @@ function Dot({
     )
   return (
     <>
-      {shape}
-      {s.reasons.some((x) => x.kind === 'plan') && (
+      {!ringOnly && shape}
+      {поППР(s) && (
         <circle
           cx={cx}
           cy={cy}
@@ -112,6 +129,7 @@ export function SensorDemo({
   synthetic,
   channel,
   scrollTo,
+  node,
 }: {
   collector: number
   collectorName: string
@@ -121,6 +139,8 @@ export function SensorDemo({
   // Датчик из адреса /map?channel=<id>.
   channel?: number
   scrollTo?: boolean
+  // Узел дерева объектов слева («Шкаф ОПС объект Вита»): только датчики его участков.
+  node?: { name: string; sections: Set<number> } | null
 }) {
   const [data, setData] = useState<SensorRiskPage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -168,11 +188,16 @@ export function SensorDemo({
     () => new Map(sections.map((s) => [s.section_id, s.smvu_key])),
     [sections],
   )
-  const наОси = useMemo(
-    () => (data?.items ?? []).filter((s): s is ПоПикету => s.picket != null),
-    [data],
+  // До 28.09.2026 узел дерева отбирал только ось «по участкам», а здесь не менялось ничего.
+  const датчики = useMemo(
+    () =>
+      node
+        ? (data?.items ?? []).filter((s) => s.section_id != null && node.sections.has(s.section_id))
+        : (data?.items ?? []),
+    [data, node],
   )
-  const безПикета = (data?.items.length ?? 0) - наОси.length
+  const наОси = useMemo(() => датчики.filter((s): s is ПоПикету => s.picket != null), [датчики])
+  const безПикета = датчики.length - наОси.length
   const lines = useMemo(() => линииДатчиков(наОси, ключУчастка), [наОси, ключУчастка])
   const prefixOf = (id: number) => lines.find(([, v]) => v.some((s) => s.channel_id === id))?.[0]
 
@@ -205,7 +230,7 @@ export function SensorDemo({
     const top = наОси[0]
     setPick(top ? { prefix: prefixOf(top.channel_id)!, picket: top.picket } : null)
     setOpen(top?.channel_id ?? null)
-  }, [data, channel])
+  }, [data, channel, node])
 
   useEffect(() => {
     if (!scrollTo || !data) return
@@ -229,7 +254,7 @@ export function SensorDemo({
     s.level !== 'normal' || s.channel_id === open || s.reasons.some((r) => r.kind === 'plan')
   const shownList = allNormal ? list : list.filter(важный)
   const свёрнуто = list.length - shownList.length
-  const count = (l: SensorLevel) => data?.items.filter((s) => s.level === l).length ?? 0
+  const count = (l: SensorLevel) => датчики.filter((s) => s.level === l).length
 
   return (
     <section
@@ -242,11 +267,12 @@ export function SensorDemo({
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-base font-semibold" style="font-family:var(--font-display)">
           Прогноз по датчикам · {collectorName}
+          {node && ` · ${node.name}`}
         </h2>
         {data && (
           <span class="text-sm" style="color:var(--text-secondary)">
-            {срезРасчёта(data.as_of, formatDateTime)} · {датчиков(data.items.length)}: высокий риск
-            — {count('high')}, наблюдать — {count('watch')}, норма — {count('normal')}
+            {срезРасчёта(data.as_of, formatDateTime)} · {датчиков(датчики.length)}: высокий риск —{' '}
+            {count('high')}, наблюдать — {count('watch')}, норма — {count('normal')}
           </span>
         )}
       </div>
@@ -255,9 +281,11 @@ export function SensorDemo({
 
       {!data ? (
         <p style="color:var(--text-muted)">Загрузка прогноза по датчикам…</p>
-      ) : data.items.length === 0 ? (
+      ) : датчики.length === 0 ? (
         <p class="text-sm" style="color:var(--text-muted)">
-          На коллекторе нет датчиков с прогнозом.
+          {node
+            ? 'У этого узла нет датчиков с прогнозом.'
+            : 'На коллекторе нет датчиков с прогнозом.'}
         </p>
       ) : (
         <>
@@ -302,8 +330,8 @@ export function SensorDemo({
           {свёрнуто > 0 && (
             <button
               type="button"
-              class="self-start text-sm underline"
-              style="color:var(--text-secondary)"
+              class="self-start text-sm font-semibold underline underline-offset-2"
+              style="color:var(--link)"
               onClick={() => setAllNormal(true)}
             >
               Показать ещё {свёрнуто} в норме
@@ -344,22 +372,35 @@ function SensorLine({
     return () => ro.disconnect()
   }, [])
 
-  // Датчики по пикетам, внутри стопки снизу вверх по возрастанию балла — красные наверху.
+  // Датчики по пикетам. В стопке снизу вверх: кольца ППР датчиков в норме, потом
+  // рискованные по возрастанию балла — красные наверху; не больше НА_ПИКЕТЕ, кольца
+  // уступают место риску. Датчики в норме — числом normal.
   const stacks = useMemo(() => {
     const m = new Map<number, SensorRow[]>()
     for (const s of items) m.set(s.picket, [...(m.get(s.picket) ?? []), s])
-    for (const v of m.values()) v.sort((a, b) => a.score - b.score)
-    return [...m.entries()].sort((a, b) => a[0] - b[0])
+    return [...m.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([pk, v]) => {
+        const риск = v.filter((s) => s.level !== 'normal').sort((a, b) => a.score - b.score)
+        const ппр = v.filter((s) => s.level === 'normal' && поППР(s))
+        const shown = [...ппр, ...риск].slice(-НА_ПИКЕТЕ)
+        const hidden = риск.length - shown.filter((s) => s.level !== 'normal').length
+        return { pk, all: v, shown, hidden, normal: v.length - риск.length }
+      })
   }, [items])
 
-  const lo = stacks[0]?.[0] ?? 0
-  const max = Math.max(1, (stacks.at(-1)?.[0] ?? 1) - lo)
+  const lo = stacks[0]?.pk ?? 0
+  const max = Math.max(1, (stacks.at(-1)?.pk ?? 1) - lo)
   const [v0, v1] = view ?? [0, max]
   const inner = Math.max(1, width - PAD * 2)
   const x = (pk: number) => PAD + ((pk - lo - v0) / (v1 - v0)) * inner
-  const tallest = Math.min(НА_ПИКЕТЕ, Math.max(...stacks.map(([, v]) => v.length)))
+  const подпись = inner / (v1 - v0) >= ПОДПИСЬ_ОТ
+  const целиком = inner / (v1 - v0) >= ПОДПИСЬ_ЦЕЛИКОМ_ОТ
+  // Под подпись «N в норме» стопка поднимается на 12 px.
+  const под = подпись ? 12 : 0
+  const tallest = Math.max(0, ...stacks.map((st) => st.shown.length))
   const step = 7
-  const baseY = 22 + Math.max(1, tallest * step)
+  const baseY = 22 + под + Math.max(1, tallest * step)
   const height = baseY + BASE_GAP
   const tick = tickStep((v1 - v0) / inner)
   const ticks: number[] = []
@@ -393,14 +434,14 @@ function SensorLine({
           role="group"
           aria-label={`Масштаб полосы датчиков, ${имя}`}
           class="inline-flex flex-wrap rounded-md overflow-hidden"
-          style="border:1px solid var(--border-strong)"
+          style="border:1px solid var(--accent-border)"
         >
           {кнопки.map(([надпись, выкл, действие], i) => (
             <button
               key={надпись}
               type="button"
-              class="px-3 py-1 text-sm bg-[var(--bg-surface)] enabled:hover:bg-[var(--bg-row-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-              style={`color:var(--text-primary)${i > 0 ? '; border-left:1px solid var(--border-subtle)' : ''}`}
+              class="px-3 py-1 text-sm font-semibold bg-[var(--bg-surface)] enabled:hover:bg-[var(--accent-tint)] disabled:opacity-40"
+              style={`color:var(--accent-text)${i > 0 ? '; border-left:1px solid var(--accent-border)' : ''}`}
               disabled={выкл}
               onClick={действие}
             >
@@ -410,99 +451,134 @@ function SensorLine({
         </div>
       </div>
 
-      <svg
-        ref={svgRef}
-        role="img"
-        aria-label={`Датчики, ${имя}, по пикетам`}
-        class="w-full"
-        height={height}
-        viewBox={`0 0 ${width || 1} ${height}`}
-        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
-        onWheel={onWheel}
-      >
-        {width > 0 && (
-          <>
-            {picket != null && (
-              <rect
-                x={x(picket) - 7}
-                y={4}
-                width={14}
-                height={baseY - 2}
-                rx={4}
-                fill="var(--row-selected)"
-                stroke="var(--brand-nav-marker)"
-              />
-            )}
-            <line x1={PAD} y1={baseY} x2={width - PAD} y2={baseY} stroke="var(--border-strong)" />
-            {ticks.map((pk) => (
-              <g key={pk} pointer-events="none">
-                <line
-                  x1={x(pk)}
-                  y1={baseY}
-                  x2={x(pk)}
-                  y2={baseY + 5}
-                  stroke="var(--border-strong)"
+      <FastTip>
+        <svg
+          ref={svgRef}
+          role="img"
+          aria-label={`Датчики, ${имя}, по пикетам`}
+          class="w-full"
+          height={height}
+          viewBox={`0 0 ${width || 1} ${height}`}
+          style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
+          onWheel={onWheel}
+        >
+          {width > 0 && (
+            <>
+              {picket != null && (
+                <rect
+                  x={x(picket) - 7}
+                  y={4}
+                  width={14}
+                  height={baseY - 2}
+                  rx={4}
+                  fill="var(--row-selected)"
+                  stroke="var(--brand-nav-marker)"
                 />
-                <text
-                  x={x(pk)}
-                  y={baseY + 18}
-                  font-size="11"
-                  text-anchor="middle"
-                  fill="var(--text-muted)"
-                >
-                  ПК {pk}
-                </text>
-              </g>
-            ))}
-            {stacks
-              .filter(([pk]) => pk >= lo + v0 && pk <= lo + v1)
-              .map(([pk, v]) => {
-                const shown = v.slice(-НА_ПИКЕТЕ)
-                const hidden = v.length - shown.length
-                return (
-                  <g
-                    key={pk}
-                    data-picket={pk}
-                    data-selected={pk === picket ? '' : undefined}
-                    style="cursor:pointer"
-                    onClick={() => onPick(pk)}
+              )}
+              <line x1={PAD} y1={baseY} x2={width - PAD} y2={baseY} stroke="var(--border-strong)" />
+              {ticks.map((pk) => (
+                <g key={pk} pointer-events="none">
+                  <line
+                    x1={x(pk)}
+                    y1={baseY}
+                    x2={x(pk)}
+                    y2={baseY + 5}
+                    stroke="var(--border-strong)"
+                  />
+                  <text
+                    x={x(pk)}
+                    y={baseY + 18}
+                    font-size="11"
+                    text-anchor="middle"
+                    fill="var(--text-muted)"
                   >
-                    {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
-                      неё, а не прямым ребёнком <g>: `g > title` на оси считает метки
-                      участков (US-05 сц. 6), датчики туда попадать не должны. */}
-                    <rect
-                      x={x(pk) - 5}
-                      y={baseY - shown.length * step - (hidden ? 18 : 6)}
-                      width={10}
-                      height={shown.length * step + (hidden ? 18 : 6)}
-                      fill="transparent"
+                    ПК {pk}
+                  </text>
+                </g>
+              ))}
+              {stacks
+                .filter(({ pk }) => pk >= lo + v0 && pk <= lo + v1)
+                .map(({ pk, all, shown, hidden, normal }) => {
+                  const низ = baseY - 5 - (normal > 0 ? под : 0)
+                  const верх = shown.length
+                    ? низ - (shown.length - 1) * step - 5 - (hidden ? 12 : 0)
+                    : baseY - 6 - (normal > 0 ? под : 0)
+                  return (
+                    <g
+                      key={pk}
+                      data-picket={pk}
+                      // Число в норме — и на стопке, где подписи при мелком масштабе нет.
+                      data-normal={normal}
+                      data-selected={pk === picket ? '' : undefined}
+                      style="cursor:pointer"
+                      onClick={() => onPick(pk)}
                     >
-                      <title>
-                        ПК{pk}: {датчиков(v.length)}, высокий риск —{' '}
-                        {v.filter((s) => s.level === 'high').length}
-                      </title>
-                    </rect>
-                    {shown.map((s, i) => (
-                      <Dot key={s.channel_id} s={s} cx={x(pk)} cy={baseY - 5 - i * step} r={2.6} />
-                    ))}
-                    {hidden > 0 && (
-                      <text
-                        data-hidden={hidden}
-                        x={x(pk)}
-                        y={baseY - shown.length * step - 6}
-                        font-size="10"
-                        text-anchor="middle"
-                        fill="var(--text-muted)"
+                      {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
+                      неё, а не прямым ребёнком <g>: `g > desc` на оси считает метки
+                      участков (US-05 сц. 6), датчики туда попадать не должны. */}
+                      <rect
+                        x={x(pk) - 5}
+                        y={верх - 2}
+                        width={10}
+                        height={baseY - верх + 2}
+                        fill="transparent"
                       >
-                        +{hidden}
-                      </text>
-                    )}
-                  </g>
-                )
-              })}
-          </>
-        )}
-      </svg>
+                        <desc>
+                          ПК{pk}: {датчиков(all.length)}, высокий риск —{' '}
+                          {all.filter((s) => s.level === 'high').length}, в норме — {normal}
+                        </desc>
+                      </rect>
+                      {/* Пикет, где все в норме, — серый штрих 1×6 px на оси. */}
+                      {shown.length === 0 && (
+                        <rect
+                          x={x(pk) - 0.5}
+                          y={baseY - 6}
+                          width={1}
+                          height={6}
+                          fill="var(--text-muted)"
+                        />
+                      )}
+                      {shown.map((s, i) => (
+                        <Dot
+                          key={s.channel_id}
+                          s={s}
+                          cx={x(pk)}
+                          cy={низ - i * step}
+                          r={2.6}
+                          ringOnly={s.level === 'normal'}
+                        />
+                      ))}
+                      {hidden > 0 && (
+                        <text
+                          data-hidden={hidden}
+                          x={x(pk)}
+                          y={низ - (shown.length - 1) * step - 8}
+                          font-size="10"
+                          text-anchor="middle"
+                          fill="var(--text-muted)"
+                        >
+                          +{hidden}
+                        </text>
+                      )}
+                      {подпись && normal > 0 && (
+                        <text
+                          data-normal={normal}
+                          x={x(pk)}
+                          y={baseY - (shown.length ? 3 : 9)}
+                          font-size="9"
+                          text-anchor="middle"
+                          fill="var(--text-muted)"
+                        >
+                          {целиком ? `${normal} в норме` : normal}
+                        </text>
+                      )}
+                    </g>
+                  )
+                })}
+            </>
+          )}
+        </svg>
+      </FastTip>
     </div>
   )
 }
@@ -520,9 +596,14 @@ function Legend() {
       {ORDER.map((l) => (
         <li key={l} class="flex items-center gap-2">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-            <Dot s={{ level: l, reasons: [] }} cx={7} cy={7} r={4} />
+            {l === 'normal' ? (
+              <rect x={6.5} y={4} width={1} height={6} fill="var(--text-muted)" />
+            ) : (
+              <Dot s={{ level: l, reasons: [] }} cx={7} cy={7} r={4} />
+            )}
           </svg>
           {SENSOR_LEVELS[l].label}
+          {l === 'normal' && ' — штрих на оси, при приближении серое число у пикета'}
         </li>
       ))}
       <li class="flex items-center gap-2">

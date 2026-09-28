@@ -63,9 +63,7 @@ export function SettingsScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Настройки
-      </h1>
+      <h1 style="font-family:var(--font-display)">Настройки</h1>
 
       {forbidden && (
         <p style="color:var(--state-error)">Настройки доступны только администратору.</p>
@@ -74,26 +72,24 @@ export function SettingsScreen(_props: Record<string, unknown>) {
       {!items && !forbidden && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
       {items && (
-        <table class="w-full text-sm" style="border-collapse:collapse">
-          <thead>
-            <tr>
-              {['Настройка', 'Значение', 'Единица', 'Изменено', ''].map((h) => (
-                <th
-                  key={h}
-                  class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                  style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                >
-                  {h}
-                </th>
+        <div class="card p-0 overflow-x-auto">
+          <table class="w-full text-sm" style="border-collapse:collapse">
+            <thead>
+              <tr>
+                {['Настройка', 'Значение', 'Единица', 'Изменено', ''].map((h) => (
+                  <th key={h} class="th">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((s) => (
+                <Строка key={s.key} s={s} />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((s) => (
-              <Строка key={s.key} s={s} />
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   )
@@ -154,12 +150,7 @@ function Строка({ s: начальная }: { s: Setting }) {
       <td class="px-2 py-2">{s.unit ?? '—'}</td>
       <td class="px-2 py-2 num">{formatDateTime(s.changed_at)}</td>
       <td class="px-2 py-2">
-        <button
-          type="submit"
-          form={`setting-${s.key}`}
-          class="px-3 py-1 rounded text-sm"
-          style={inputStyle}
-        >
+        <button type="submit" form={`setting-${s.key}`} class="btn btn-primary">
           Сохранить
         </button>
         {итог && (

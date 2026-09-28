@@ -2,13 +2,17 @@
 // MOS-123 (план 5.13). Один опрос на приложение раз в 60 с (src/lib/poll.ts).
 // page.clock сокращает минуту до мгновения; запросы идут на живой стенд.
 import { expect, test } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
 
-const времяОбновления = /обновлено в (\d\d:\d\d:\d\d)/
+// E2E_BUNDLE=dist — проверка шапки до выкладки.
+test.beforeEach(async ({ page }) => свойБандл(page))
+
+const времяОбновления = /обновлена в (\d\d:\d\d:\d\d)/
 
 for (const [экран, путь, метод] of [
   ['дашборд', '/dashboard?view=sections', '/api/risks'],
   ['журнал прогнозов', '/log', '/api/forecasts'],
-  ['схема коллектора', '/map', '/api/risks'],
+  ['схема коллектора', '/map', '/api/sensor-risk/summary'],
   ['заявки', '/orders', '/api/orders'],
 ] as const) {
   test(`US-02 сц. 2: экран обновляется сам — ${экран}`, async ({ page }) => {
@@ -25,7 +29,7 @@ for (const [экран, путь, метод] of [
     const повтор = page.waitForRequest((r) => r.url().includes(метод))
     await page.clock.runFor(60_000)
     await повтор
-    await expect(шапка).not.toContainText(`обновлено в ${было}`)
+    await expect(шапка).not.toContainText(`обновлена в ${было}`)
     await expect(шапка).toContainText(времяОбновления)
   })
 }
@@ -46,11 +50,11 @@ test('US-02 сц. 2: после ошибки опроса время в шапк
   const повтор = page.waitForResponse((r) => r.url().includes('/api/risks'))
   await page.clock.runFor(60_000)
   expect((await повтор).status()).toBe(500)
-  await expect(шапка).toContainText(`обновлено в ${было}`)
+  await expect(шапка).toContainText(`обновлена в ${было}`)
 })
 
 test('US-02 сц. 2: на экране без опроса времени обновления нет', async ({ page }) => {
   await page.goto('/admin/sources')
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
-  await expect(page.getByRole('banner')).not.toContainText('обновлено в')
+  await expect(page.getByRole('banner')).not.toContainText('обновлена в')
 })

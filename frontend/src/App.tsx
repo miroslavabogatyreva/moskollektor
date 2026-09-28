@@ -23,7 +23,7 @@ function NotFound(_props: Record<string, unknown>) {
   return (
     <main class="p-5">
       <p style="color:var(--text-muted)">
-        Такой страницы нет. Вернуться на <a href="/dashboard">дашборд</a>.
+        Такой страницы нет. Вернуться на <a href="/map">схему</a>.
       </p>
     </main>
   )
@@ -34,7 +34,7 @@ export function App() {
   const [me, setMe] = useState<AuthUser | null>(null)
 
   useEffect(() => {
-    if (window.location.pathname === '/') route('/dashboard', true)
+    if (window.location.pathname === '/') route('/map', true)
   }, [])
 
   useEffect(() => {

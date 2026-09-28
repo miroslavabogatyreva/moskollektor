@@ -1,3 +1,4 @@
+import { FastTip } from '../../components/FastTip'
 import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { имяУчастка } from '../../lib/format'
@@ -182,14 +183,14 @@ export function AxisLine({
           role="group"
           aria-label={`Масштаб линии ${prefix}`}
           class="inline-flex flex-wrap rounded-md overflow-hidden"
-          style="border:1px solid var(--border-strong)"
+          style="border:1px solid var(--accent-border)"
         >
           {кнопки.map(([имя, выключена, действие], i) => (
             <button
               key={имя}
               type="button"
-              class="px-3 py-1 text-sm bg-[var(--bg-surface)] enabled:hover:bg-[var(--bg-row-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-              style={`color:var(--text-primary)${i > 0 ? '; border-left:1px solid var(--border-subtle)' : ''}`}
+              class="px-3 py-1 text-sm font-semibold bg-[var(--bg-surface)] enabled:hover:bg-[var(--accent-tint)] disabled:opacity-40"
+              style={`color:var(--accent-text)${i > 0 ? '; border-left:1px solid var(--accent-border)' : ''}`}
               disabled={выключена}
               onClick={действие}
             >
@@ -199,87 +200,108 @@ export function AxisLine({
         </div>
       </div>
 
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${AXIS_WIDTH} ${L.height}`}
-        role="img"
-        aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${изУчастков(all.length)}`}
-        class="w-full"
-        height={L.height * PX_PER_UNIT}
-        style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
-        onWheel={onWheel}
-      >
-        {screenWidth != null && screenWidth > 0 && (
-          <>
-            <line
-              x1={PADDING}
-              y1={baselineY}
-              x2={AXIS_WIDTH - PADDING}
-              y2={baselineY}
-              stroke="var(--border-subtle)"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-            {/* Полосы — полупрозрачный штрих: на ч/б распечатке (US-05 сц. 5) чёрный
-            при 0,35 выходит светлее порога 128 и не закрывает силуэт значка поверх. */}
-            {bands.map((b, i) => (
+      <FastTip>
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${AXIS_WIDTH} ${L.height}`}
+          role="img"
+          aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${изУчастков(all.length)}`}
+          class="w-full"
+          height={L.height * PX_PER_UNIT}
+          style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
+          onWheel={onWheel}
+        >
+          {screenWidth != null && screenWidth > 0 && (
+            <>
               <line
-                key={i}
-                x1={b.from}
+                x1={PADDING}
                 y1={baselineY}
-                x2={b.to}
+                x2={AXIS_WIDTH - PADDING}
                 y2={baselineY}
-                stroke={bandColor(b.cls)}
-                stroke-opacity={0.35}
-                stroke-width={L.band}
+                stroke="var(--border-subtle)"
+                stroke-width="2"
                 stroke-linecap="round"
-                pointer-events="none"
               />
-            ))}
-            {ticks.map((pk) => (
-              <g key={pk} pointer-events="none">
+              {/* Полосы — полупрозрачный штрих: на ч/б распечатке (US-05 сц. 5) чёрный
+            при 0,35 выходит светлее порога 128 и не закрывает силуэт значка поверх. */}
+              {bands.map((b, i) => (
                 <line
-                  x1={x(pk)}
-                  y1={baselineY + L.band / 2 + 3}
-                  x2={x(pk)}
-                  y2={baselineY + L.band / 2 + 7}
-                  stroke="var(--border-strong)"
-                  stroke-width={1}
+                  key={i}
+                  x1={b.from}
+                  y1={baselineY}
+                  x2={b.to}
+                  y2={baselineY}
+                  stroke={bandColor(b.cls)}
+                  stroke-opacity={0.35}
+                  stroke-width={L.band}
+                  stroke-linecap="round"
+                  pointer-events="none"
                 />
-                <text
-                  x={x(pk)}
-                  y={baselineY + L.band / 2 + 19}
-                  font-size="11"
-                  text-anchor="middle"
-                  fill="var(--text-muted)"
-                >
-                  ПК {pk}
-                </text>
-              </g>
-            ))}
-            {visibleAxis.map((s) => {
-              const cls = classOf(s)
-              const title = `${имяУчастка(s.smvu_key)} · участок ${s.section_id} · ${riskLabel(cls)}`
-              const cx = x(s.picket)
-              const выбран = s.section_id === selected
-              const кольцо = выбран && (
-                <circle
-                  cx={cx}
-                  cy={baselineY}
-                  r={dense ? 7 : 9}
-                  fill="none"
-                  stroke="var(--brand-nav-marker)"
-                  stroke-width={2.5}
-                />
-              )
-              const метка = {
-                'data-section-id': s.section_id,
-                'data-selected': выбран ? '' : undefined,
-              }
+              ))}
+              {ticks.map((pk) => (
+                <g key={pk} pointer-events="none">
+                  <line
+                    x1={x(pk)}
+                    y1={baselineY + L.band / 2 + 3}
+                    x2={x(pk)}
+                    y2={baselineY + L.band / 2 + 7}
+                    stroke="var(--border-strong)"
+                    stroke-width={1}
+                  />
+                  <text
+                    x={x(pk)}
+                    y={baselineY + L.band / 2 + 19}
+                    font-size="11"
+                    text-anchor="middle"
+                    fill="var(--text-muted)"
+                  >
+                    ПК {pk}
+                  </text>
+                </g>
+              ))}
+              {visibleAxis.map((s) => {
+                const cls = classOf(s)
+                const title = `${имяУчастка(s.smvu_key)} · участок ${s.section_id} · ${riskLabel(cls)}`
+                const cx = x(s.picket)
+                const выбран = s.section_id === selected
+                const кольцо = выбран && (
+                  <circle
+                    cx={cx}
+                    cy={baselineY}
+                    r={dense ? 7 : 9}
+                    fill="none"
+                    stroke="var(--brand-nav-marker)"
+                    stroke-width={2.5}
+                  />
+                )
+                const метка = {
+                  'data-section-id': s.section_id,
+                  'data-selected': выбран ? '' : undefined,
+                }
 
-              // Густо — только значок на оси, без номера (правило плотности,
-              // risk.ts): рамка 20×20 перекрыла бы соседей на этой оси.
-              if (dense) {
+                // Густо — только значок на оси, без номера (правило плотности,
+                // risk.ts): рамка 20×20 перекрыла бы соседей на этой оси.
+                if (dense) {
+                  return (
+                    <g
+                      key={s.section_id}
+                      {...метка}
+                      style="cursor:pointer"
+                      onClick={() => route(`/objects/${s.section_id}`)}
+                    >
+                      <desc>{title}</desc>
+                      {кольцо}
+                      {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
+                    через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
+                    видимого значка у 302 меток из 303 (линия 847). Кликается сама форма. */}
+                      <RiskMark cls={cls} cx={cx} cy={baselineY} size={L.mark} />
+                    </g>
+                  )
+                }
+
+                // Личность (рамка с номером на выноске) и состояние (значок на оси) —
+                // раздельно, как на экране заказчика: номер читается при любом цвете.
+                // Значок — последним: e2e US-05 сц. 5 снимает его как lastElementChild.
                 return (
                   <g
                     key={s.section_id}
@@ -287,63 +309,44 @@ export function AxisLine({
                     style="cursor:pointer"
                     onClick={() => route(`/objects/${s.section_id}`)}
                   >
-                    <title>{title}</title>
+                    <desc>{title}</desc>
                     {кольцо}
-                    {/* Цели клика 6×6 поверх формы нет нарочно: метки густой линии стоят
-                    через 3,8 px, и невидимый квадрат соседа перехватывал клик в центр
-                    видимого значка у 302 меток из 303 (линия 847). Кликается сама форма. */}
+                    <line
+                      x1={cx}
+                      y1={24}
+                      x2={cx}
+                      y2={baselineY - L.band / 2}
+                      stroke="var(--border-strong)"
+                      stroke-width={1}
+                    />
+                    <rect
+                      x={cx - 10}
+                      y={4}
+                      width={20}
+                      height={20}
+                      rx={4}
+                      fill="var(--bg-table)"
+                      stroke="var(--border-strong)"
+                      stroke-width={1}
+                    />
+                    <text
+                      x={cx}
+                      y={18}
+                      font-size="10"
+                      font-weight="600"
+                      text-anchor="middle"
+                      fill="var(--text-primary)"
+                    >
+                      {Math.round(s.picket)}
+                    </text>
                     <RiskMark cls={cls} cx={cx} cy={baselineY} size={L.mark} />
                   </g>
                 )
-              }
-
-              // Личность (рамка с номером на выноске) и состояние (значок на оси) —
-              // раздельно, как на экране заказчика: номер читается при любом цвете.
-              // Значок — последним: e2e US-05 сц. 5 снимает его как lastElementChild.
-              return (
-                <g
-                  key={s.section_id}
-                  {...метка}
-                  style="cursor:pointer"
-                  onClick={() => route(`/objects/${s.section_id}`)}
-                >
-                  <title>{title}</title>
-                  {кольцо}
-                  <line
-                    x1={cx}
-                    y1={24}
-                    x2={cx}
-                    y2={baselineY - L.band / 2}
-                    stroke="var(--border-strong)"
-                    stroke-width={1}
-                  />
-                  <rect
-                    x={cx - 10}
-                    y={4}
-                    width={20}
-                    height={20}
-                    rx={4}
-                    fill="var(--bg-table)"
-                    stroke="var(--border-strong)"
-                    stroke-width={1}
-                  />
-                  <text
-                    x={cx}
-                    y={18}
-                    font-size="10"
-                    font-weight="600"
-                    text-anchor="middle"
-                    fill="var(--text-primary)"
-                  >
-                    {Math.round(s.picket)}
-                  </text>
-                  <RiskMark cls={cls} cx={cx} cy={baselineY} size={L.mark} />
-                </g>
-              )
-            })}
-          </>
-        )}
-      </svg>
+              })}
+            </>
+          )}
+        </svg>
+      </FastTip>
     </div>
   )
 }

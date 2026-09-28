@@ -109,9 +109,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Журнал действий
-      </h1>
+      <h1 style="font-family:var(--font-display)">Журнал действий</h1>
 
       {forbidden && (
         <p style="color:var(--state-error)">Журнал действий доступен только администратору.</p>
@@ -156,43 +154,41 @@ export function AuditScreen(_props: Record<string, unknown>) {
                 style={inputStyle}
               />
             </label>
-            <button type="submit" class="px-3 py-1 rounded text-sm" style={inputStyle}>
+            <button type="submit" class="btn btn-primary">
               Найти
             </button>
             {items && <span class="num">найдено {total}</span>}
           </form>
 
-          <table class="w-full text-sm" style="border-collapse:collapse">
-            <thead>
-              <tr>
-                {['Время', 'Логин', 'Метод', 'Путь', 'Код ответа', 'Подробности'].map((h) => (
-                  <th
-                    key={h}
-                    class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                    style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items?.map((r) => (
-                <tr key={r.action_id} style="border-bottom:1px solid var(--border-subtle)">
-                  <td class="px-2 py-2 num">{formatDateTime(r.occurred_at, true)}</td>
-                  <td class="px-2 py-2">{r.login ?? '—'}</td>
-                  <td class="px-2 py-2">{r.method}</td>
-                  <td class="px-2 py-2" style="word-break:break-all">
-                    {r.path}
-                  </td>
-                  <td class="px-2 py-2 num">{r.status_code}</td>
-                  <td class="px-2 py-2" style="word-break:break-all">
-                    {подробности(r.details)}
-                  </td>
+          <div class="card p-0 overflow-x-auto">
+            <table class="w-full text-sm" style="border-collapse:collapse">
+              <thead>
+                <tr>
+                  {['Время', 'Логин', 'Метод', 'Путь', 'Код ответа', 'Подробности'].map((h) => (
+                    <th key={h} class="th">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {items?.map((r) => (
+                  <tr key={r.action_id} style="border-bottom:1px solid var(--border-subtle)">
+                    <td class="px-2 py-2 num">{formatDateTime(r.occurred_at, true)}</td>
+                    <td class="px-2 py-2">{r.login ?? '—'}</td>
+                    <td class="px-2 py-2">{r.method}</td>
+                    <td class="px-2 py-2" style="word-break:break-all">
+                      {r.path}
+                    </td>
+                    <td class="px-2 py-2 num">{r.status_code}</td>
+                    <td class="px-2 py-2" style="word-break:break-all">
+                      {подробности(r.details)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
           {items && total > PAGE_SIZE && (
@@ -201,8 +197,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
                 type="button"
                 disabled={offset === 0}
                 onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-                class="px-2 py-1 rounded disabled:opacity-50"
-                style={inputStyle}
+                class="btn btn-secondary"
               >
                 ← Новее
               </button>
@@ -213,8 +208,7 @@ export function AuditScreen(_props: Record<string, unknown>) {
                 type="button"
                 disabled={offset + items.length >= total}
                 onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                class="px-2 py-1 rounded disabled:opacity-50"
-                style={inputStyle}
+                class="btn btn-secondary"
               >
                 Старее →
               </button>

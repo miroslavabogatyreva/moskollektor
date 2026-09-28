@@ -13,7 +13,7 @@ export function SyntheticToggle({ on }: { on: boolean }) {
     route(сПараметром(pathname, search, 'synthetic', on ? '0' : null), true)
   }
   return (
-    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+    <div data-tour="synthetic" class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
       <label class="flex items-center gap-2 cursor-pointer" style="color:var(--text-primary)">
         <input
           type="checkbox"
