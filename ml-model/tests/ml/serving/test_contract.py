@@ -1,8 +1,7 @@
-"""Проверка HTTP-контракта на настоящей модели из models/current/.
+"""Проверка HTTP-контракта на сохранённых исследовательских весах v3..
 
-Модели ещё нет — все тесты этого файла пропускаются. Мок-модель не создаётся:
-проверять контракт на выдуманных весах бессмысленно, а данные заказчика синтезировать
-запрещено.
+Веса входят в поставку: их отсутствие должно ломать проверку. Входы из null
+и нулей проверяют формат HTTP, а не качество прогноза.
 """
 
 import json
@@ -16,16 +15,10 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src"))
 
 # ML_MODEL_DIR позволяет прогнать те же тесты на модели-кандидате, не подменяя current.
-MODEL_DIR = Path(os.environ.get("ML_MODEL_DIR", ROOT / "models" / "current"))
+MODEL_DIR = Path(os.environ.get("ML_MODEL_DIR", ROOT / "models" / "lgbm-v3-bag-2026.09.21"))
 META_PATH = MODEL_DIR / "model_meta.json"
 IS_BAG = META_PATH.is_file() and json.loads(META_PATH.read_text(encoding="utf-8")).get(
     "model_format") == "v3-bag"
-HAS_MODEL = META_PATH.is_file() and (IS_BAG or (MODEL_DIR / "model.txt").is_file())
-
-pytestmark = pytest.mark.skipif(
-    not HAS_MODEL,
-    reason=f"нет обученной модели в {MODEL_DIR} (model.txt или мешок v3 + model_meta.json)",
-)
 
 
 @pytest.fixture(scope="module")

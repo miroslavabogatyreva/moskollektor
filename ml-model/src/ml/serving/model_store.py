@@ -17,9 +17,8 @@ import numpy as np
 
 from . import v3_bag
 
-# Относительный путь от корня проекта (правило раскладки проекта). В образе WORKDIR=/app,
-# поэтому тот же относительный путь работает и в контейнере.
-DEFAULT_MODEL_DIR = "models/v3_collector_20260922"
+# Поставляемые исследовательские веса: путь не зависит от рабочего каталога.
+DEFAULT_MODEL_DIR = str(Path(__file__).resolve().parents[3] / "models/lgbm-v3-bag-2026.09.21")
 
 MODEL_FILE = "model.txt"
 META_FILE = "model_meta.json"
