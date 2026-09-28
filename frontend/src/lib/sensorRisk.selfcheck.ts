@@ -11,7 +11,6 @@ import {
   синтетикаВключена,
   страница,
   sensorRiskUrl,
-  шагСтопки,
 } from './sensorRisk.ts'
 
 let failed = false
@@ -88,9 +87,6 @@ assertEqual(
   ],
   'линии по префиксу, «—» в конце',
 )
-
-assertEqual(шагСтопки(10), 7, 'невысокая стопка — 7 px')
-assertEqual(шагСтопки(100), 1.4, '100 датчиков — стопка не выше 140 px')
 
 if (failed) process.exitCode = 1
 else console.log('sensorRisk.ts: всё сходится')

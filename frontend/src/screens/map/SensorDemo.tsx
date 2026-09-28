@@ -9,7 +9,6 @@ import {
   линииДатчиков,
   sensorRiskUrl,
   срезРасчёта,
-  шагСтопки,
   type SensorLevel,
   type SensorRiskPage,
   type SensorRow,
@@ -28,11 +27,16 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    Полоса — одна на линию-префикс тега, как ось AxisLine.tsx: у «объекта Мю»
    две линии (914 и 915), и пикет 0 у каждой свой — на общей полосе датчики
    разных линий легли бы друг на друга. Каждый датчик — точка на своём пикете,
-   датчики одного пикета стопкой (на ПК632 Каппы их 42). На плотном коллекторе
-   стопка сжимается до 140 px (шагСтопки, sensorRisk.ts).
+   датчики одного пикета стопкой. В стопке не больше НА_ПИКЕТЕ самых рискованных
+   значков, остальные — числом «+N» над ней: на ПК632 коллектора «объект Каппа» 100
+   датчиков, и 100 кружков в 140 px сливались в сплошную колонну. Все датчики пикета —
+   в списке под схемой.
 
    /map?channel=<id> выбирает коллектор (index.tsx), здесь — линию и пикет
    датчика, приближает полосу к пикету и раскрывает строку датчика. */
+
+// Сколько значков рисуем в стопке пикета: красные и жёлтые сверху, остальное — «+N».
+const НА_ПИКЕТЕ = 8
 
 // «объект Каппа ДУ» — узел демо SL.0; /map?demo=sensors открывает его коллектор.
 export const DEMO_NODE = 5657
@@ -119,6 +123,10 @@ export function SensorDemo({
   const [error, setError] = useState<string | null>(null)
   const [pick, setPick] = useState<Выбор | null>(null)
   const [open, setOpen] = useState<number | null>(null)
+  // Датчики «в норме» без плана ППР свёрнуты: на ПК632 коллектора «объект Каппа» их 94
+  // из 100, и список растягивал страницу на 5 000 px. Новый пикет — снова свёрнуто.
+  const [allNormal, setAllNormal] = useState(false)
+  useEffect(() => setAllNormal(false), [pick?.prefix, pick?.picket])
   const [views, setViews] = useState<Record<string, ViewRange | null>>({})
   const rootRef = useRef<HTMLElement>(null)
   // Датчик из адреса применяем один раз: иначе опрос раз в минуту возвращал бы
@@ -214,6 +222,10 @@ export function SensorDemo({
         .filter((s) => s.picket === pick.picket)
         .sort((a, b) => b.score - a.score)
     : []
+  const важный = (s: SensorRow) =>
+    s.level !== 'normal' || s.channel_id === open || s.reasons.some((r) => r.kind === 'plan')
+  const shownList = allNormal ? list : list.filter(важный)
+  const свёрнуто = list.length - shownList.length
   const count = (l: SensorLevel) => data?.items.filter((s) => s.level === l).length ?? 0
 
   return (
@@ -276,7 +288,7 @@ export function SensorDemo({
             {list.length} датчиков
           </h3>
           <ul class="flex flex-col gap-1" style="list-style:none; padding:0; margin:0">
-            {list.map((s) => (
+            {shownList.map((s) => (
               <SensorItem
                 key={s.channel_id}
                 s={s}
@@ -285,6 +297,16 @@ export function SensorDemo({
               />
             ))}
           </ul>
+          {свёрнуто > 0 && (
+            <button
+              type="button"
+              class="self-start text-sm underline"
+              style="color:var(--text-secondary)"
+              onClick={() => setAllNormal(true)}
+            >
+              Показать ещё {свёрнуто} в норме
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -333,9 +355,9 @@ function SensorLine({
   const [v0, v1] = view ?? [0, max]
   const inner = Math.max(1, width - PAD * 2)
   const x = (pk: number) => PAD + ((pk - lo - v0) / (v1 - v0)) * inner
-  const tallest = Math.max(...stacks.map(([, v]) => v.length))
-  const step = шагСтопки(tallest)
-  const baseY = 12 + Math.max(1, tallest * step)
+  const tallest = Math.min(НА_ПИКЕТЕ, Math.max(...stacks.map(([, v]) => v.length)))
+  const step = 7
+  const baseY = 22 + Math.max(1, tallest * step)
   const height = baseY + BASE_GAP
   const tick = tickStep((v1 - v0) / inner)
   const ticks: number[] = []
@@ -432,34 +454,50 @@ function SensorLine({
             ))}
             {stacks
               .filter(([pk]) => pk >= lo + v0 && pk <= lo + v1)
-              .map(([pk, v]) => (
-                <g
-                  key={pk}
-                  data-picket={pk}
-                  data-selected={pk === picket ? '' : undefined}
-                  style="cursor:pointer"
-                  onClick={() => onPick(pk)}
-                >
-                  {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
+              .map(([pk, v]) => {
+                const shown = v.slice(-НА_ПИКЕТЕ)
+                const hidden = v.length - shown.length
+                return (
+                  <g
+                    key={pk}
+                    data-picket={pk}
+                    data-selected={pk === picket ? '' : undefined}
+                    style="cursor:pointer"
+                    onClick={() => onPick(pk)}
+                  >
+                    {/* Цель клика — вся стопка, а не точка в 6 px. Подсказка — внутри
                       неё, а не прямым ребёнком <g>: `g > title` на оси считает метки
                       участков (US-05 сц. 6), датчики туда попадать не должны. */}
-                  <rect
-                    x={x(pk) - 5}
-                    y={baseY - v.length * step - 6}
-                    width={10}
-                    height={v.length * step + 6}
-                    fill="transparent"
-                  >
-                    <title>
-                      ПК{pk}: {v.length} датч., высокий риск —{' '}
-                      {v.filter((s) => s.level === 'high').length}
-                    </title>
-                  </rect>
-                  {v.map((s, i) => (
-                    <Dot key={s.channel_id} s={s} cx={x(pk)} cy={baseY - 5 - i * step} r={2.6} />
-                  ))}
-                </g>
-              ))}
+                    <rect
+                      x={x(pk) - 5}
+                      y={baseY - shown.length * step - (hidden ? 18 : 6)}
+                      width={10}
+                      height={shown.length * step + (hidden ? 18 : 6)}
+                      fill="transparent"
+                    >
+                      <title>
+                        ПК{pk}: {v.length} датч., высокий риск —{' '}
+                        {v.filter((s) => s.level === 'high').length}
+                      </title>
+                    </rect>
+                    {shown.map((s, i) => (
+                      <Dot key={s.channel_id} s={s} cx={x(pk)} cy={baseY - 5 - i * step} r={2.6} />
+                    ))}
+                    {hidden > 0 && (
+                      <text
+                        data-hidden={hidden}
+                        x={x(pk)}
+                        y={baseY - shown.length * step - 6}
+                        font-size="10"
+                        text-anchor="middle"
+                        fill="var(--text-muted)"
+                      >
+                        +{hidden}
+                      </text>
+                    )}
+                  </g>
+                )
+              })}
           </>
         )}
       </svg>

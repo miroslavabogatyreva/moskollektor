@@ -193,6 +193,17 @@ async function живойПарк(page: Page, synthetic: boolean): Promise<Item[
 }
 
 export async function mockSensorRisk(page: Page): Promise<SensorMock> {
+  // E2E_BUNDLE=dist — локальная сборка вместо бандла стенда, API и /data — со стенда
+  // (тот же приём, что в sensor-demo.spec.ts): экран проверяется до выкладки.
+  const бандл = process.env.E2E_BUNDLE
+  if (бандл)
+    await page.route(
+      (url) => !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/data/'),
+      (r) => {
+        const путь = new URL(r.request().url()).pathname
+        r.fulfill({ path: путь.startsWith('/assets/') ? бандл + путь : `${бандл}/index.html` })
+      },
+    )
   if (ЖИВОЙ) {
     const срезы = new Map([
       [true, await живойПарк(page, true)],
