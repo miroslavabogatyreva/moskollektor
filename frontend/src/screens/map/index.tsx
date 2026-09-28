@@ -8,6 +8,7 @@ import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
 import { ObjectTree, type TreeCollector } from './ObjectTree'
 import { riskLabel, type RiskClass } from './risk'
+import { DEMO_NODE, SensorDemo } from './SensorDemo'
 import type { RiskClassRow, Section } from './types'
 import { fullView, zoomView, type ViewRange } from './viewport'
 
@@ -32,10 +33,17 @@ import { fullView, zoomView, type ViewRange } from './viewport'
 // должны дословно совпасть с легендой на дашборде (зона fe) — текст согласован
 // в переписке к MOS-170, менять только вместе с ним.
 const LEGEND_STATES: RiskClass[] = ['high', 'normal', null]
+// «объект Каппа» — коллектор узла демо по датчикам (DEMO_NODE, «объект Каппа ДУ»).
+const KAPPA = 15
 
 // section — из адреса /map?section=<id> (preact-router кладёт параметры запроса
 // в props): переход «на схеме» из полосы уведомлений, Ф-90, MOS-245.
-export function MapScreen({ section }: { section?: string } & Record<string, unknown>) {
+// demo=sensors — /map?demo=sensors: выбрать «объект Каппа ДУ» и прокрутить к демо
+// прогноза по датчикам (SensorDemo.tsx).
+export function MapScreen({
+  section,
+  demo,
+}: { section?: string; demo?: string } & Record<string, unknown>) {
   const [всеУчастки, setВсеУчастки] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
@@ -66,6 +74,14 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
     if (sections && !sections.some((s) => s.collector === collector))
       setCollector(sections[0]?.collector ?? null)
   }, [sections])
+
+  // Демо по датчикам — только если коллектор Каппы роли виден (дерево сервер режет по роли).
+  const демоДатчиков = demo === 'sensors'
+  useEffect(() => {
+    if (!демоДатчиков || !sections?.some((s) => s.collector === KAPPA)) return
+    setCollector(KAPPA)
+    setNode(DEMO_NODE)
+  }, [sections, демоДатчиков])
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -233,7 +249,7 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
       {!sections && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
       {sections && (
-        <div class="flex gap-5 items-start">
+        <div class="flex flex-col md:flex-row gap-5 md:items-start">
           {treeError ? (
             <p class="text-sm w-64 shrink-0" style="color:var(--state-error)">
               Дерево объектов не загрузилось: {treeError}
@@ -337,6 +353,8 @@ export function MapScreen({ section }: { section?: string } & Record<string, unk
                 </span>
               ))}
             </div>
+
+            {collector === KAPPA && <SensorDemo scrollTo={демоДатчиков} />}
           </div>
         </div>
       )}
