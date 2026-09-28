@@ -7,7 +7,7 @@
 // /api и /data на стенд. E2E_SHOTS=<каталог> — ещё и снимки экранов на 1440 и 390.
 import { expect, test, type Page } from '@playwright/test'
 import { слово, type Формы } from '../src/lib/plural'
-import { процент } from '../src/lib/sensorRisk'
+import { главнаяПричина, процент } from '../src/lib/sensorRisk'
 import { mockSensorRisk, КАППА, МЮ, type SensorMock } from './helpers/sensor-mock'
 
 const ошибкиКонсоли = (page: Page) => {
@@ -57,10 +57,8 @@ test('SL.5: дашборд по датчикам — плитки, коллек�
   await expect(ячейки.nth(2)).toContainText(парк[0].name)
   await expect(ячейки.nth(3)).toHaveText(парк[0].sensor_kind)
   await expect(ячейки.nth(4)).toHaveText(`${парк[0].collector_name} · ПК${парк[0].picket}`)
-  const главная = парк[0].reasons
-    .filter((r) => r.kind !== 'plan')
-    .reduce((a, b) => (b.weight > a.weight ? b : a))
-  await expect(ячейки.nth(5)).toContainText(главная.text)
+  // Главная — причина, давшая уровень (run_sensors.причина_уровня), не самая весомая.
+  await expect(ячейки.nth(5)).toContainText(главнаяПричина(парк[0].reasons, парк[0].level)!.text)
 
   const страница = page.getByTestId('sensor-page')
   expect(число((await страница.innerText()).split('из')[1])).toBe(парк.length)
