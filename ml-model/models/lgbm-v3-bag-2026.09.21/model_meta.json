@@ -1,0 +1,218 @@
+{
+  "model_version": "lgbm-v3-bag-2026.09.21",
+  "model_format": "v3-bag",
+  "trained_at": "2026-09-21T10:21:01Z",
+  "feature_schema": "feat.v3",
+  "feature_names": [
+    "n_active_ch",
+    "n_rows_1d",
+    "n_rows_3d",
+    "n_rows_7d",
+    "n_rows_28d",
+    "n_bad_1d",
+    "n_bad_3d",
+    "n_bad_7d",
+    "n_bad_28d",
+    "n_undef_1d",
+    "n_undef_3d",
+    "n_undef_7d",
+    "n_undef_28d",
+    "n_alarm_1d",
+    "n_alarm_3d",
+    "n_alarm_7d",
+    "n_alarm_28d",
+    "n_ch_bad_1d",
+    "n_ch_bad_7d",
+    "n_ch_bad_28d",
+    "act_share_1d",
+    "act_share_7d",
+    "rate_7d",
+    "rate_28d",
+    "n_dying_ch",
+    "dying_share",
+    "ev_inc_6h",
+    "ev_inc_24h",
+    "ev_inc_72h",
+    "ev_inc_168h",
+    "ev_inc_672h",
+    "ev_fail_3h",
+    "ev_fail_24h",
+    "ev_fail_168h",
+    "ev_h_since_inc",
+    "ev_h_since_prev",
+    "ev_gap_last",
+    "ev_relapse_rate",
+    "ev_open_ch",
+    "is_rearm",
+    "hour",
+    "dow"
+  ],
+  "object_level": "pfx",
+  "directions": [
+    "sensor_failure"
+  ],
+  "train_rows": 42536,
+  "holdout_precision": 0.91,
+  "holdout_recall": 0.841,
+  "holdout_median_lead_hours": 22.6,
+  "holdout_report": "docs/research/alert_policy_20260920/holdout_20260920.md",
+  "alert_threshold": 0.63,
+  "horizon_h": 720,
+  "policy": "одно открытое предупреждение на коллектор; срок жизни horizon_h; новое — не раньше чем через час после старта инцидента",
+  "train_code_sha256": {
+    "train.py": "3ec380d78ae9713ab40f766877020c17bb9266dec9875b02bc88c97972a01369",
+    "prepare.py": "f642f0b280ae0d1f2038a5ffb5bb999d6515954e2836167b2c547c19df3b36ee",
+    "prepare_data.py": "1a5ab5e4e7eae539716a1faad4415a2327707d755503d1d19e1e889fa0ced1d2"
+  },
+  "boosters": [
+    {
+      "file": "booster_42.txt",
+      "seed": 42,
+      "n_trees": 137
+    },
+    {
+      "file": "booster_43.txt",
+      "seed": 43,
+      "n_trees": 96
+    },
+    {
+      "file": "booster_44.txt",
+      "seed": 44,
+      "n_trees": 142
+    },
+    {
+      "file": "booster_45.txt",
+      "seed": 45,
+      "n_trees": 70
+    },
+    {
+      "file": "booster_46.txt",
+      "seed": 46,
+      "n_trees": 55
+    },
+    {
+      "file": "booster_47.txt",
+      "seed": 47,
+      "n_trees": 107
+    },
+    {
+      "file": "booster_48.txt",
+      "seed": 48,
+      "n_trees": 62
+    },
+    {
+      "file": "booster_49.txt",
+      "seed": 49,
+      "n_trees": 105
+    },
+    {
+      "file": "booster_50.txt",
+      "seed": 50,
+      "n_trees": 58
+    },
+    {
+      "file": "booster_51.txt",
+      "seed": 51,
+      "n_trees": 95
+    },
+    {
+      "file": "booster_52.txt",
+      "seed": 52,
+      "n_trees": 76
+    },
+    {
+      "file": "booster_53.txt",
+      "seed": 53,
+      "n_trees": 85
+    },
+    {
+      "file": "booster_54.txt",
+      "seed": 54,
+      "n_trees": 50
+    },
+    {
+      "file": "booster_55.txt",
+      "seed": 55,
+      "n_trees": 114
+    },
+    {
+      "file": "booster_56.txt",
+      "seed": 56,
+      "n_trees": 89
+    },
+    {
+      "file": "booster_57.txt",
+      "seed": 57,
+      "n_trees": 86
+    },
+    {
+      "file": "booster_58.txt",
+      "seed": 58,
+      "n_trees": 181
+    },
+    {
+      "file": "booster_59.txt",
+      "seed": 59,
+      "n_trees": 61
+    },
+    {
+      "file": "booster_60.txt",
+      "seed": 60,
+      "n_trees": 89
+    },
+    {
+      "file": "booster_61.txt",
+      "seed": 61,
+      "n_trees": 120
+    },
+    {
+      "file": "booster_62.txt",
+      "seed": 62,
+      "n_trees": 75
+    },
+    {
+      "file": "booster_63.txt",
+      "seed": 63,
+      "n_trees": 84
+    },
+    {
+      "file": "booster_64.txt",
+      "seed": 64,
+      "n_trees": 113
+    },
+    {
+      "file": "booster_65.txt",
+      "seed": 65,
+      "n_trees": 80
+    },
+    {
+      "file": "booster_66.txt",
+      "seed": 66,
+      "n_trees": 60
+    }
+  ],
+  "rearm_head": {
+    "coef": [
+      0.8806915539010287,
+      0.9660011962010844,
+      -0.06732319473971213
+    ],
+    "intercept": -1.3404905922986974,
+    "features": [
+      "ev_inc_168h",
+      "ev_inc_672h",
+      "ev_fail_168h"
+    ]
+  },
+  "platt": {
+    "rearm": {
+      "coef": 0.8677270786784058,
+      "intercept": 0.5399202320085884
+    },
+    "tick": {
+      "coef": 1.0251910537863063,
+      "intercept": 0.4957186603770826
+    }
+  },
+  "sha256": "c08d2835f1e497f84817b55dfb84743e8537e99039f6c44a3c8fdd901944e249"
+}
