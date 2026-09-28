@@ -62,9 +62,9 @@ test('перенесённый блок пользователя стоит сп
   }
 })
 
-// Кнопка тура мерцает при первом входе и гаснет после нажатия — и после перезагрузки
-// тоже (Слава, 28.09.2026).
-test('кнопка тура мерцает до первого нажатия', async ({ page }) => {
+// Кнопка тура мерцает при каждом входе и гаснет после нажатия; перезагрузка —
+// новый вход, снова мерцает: под одной учёткой заходят разные люди (Слава, 28.09.2026).
+test('кнопка тура мерцает до нажатия и снова после перезагрузки', async ({ page }) => {
   await свойБандл(page)
   await page.goto('/map')
   const тур = page.getByRole('button', { name: 'Тур по системе' })
@@ -73,5 +73,5 @@ test('кнопка тура мерцает до первого нажатия', 
   await expect(тур).not.toHaveClass(/tour-pulse/)
   await page.keyboard.press('Escape')
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Тур по системе' })).not.toHaveClass(/tour-pulse/)
+  await expect(page.getByRole('button', { name: 'Тур по системе' })).toHaveClass(/tour-pulse/)
 })

@@ -18,7 +18,13 @@ test('шапка на 390 px не шире окна', async ({ page }) => {
     await page.goto(адрес)
     await expect(page.getByRole('navigation', { name: 'Разделы' })).toBeVisible()
     expect(await правыйКрай(page, 'header, header *'), адрес).toBeLessThanOrEqual(390)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth), адрес).toBe(390)
+    // Не 390, а clientWidth: scrollbar-gutter: stable (28.09.2026) держит место под
+    // полосу прокрутки, и ширина страницы на 390 px — 375.
+    const { sw, cw } = await page.evaluate(() => ({
+      sw: document.documentElement.scrollWidth,
+      cw: document.documentElement.clientWidth,
+    }))
+    expect(sw, адрес).toBeLessThanOrEqual(cw)
   }
 })
 
