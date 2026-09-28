@@ -274,15 +274,15 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         finally:
             await держатель.close()
         assert other
-        # модель одна: строка совпадает с sensor_risk.split() на тех же входах
+        # правила одни: строка совпадает с sensor_risk.rule_split() на тех же входах
         строки = {r[0]: r for r in await sensor_scores.баллы(conn, срез)}
         for r in await conn.fetch("SELECT * FROM pred.sensor_risk"):
             s = строки[r["channel_id"]]
             assert abs(r["score_real"] - s[2]) < 1e-6 and abs(r["score_synth"] - s[3]) < 1e-6
             assert (r["level_real"], r["level_full"]) == (s[4], s[5])
             assert 0 <= r["score_real"] + r["score_synth"] <= 1
-        # миграция 061 сняла CHECK score_synth >= 0: модель с синтетикой вправе дать
-        # вероятность ниже, чем модель без неё
+        # миграция 061 сняла CHECK score_synth >= 0 (разница двух режимов), а score_real
+        # по-прежнему в [0, 1]
         import asyncpg
 
         tr = conn.transaction()
@@ -303,8 +303,9 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         виды = dict(await conn.fetch("SELECT channel_id, sensor_kind FROM smvu.channel"))
 
         def здоровый(channel_id):
-            """Вероятность модели без синтетики у канала того же вида без отказов."""
-            return sensor_risk.score([], None, срез, kind=виды[channel_id])["score"]
+            """Балл правила давности у канала без отказов (одинаковый у всех видов)."""
+            assert виды[channel_id] is None or виды[channel_id]
+            return sensor_risk.rule_split([], None, срез)["score_real"]
 
         # ППР: газ 5657 без свежего отказа — причина plan, балл как у здорового
         ппр = await conn.fetchrow("""
@@ -321,15 +322,24 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         ):
             assert r["score_real"] > здоровый(r["channel_id"]), r
             assert json.loads(r["reasons_real"])[0]["kind"] == "real"
-        # Подтверждённый свежий эпизод выше high текущего замороженного артефакта.
+        # подтверждённый отказ меньше суток назад — high по правилу давности
         assert await conn.fetchval(
             "SELECT bool_and(level_real = 'high') FROM pred.sensor_risk WHERE channel_id % 7 = 0"
         )
-        # синтетический предвестник доходит до причин режима «с синтетикой»
-        assert await conn.fetchval(
-            "SELECT count(*) FROM pred.sensor_risk "
-            "WHERE reasons::text LIKE '%предупреждение прибора%'"
-        ) > 0
+        assert all(
+            json.loads(r)[0]["text"].startswith("правило давности (high)")
+            for r in await conn.fetchval(
+                "SELECT array_agg(reasons_real::text) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+            )
+        )
+        # синтетический предвестник доходит до причин и уровня режима «с синтетикой»,
+        # а режим без синтетики его не видит
+        пред = await conn.fetch(
+            "SELECT * FROM pred.sensor_risk WHERE reasons::text LIKE '%правило предвестника%'"
+        )
+        assert пред, "ни у одного канала нет наблюдённого предвестника"
+        assert all(r["level_full"] in ("high", "watch") and r["score_synth"] > 0 for r in пред)
+        assert not any("предвестник" in r["reasons_real"] for r in пред)
         for r in await conn.fetch(
             "SELECT channel_id, score_real FROM pred.sensor_risk "
             "WHERE channel_id % 11 = 0 AND channel_id % 7 <> 0 AND channel_id NOT IN "

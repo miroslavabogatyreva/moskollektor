@@ -4,12 +4,14 @@
 же срезе, что отдаёт GET /api/risks: max(as_of) в pred.forecast_current. Прогноза нет —
 считать не на что, тик молчит.
 
-Модель одна — `app.domain.sensor_risk` (SL.10, MOS-263; коэффициенты
-backend/app/domain/sensor_model.json): отказы smvu.model_failure_event (как
-у карточки участка, от нижней границы pred.weight_window()), синтетический паспорт
-из db/seed/sensor_demo.sql, окна графика ППР из maint.ppr_window (MOS-251). Здесь
-чтение входа четырьмя запросами, счёт отказов соседей за 7 сут и запись результата:
-на 11,5 тыс. каналов это четыре выборки и один COPY.
+Балл и уровень считают правила `app.domain.sensor_risk.rule_split()` (SL.10, MOS-263;
+пороги — backend/app/domain/sensor_rules.json): правило давности по отказам
+smvu.model_failure_event (как у карточки участка, от нижней границы
+pred.weight_window()) и, в режиме «с синтетикой», правило предвестника по
+синтетическому паспорту из db/seed/sensor_demo.sql; окна графика ППР — из
+maint.ppr_window (MOS-251). Логистическую регрессию тик не зовёт: она проверена
+и отвергнута (docs/proof/2026-09-28-sensor-model/metrics.md). Здесь чтение входа
+и запись результата: на 11,5 тыс. каналов это несколько выборок и один COPY.
 
 Блокировка своя — `pg_try_advisory_lock(48219)`, рядом с 48217 расчёта (run.py)
 и 48218 самопроверки планировщика: занято — тик выходит сразу, без ожидания.
@@ -24,7 +26,6 @@ import asyncio
 import json
 import os
 import time
-from collections import Counter
 from datetime import timedelta
 
 from app.domain import failure_sim, sensor_risk
@@ -34,7 +35,6 @@ from app.domain import failure_sim, sensor_risk
 # перезапуске проигрывания архива срез уходит назад, и метод не должен читать
 # «будущий» срез, оставшийся от прошлого прохода.
 ХРАНИТЬ = timedelta(days=1)
-НЕДЕЛЯ = timedelta(days=7)
 
 КАНАЛЫ = """
 SELECT c.channel_id, c.object_id, c.sensor_kind, c.collector, c.picket,
@@ -79,7 +79,7 @@ def предвестники(channel_id, eq, object_kind, даты, день, at
     beta, eta, iv, mult = failure_sim.params_of(
         {"object_kind": object_kind, "life": eq["life"]}
     )
-    m = sensor_risk.model()["modes"]["sim"]
+    m = sensor_risk.rules()["precursor"]
     _, pre = failure_sim.channel(
         channel_id, eq["in_service"], beta, eta,
         день - timedelta(days=ОКНО_ПРЕДВЕСТНИКА), день, даты, iv, mult,
@@ -88,8 +88,7 @@ def предвестники(channel_id, eq, object_kind, даты, день, at
     return [t for t, _ in pre if t <= at]
 
 
-# Отказы всех каналов, а не только активных: соседей на пикете и коллекторе
-# модель училась считать по всем отказам группы (docs/proof/2026-09-28-sensor-model).
+# Отказы с началом не позже среза минус час подтверждения (эпизод дольше часа).
 ОТКАЗЫ = """
 SELECT e.channel_id, e.started_at, c.object_id, c.sensor_kind, c.collector, c.picket
   FROM smvu.model_failure_event e
@@ -114,25 +113,9 @@ async def баллы(conn, at) -> list[tuple]:
     даты = dict(await conn.fetch(ДАТЫ_ПРОВЕРОК, sensor_risk.SRC))
     окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
     starts: dict[int, list] = {}
-    # Соседи: отказы за 7 сут до среза по коллектору и по паре (коллектор, пикет),
-    # эпизоды в окнах ППР не считаются — так же, как у самого канала.
-    свои: Counter = Counter()
-    по_коллектору: Counter = Counter()
-    по_пикету: Counter = Counter()
     for r in await conn.fetch(ОТКАЗЫ, at, sensor_risk.CONFIRM_SECONDS):
-        s = r["started_at"]
-        if not sensor_risk.confirmed(s, at):
-            continue
-        starts.setdefault(r["channel_id"], []).append(s)
-        if not timedelta(0) <= at - s < НЕДЕЛЯ or sensor_risk.in_plan(
-            s, окна.get((r["object_id"], r["sensor_kind"]), ())
-        ):
-            continue
-        свои[r["channel_id"]] += 1
-        if r["collector"] is not None:
-            по_коллектору[r["collector"]] += 1
-            if r["picket"] is not None:
-                по_пикету[(r["collector"], r["picket"])] += 1
+        if sensor_risk.confirmed(r["started_at"], at):
+            starts.setdefault(r["channel_id"], []).append(r["started_at"])
     строки = []
     for c in await conn.fetch(КАНАЛЫ, sensor_risk.SRC):
         eq = c["eq_id"] and {
@@ -140,19 +123,11 @@ async def баллы(conn, at) -> list[tuple]:
             "life": c["service_life_years"],
             "points": точки.get(c["eq_id"], []),
         }
-        n = свои[c["channel_id"]]
-        col, pk = c["collector"], c["picket"]
-        nb = (
-            по_пикету[(col, pk)] - n if col is not None and pk is not None else 0,
-            по_коллектору[col] - n if col is not None else 0,
-        )
-        b = sensor_risk.split(
+        b = sensor_risk.rule_split(
             starts.get(c["channel_id"], []),
             eq or None,
             at,
             окна.get((c["object_id"], c["sensor_kind"]), ()),
-            nb,
-            c["sensor_kind"],
             предвестники(
                 c["channel_id"], eq, c["object_kind"], даты.get(c["eq_id"], []), день, at
             ),
