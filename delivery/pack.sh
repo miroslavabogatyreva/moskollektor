@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pack.sh — пакет сдачи: архив, который эксперты распаковывают и поднимают
-# по docs/install.md, не заглядывая в репозиторий (MOS-125, план 9.13, НФ-88).
+# по delivery/INSTALL.md, не заглядывая в репозиторий (MOS-125, план 9.13, НФ-88).
 #
 # Заказчик 19.09.2026: «Формат сдачи - это пакет, который можно распаковать
 # и запустить, с обязательной инструкцией по развертыванию».
@@ -15,9 +15,9 @@
 # и поэтому отказывается собирать, пока они есть.
 #
 # Не едут три каталога. final-presentation/ — 68 МБ, презентация сдаётся своей
-# ссылкой (docs/delivery.md). .agents/ и .claude/ — настройки Claude Code
+# ссылкой (delivery.md). .agents/ и .claude/ — настройки Claude Code
 # для разработки, продукту и экспертам не нужны. Выгрузки заказчика в пакете
-# нет: она у заказчика своя, а заливку описывает docs/install.md разд. 5.
+# нет: она у заказчика своя, а заливку описывает delivery/INSTALL.md разд. 5.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -50,7 +50,7 @@ tar -xzf "$out" -C "$tmp"
 root="$tmp/$name"
 fail=0
 
-for f in README.md deploy/README.md \
+for f in README.md delivery/INSTALL.md deploy/README.md \
          deploy/docker-compose.yml deploy/.env.example \
          backend/Dockerfile backend/requirements.txt \
          frontend/package.json frontend/package-lock.json db/migrations db/seed contracts; do
@@ -70,7 +70,7 @@ fi
 # docker compose config разбирает файл и подстановки без демона Docker.
 if docker compose version > /dev/null 2>&1; then
   # Два секрета compose требует обязательно (${VAR:?}); эксперт задаёт их сам
-  # по docs/install.md разд. 4, здесь подставляем заглушки только для разбора.
+  # по delivery/INSTALL.md разд. 4, здесь подставляем заглушки только для разбора.
   sed -e 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=check/' -e 's/^AUTH_SECRET=$/AUTH_SECRET=check/' \
     "$root/deploy/.env.example" > "$root/deploy/.env"
   if (cd "$root/deploy" && docker compose --profile app --profile ldap config -q 2> "$tmp/compose.log"); then
