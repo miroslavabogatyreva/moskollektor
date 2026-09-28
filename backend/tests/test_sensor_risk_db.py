@@ -14,6 +14,7 @@ pred.sensor_risk (SL.3, MOS-252) и методы GET /api/sensor-risk (SL.4, MOS
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -116,7 +117,7 @@ def database():
             """.replace("$1", str(КАНАЛОВ))
             )
             # Отказы: газ узла 5657 — в окне ППР 04.06.2026 (не отказ), каждый 7-й
-            # канал — свежий отказ 29.06, каждый 11-й — отказ позже среза (не видим).
+            # канал — свежий отказ 30.06 за 6 ч до среза, каждый 11-й — отказ позже среза (не видим).
             await conn.execute("""
                 INSERT INTO smvu.model_failure_episode
                        (channel_id, section_id, started_at, ended_at, fault_value, model_version)
@@ -124,7 +125,7 @@ def database():
                        'Неисправен', 'lgbm-v3-bag-2026.09.21'
                   FROM smvu.channel c
                   JOIN (VALUES (timestamptz '2026-06-04 09:30+03', 'ppr'),
-                               (timestamptz '2026-06-29 10:00+03', 'fresh'),
+                               (timestamptz '2026-06-30 18:00+03', 'fresh'),
                                (timestamptz '2026-07-10 10:00+03', 'future')) AS s(t, what)
                     ON (s.what = 'ppr' AND c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик')
                     OR (s.what = 'fresh' AND c.channel_id % 7 = 0)
@@ -242,7 +243,7 @@ def test_ppr_seed_rows_nodes_and_rerun(database):
 
 
 def test_tick_writes_every_channel_on_forecast_as_of(database):
-    """SL.3: строка на каждый активный канал, срез — как у /api/risks, формула — одна."""
+    """SL.3: строка на каждый активный канал, срез — как у /api/risks, модель — одна."""
 
     async def тело(conn):
         t0 = time.monotonic()
@@ -271,34 +272,59 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         finally:
             await держатель.close()
         assert other
-        # формула одна: строка совпадает с sensor_risk.split() на тех же входах
+        # модель одна: строка совпадает с sensor_risk.split() на тех же входах
         строки = {r[0]: r for r in await sensor_scores.баллы(conn, срез)}
         for r in await conn.fetch("SELECT * FROM pred.sensor_risk"):
             s = строки[r["channel_id"]]
-            assert (
-                round(r["score_real"], 3),
-                round(r["score_synth"], 3),
-                r["level_real"],
-                r["level_full"],
-            ) == (s[2], s[3], s[4], s[5])
-        # ППР: газ 5657 без свежего отказа — причина plan, реальной части нет
+            assert abs(r["score_real"] - s[2]) < 1e-6 and abs(r["score_synth"] - s[3]) < 1e-6
+            assert (r["level_real"], r["level_full"]) == (s[4], s[5])
+            assert 0 <= r["score_real"] + r["score_synth"] <= 1
+        # миграция 061 сняла CHECK score_synth >= 0: модель с синтетикой вправе дать
+        # вероятность ниже, чем модель без неё
+        import asyncpg
+
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            await conn.execute(
+                "UPDATE pred.sensor_risk SET score_synth = -score_real WHERE channel_id = $1",
+                min(строки),
+            )
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(
+                    "UPDATE pred.sensor_risk SET score_real = 1.5 WHERE channel_id = $1",
+                    min(строки),
+                )
+        finally:
+            await tr.rollback()
+
+        виды = dict(await conn.fetch("SELECT channel_id, sensor_kind FROM smvu.channel"))
+
+        def здоровый(channel_id):
+            """Вероятность модели без синтетики у канала того же вида без отказов."""
+            return sensor_risk.score([], None, срез, kind=виды[channel_id])["score"]
+
+        # ППР: газ 5657 без свежего отказа — причина plan, балл как у здорового
         ппр = await conn.fetchrow("""
             SELECT r.* FROM pred.sensor_risk r JOIN smvu.channel c USING (channel_id)
              WHERE c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик'
-               AND c.channel_id % 7 <> 0 LIMIT 1""")
-        assert ппр["score_real"] == 0
-        assert "plan" in {x["kind"] for x in __import__("json").loads(ппр["reasons"])}
+               AND c.channel_id % 7 <> 0 AND c.channel_id % 11 <> 0 LIMIT 1""")
+        assert abs(ппр["score_real"] - здоровый(ппр["channel_id"])) < 1e-6
+        assert "plan" in {x["kind"] for x in json.loads(ппр["reasons"])}
+        assert "plan" in {x["kind"] for x in json.loads(ппр["reasons_real"])}
+        assert not any(x["kind"] == "synthetic" for x in json.loads(ппр["reasons_real"]))
         # отказ позже среза не виден, свежий — виден
-        свежий = await conn.fetchval(
-            "SELECT min(score_real) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
-        )
-        assert свежий > 0.4
-        будущий = await conn.fetchval(
-            "SELECT max(score_real) FROM pred.sensor_risk "
+        for r in await conn.fetch(
+            "SELECT channel_id, score_real, reasons_real FROM pred.sensor_risk WHERE channel_id % 7 = 0"
+        ):
+            assert r["score_real"] > здоровый(r["channel_id"]), r
+            assert json.loads(r["reasons_real"])[0]["kind"] == "real"
+        for r in await conn.fetch(
+            "SELECT channel_id, score_real FROM pred.sensor_risk "
             "WHERE channel_id % 11 = 0 AND channel_id % 7 <> 0 AND channel_id NOT IN "
             "(SELECT channel_id FROM smvu.channel WHERE object_id = 5657 AND sensor_kind = 'Газовый датчик')"
-        )
-        assert будущий == 0
+        ):
+            assert abs(r["score_real"] - здоровый(r["channel_id"])) < 1e-6, r
 
     _в_базе(database, тело)
 
@@ -334,13 +360,22 @@ def test_api_reads_table_with_filters_and_scope(database):
         )
         по_таблице = dict(
             await conn.fetch(
-                "SELECT channel_id, round(score_real::numeric, 3) FROM pred.sensor_risk"
+                "SELECT channel_id, round(score_real::numeric, 6) FROM pred.sensor_risk"
             )
         )
         assert all(
             i["score"] == float(по_таблице[i["channel_id"]]) for i in реальный["items"]
         )
-        assert sum(i["score"] for i in реальный["items"]) < sum(баллы)
+        полные = dict(
+            await conn.fetch(
+                "SELECT channel_id, round((score_real + score_synth)::numeric, 6) FROM pred.sensor_risk"
+            )
+        )
+        assert all(i["score"] == float(полные[i["channel_id"]]) for i in полный["items"])
+        # причины при synthetic=0 — reasons_real, а не отфильтрованные reasons
+        причины = dict(await conn.fetch("SELECT channel_id, reasons_real FROM pred.sensor_risk"))
+        i = next(i for i in реальный["items"] if i["reasons"])
+        assert i["reasons"] == json.loads(причины[i["channel_id"]])
 
         узел = await _список(conn, ADMIN, node=5657)
         assert узел["node_name"] == "объект Каппа ДУ"

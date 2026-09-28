@@ -4,11 +4,12 @@
 же срезе, что отдаёт GET /api/risks: max(as_of) в pred.forecast_current. Прогноза нет —
 считать не на что, тик молчит.
 
-Формула одна — `app.domain.sensor_risk`: отказы smvu.model_failure_event (как
+Модель одна — `app.domain.sensor_risk` (SL.10, MOS-263; коэффициенты
+backend/app/domain/sensor_model.json): отказы smvu.model_failure_event (как
 у карточки участка, от нижней границы pred.weight_window()), синтетический паспорт
 из db/seed/sensor_demo.sql, окна графика ППР из maint.ppr_window (MOS-251). Здесь
-только чтение входа четырьмя запросами и запись результата: на 11,5 тыс. каналов это
-четыре выборки и один COPY.
+чтение входа четырьмя запросами, счёт отказов соседей за 7 сут и запись результата:
+на 11,5 тыс. каналов это четыре выборки и один COPY.
 
 Блокировка своя — `pg_try_advisory_lock(48219)`, рядом с 48217 расчёта (run.py)
 и 48218 самопроверки планировщика: занято — тик выходит сразу, без ожидания.
@@ -23,6 +24,7 @@ import asyncio
 import json
 import os
 import time
+from collections import Counter
 from datetime import timedelta
 
 from app.domain import sensor_risk
@@ -32,9 +34,10 @@ from app.domain import sensor_risk
 # перезапуске проигрывания архива срез уходит назад, и метод не должен читать
 # «будущий» срез, оставшийся от прошлого прохода.
 ХРАНИТЬ = timedelta(days=1)
+НЕДЕЛЯ = timedelta(days=7)
 
 КАНАЛЫ = """
-SELECT c.channel_id, c.object_id, c.sensor_kind,
+SELECT c.channel_id, c.object_id, c.sensor_kind, c.collector, c.picket,
        e.id AS eq_id, e.in_service_from, e.service_life_years
   FROM smvu.channel c
   LEFT JOIN asset.equipment e ON e.id = c.equipment_id AND e.source_system = $1
@@ -52,9 +55,12 @@ SELECT p.equipment_id, ch.code,
   LEFT JOIN asset.measurement ms ON ms.point_id = p.id
  GROUP BY p.id, p.equipment_id, ch.code
 """
+# Отказы всех каналов, а не только активных: соседей на пикете и коллекторе
+# модель училась считать по всем отказам группы (docs/proof/2026-09-28-sensor-model).
 ОТКАЗЫ = """
-SELECT e.channel_id, e.started_at
+SELECT e.channel_id, e.started_at, c.object_id, c.sensor_kind, c.collector, c.picket
   FROM smvu.model_failure_event e
+  JOIN smvu.channel c USING (channel_id)
  CROSS JOIN pred.weight_window() w
  WHERE timezone('Europe/Moscow', e.started_at)::date >= w.date_from
    AND e.started_at <= $1
@@ -72,10 +78,25 @@ async def баллы(conn, at) -> list[tuple]:
                 "readings": [(r["last"],)] if r["last"] else [],
             }
         )
-    starts: dict[int, list] = {}
-    for r in await conn.fetch(ОТКАЗЫ, at):
-        starts.setdefault(r["channel_id"], []).append(r["started_at"])
     окна = sensor_risk.plan_windows(await conn.fetch(sensor_risk.ОКНА))
+    starts: dict[int, list] = {}
+    # Соседи: отказы за 7 сут до среза по коллектору и по паре (коллектор, пикет),
+    # эпизоды в окнах ППР не считаются — так же, как у самого канала.
+    свои: Counter = Counter()
+    по_коллектору: Counter = Counter()
+    по_пикету: Counter = Counter()
+    for r in await conn.fetch(ОТКАЗЫ, at):
+        s = r["started_at"]
+        starts.setdefault(r["channel_id"], []).append(s)
+        if not timedelta(0) <= at - s < НЕДЕЛЯ or sensor_risk.in_plan(
+            s, окна.get((r["object_id"], r["sensor_kind"]), ())
+        ):
+            continue
+        свои[r["channel_id"]] += 1
+        if r["collector"] is not None:
+            по_коллектору[r["collector"]] += 1
+            if r["picket"] is not None:
+                по_пикету[(r["collector"], r["picket"])] += 1
     строки = []
     for c in await conn.fetch(КАНАЛЫ, sensor_risk.SRC):
         eq = c["eq_id"] and {
@@ -83,11 +104,19 @@ async def баллы(conn, at) -> list[tuple]:
             "life": c["service_life_years"],
             "points": точки.get(c["eq_id"], []),
         }
+        n = свои[c["channel_id"]]
+        col, pk = c["collector"], c["picket"]
+        nb = (
+            по_пикету[(col, pk)] - n if col is not None and pk is not None else 0,
+            по_коллектору[col] - n if col is not None else 0,
+        )
         b = sensor_risk.split(
             starts.get(c["channel_id"], []),
             eq or None,
             at,
             окна.get((c["object_id"], c["sensor_kind"]), ()),
+            nb,
+            c["sensor_kind"],
         )
         строки.append(
             (
@@ -98,6 +127,7 @@ async def баллы(conn, at) -> list[tuple]:
                 b["level_real"],
                 b["level_full"],
                 json.dumps(b["reasons"], ensure_ascii=False),
+                json.dumps(b["reasons_real"], ensure_ascii=False),
             )
         )
     return строки
@@ -131,6 +161,7 @@ async def посчитать(conn) -> dict:
                     "level_real",
                     "level_full",
                     "reasons",
+                    "reasons_real",
                 ],
             )
         return {
