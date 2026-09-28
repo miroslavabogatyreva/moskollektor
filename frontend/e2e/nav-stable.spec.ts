@@ -48,3 +48,30 @@ test('на 390 px постоянное место под «обновлено» 
     expect(лишнее, адрес).toBeLessThanOrEqual(0)
   }
 })
+
+// Когда место кончается и блок пользователя переносится на вторую строку, он остаётся
+// у правого края шапки, а не под логотипом (Слава, 28.09.2026, окно ~1000 px).
+test('перенесённый блок пользователя стоит справа', async ({ page }) => {
+  await свойБандл(page)
+  for (const ширина of [1000, 1280, 1440]) {
+    await page.setViewportSize({ width: ширина, height: 800 })
+    await page.goto('/map')
+    const шапка = await page.getByRole('banner').boundingBox()
+    const выйти = await page.getByRole('button', { name: 'Выйти' }).boundingBox()
+    expect(шапка!.x + шапка!.width - (выйти!.x + выйти!.width), `${ширина} px`).toBeLessThan(40)
+  }
+})
+
+// Кнопка тура мерцает при первом входе и гаснет после нажатия — и после перезагрузки
+// тоже (Слава, 28.09.2026).
+test('кнопка тура мерцает до первого нажатия', async ({ page }) => {
+  await свойБандл(page)
+  await page.goto('/map')
+  const тур = page.getByRole('button', { name: 'Тур по системе' })
+  await expect(тур).toHaveClass(/tour-pulse/)
+  await тур.click()
+  await expect(тур).not.toHaveClass(/tour-pulse/)
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Тур по системе' })).not.toHaveClass(/tour-pulse/)
+})

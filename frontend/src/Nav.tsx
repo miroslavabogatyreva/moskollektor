@@ -23,6 +23,14 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
   // Срез берём один раз: шапка живёт всё время работы, а срез двигается раз в сутки.
   // Без свежо(): «обновлена в» — про данные текущего экрана, а не про шапку.
   const [asOf, setAsOf] = useState<string | null>(null)
+  // Кнопка тура мерцает, пока её ни разу не нажимали в этом браузере.
+  const [турНовый, setТурНовый] = useState(() => {
+    try {
+      return localStorage.getItem('tour-seen') !== '1'
+    } catch {
+      return true
+    }
+  })
   useEffect(() => {
     if (!me) return
     let отменено = false
@@ -49,65 +57,79 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
         </a>
         <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>
       </div>
-      <nav aria-label="Разделы" class="flex flex-wrap gap-0.5">
-        {menuRoutes.map((r) => {
-          const active = currentPath === r.path
-          return (
-            <a
-              key={r.path}
-              href={r.path}
-              aria-current={active ? 'page' : undefined}
-              class={`text-sm no-underline px-3 py-1.5 rounded-md border-b-[3px] transition-colors font-semibold ${active ? '' : 'hover:bg-white/10 hover:!text-white'}`}
-              style={
-                active
-                  ? `background:var(--brand-nav-active); color:#fff; border-bottom-color:var(--brand-nav-marker)`
-                  : `color:#DCE8F7; border-bottom-color:transparent`
-              }
-            >
-              {r.label}
-            </a>
-          )
-        })}
-      </nav>
-      {/* Ширину блока держит вторая строка, она есть всегда: появление «обновлена в»
+      {/* Меню, время и пользователь — одна группа у правого края: когда места мало и
+          блок пользователя переносится на вторую строку, он остаётся справа, а не
+          уезжает под логотип (Слава, 28.09.2026). */}
+      <div class="flex flex-1 min-w-0 flex-wrap items-center justify-end gap-x-5 gap-y-2">
+        <nav aria-label="Разделы" class="flex flex-wrap gap-0.5">
+          {menuRoutes.map((r) => {
+            const active = currentPath === r.path
+            return (
+              <a
+                key={r.path}
+                href={r.path}
+                aria-current={active ? 'page' : undefined}
+                class={`text-sm no-underline px-3 py-1.5 rounded-md border-b-[3px] transition-colors font-semibold ${active ? '' : 'hover:bg-white/10 hover:!text-white'}`}
+                style={
+                  active
+                    ? `background:var(--brand-nav-active); color:#fff; border-bottom-color:var(--brand-nav-marker)`
+                    : `color:#DCE8F7; border-bottom-color:transparent`
+                }
+              >
+                {r.label}
+              </a>
+            )
+          })}
+        </nav>
+        {/* Ширину блока держит вторая строка, она есть всегда: появление «обновлена в»
           сдвигало всё меню на 131 px при переходе (28.09.2026). Первая строка пустая,
           пока экран без опроса.
           Вторая строка — период выгрузки: начало 01.01.2019 (docs/day-one.md), конец —
           срез, на котором считает worker; раньше это была плитка «Срез данных» на главной. */}
-      <div
-        data-tour="header-time"
-        class="num text-xs leading-tight text-right"
-        style="color:#B9CCE6; min-width:30ch"
-      >
-        <div style="min-height:1.25em">{at && `система обновлена в ${formatTime(at)}`}</div>
-        <div data-testid="data-period">
-          {asOf ? `данные ${ДАННЫЕ_С} — ${formatDate(asOf)}` : `данные с ${ДАННЫЕ_С}`}
+        <div
+          data-tour="header-time"
+          class="num text-xs leading-tight text-right"
+          style="color:#B9CCE6; min-width:30ch"
+        >
+          <div style="min-height:1.25em">{at && `система обновлена в ${formatTime(at)}`}</div>
+          <div data-testid="data-period">
+            {asOf ? `данные ${ДАННЫЕ_С} — ${formatDate(asOf)}` : `данные с ${ДАННЫЕ_С}`}
+          </div>
         </div>
+        {me && (
+          <div class="flex flex-wrap items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
+            <span>
+              {me.full_name || me.login} · {roleLabels(me.roles)}
+            </span>
+            {/* Тур грузится по клику (src/lib/tour.ts): driver.js не входит в основной бандл. */}
+            <button
+              type="button"
+              onClick={() => {
+                setТурНовый(false)
+                try {
+                  localStorage.setItem('tour-seen', '1')
+                } catch {
+                  // приватное окно — мерцание погаснет до перезагрузки, и ладно
+                }
+                import('./lib/tour').then((m) => m.запуститьТур())
+              }}
+              data-new={турНовый ? '' : undefined}
+              class={`px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10 ${турНовый ? 'tour-pulse' : ''}`}
+              style="background:transparent; border:1px solid #6F8DB8; color:#fff"
+            >
+              Тур по системе
+            </button>
+            <button
+              type="button"
+              onClick={() => logout().then(() => (window.location.href = '/login'))}
+              class="px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10"
+              style="background:transparent; border:1px solid #6F8DB8; color:#fff"
+            >
+              Выйти
+            </button>
+          </div>
+        )}
       </div>
-      {me && (
-        <div class="flex flex-wrap items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
-          <span>
-            {me.full_name || me.login} · {roleLabels(me.roles)}
-          </span>
-          {/* Тур грузится по клику (src/lib/tour.ts): driver.js не входит в основной бандл. */}
-          <button
-            type="button"
-            onClick={() => import('./lib/tour').then((m) => m.запуститьТур())}
-            class="px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10"
-            style="background:transparent; border:1px solid #6F8DB8; color:#fff"
-          >
-            Тур по системе
-          </button>
-          <button
-            type="button"
-            onClick={() => logout().then(() => (window.location.href = '/login'))}
-            class="px-3 py-1 rounded-md font-semibold transition-colors hover:bg-white/10"
-            style="background:transparent; border:1px solid #6F8DB8; color:#fff"
-          >
-            Выйти
-          </button>
-        </div>
-      )}
     </header>
   )
 }
