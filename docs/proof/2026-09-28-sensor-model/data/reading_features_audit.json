@@ -1,0 +1,118 @@
+{
+  "schema": "sensor-readings.v1",
+  "as_of": "2026-07-01T00:00:00+03:00",
+  "policy": {
+    "methane_upper_inclusive": 15.0,
+    "numeric_alarm_threshold_inclusive": 1.0,
+    "batch_min_channels": 10,
+    "origin": "team quality policy; calibration is a heuristic"
+  },
+  "files": [
+    {
+      "name": "ext-journal-2025.csv",
+      "bytes": 2710263516,
+      "first_day": "2025-01-01",
+      "last_day": "2025-12-31",
+      "counts": {
+        "input_rows": 55541796,
+        "included_rows": 55541796,
+        "gas_rows": 45743228,
+        "valid": 45586619,
+        "gas_numeric": 45587151,
+        "text": 156077,
+        "epoch_marker": 15320,
+        "gas_alarm_text": 2712,
+        "unknown_channel_rows": 530,
+        "methane_ge1": 12085,
+        "methane_ge1_alarm_flag": 0,
+        "above_upper": 532,
+        "repeated_headers": 1
+      }
+    },
+    {
+      "name": "ext-journal-2026.csv",
+      "bytes": 1497523553,
+      "first_day": "2026-01-01",
+      "last_day": "2026-06-30",
+      "counts": {
+        "input_rows": 30695389,
+        "included_rows": 30695389,
+        "gas_rows": 24709612,
+        "valid": 24629164,
+        "gas_numeric": 24629165,
+        "text": 80447,
+        "epoch_marker": 6951,
+        "methane_ge1": 5418,
+        "methane_ge1_alarm_flag": 0,
+        "gas_alarm_text": 1342,
+        "unknown_channel_rows": 122,
+        "above_upper": 1
+      }
+    }
+  ],
+  "totals": {
+    "input_rows": 86237185,
+    "included_rows": 86237185,
+    "gas_rows": 70452840,
+    "valid": 70215783,
+    "gas_numeric": 70216316,
+    "text": 236524,
+    "epoch_marker": 22271,
+    "gas_alarm_text": 4054,
+    "unknown_channel_rows": 652,
+    "methane_ge1": 17503,
+    "methane_ge1_alarm_flag": 0,
+    "above_upper": 533,
+    "repeated_headers": 1
+  },
+  "invalid_channels": {
+    "278291": {
+      "above_upper": 531
+    },
+    "267433": {
+      "above_upper": 1
+    },
+    "288261": {
+      "above_upper": 1
+    }
+  },
+  "calibration_days": [
+    "2025-02-03",
+    "2025-02-05",
+    "2025-02-12",
+    "2025-04-02",
+    "2025-04-08",
+    "2025-05-12",
+    "2025-05-14",
+    "2025-06-20",
+    "2025-06-25",
+    "2025-07-17",
+    "2025-07-23",
+    "2025-10-01",
+    "2025-10-03",
+    "2025-10-06",
+    "2025-10-08",
+    "2025-10-09",
+    "2025-10-24",
+    "2025-10-30",
+    "2025-11-20",
+    "2025-11-21",
+    "2025-11-26",
+    "2025-12-10",
+    "2025-12-11",
+    "2025-12-12",
+    "2025-12-18",
+    "2026-02-09",
+    "2026-02-10",
+    "2026-02-12",
+    "2026-04-02",
+    "2026-04-03",
+    "2026-04-08",
+    "2026-05-07",
+    "2026-05-26",
+    "2026-06-17",
+    "2026-06-23"
+  ],
+  "feature_rows": 119942,
+  "gas_alarm_text_on_calibration_days": 1496
+}
