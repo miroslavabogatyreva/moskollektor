@@ -53,3 +53,34 @@ test('US-01 сц. 6: корень ведёт на схему, на 390 px без
   await expect(page.getByRole('heading', { name: 'Ждут квитирования' })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
+
+// Подписи датчиков в норме у соседних пикетов не налезают друг на друга ни на одном
+// шаге приближения: сначала серое число, фраза «N в норме» — только при крупном масштабе.
+test('US-01 сц. 6: подписи «в норме» у соседних пикетов не перекрываются', async ({ page }) => {
+  const уч = (await demoAccounts(page)).find((a) => a.login === 'disp2')!
+  await page.goto('/login')
+  await page.getByLabel('Логин').fill(уч.login)
+  await page.getByLabel('Пароль').fill(уч.password)
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await expect(page).toHaveURL(/\/map$/)
+
+  // Линия с выбранным пикетом: приближение идёт к нему, а у него датчики точно есть.
+  const линия = page.getByTestId('sensor-demo').locator('[data-line]:has([data-selected])')
+  const ближе = линия.getByRole('button', { name: '+ приблизить' })
+  let подписей = 0
+  for (let шаг = 0; шаг < 8 && (await ближе.isEnabled()); шаг++) {
+    await ближе.click()
+    const рамки = await линия
+      .locator('text[data-normal]')
+      .evaluateAll((els) =>
+        els.map((e) => e.getBoundingClientRect()).map((r) => [r.left, r.right] as const),
+      )
+    подписей += рамки.length
+    рамки.sort((a, b) => a[0] - b[0])
+    for (let i = 1; i < рамки.length; i++)
+      expect(рамки[i][0], `шаг ${шаг}: подпись ${i} налезает на соседнюю`).toBeGreaterThanOrEqual(
+        рамки[i - 1][1] - 0.5,
+      )
+  }
+  expect(подписей, 'подписи вообще появлялись').toBeGreaterThan(0)
+})
