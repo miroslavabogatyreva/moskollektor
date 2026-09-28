@@ -21,3 +21,10 @@ test('шапка на 390 px не шире окна', async ({ page }) => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth), адрес).toBe(390)
   }
 })
+
+test('кнопка «вся линия» оси пикетов на 390 px не вылезает за окно', async ({ page }) => {
+  await page.goto('/map')
+  const кнопка = page.getByRole('group', { name: /^Масштаб линии / }).first()
+  await expect(кнопка.getByRole('button', { name: 'вся линия' })).toBeVisible()
+  expect(await правыйКрай(page, '[aria-label^="Масштаб линии"] button')).toBeLessThanOrEqual(390)
+})

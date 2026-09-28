@@ -180,7 +180,7 @@ export function AxisLine({
         <div
           role="group"
           aria-label={`Масштаб линии ${prefix}`}
-          class="inline-flex rounded-md overflow-hidden"
+          class="inline-flex flex-wrap rounded-md overflow-hidden"
           style="border:1px solid var(--border-strong)"
         >
           {кнопки.map(([имя, выключена, действие], i) => (
