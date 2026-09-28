@@ -50,8 +50,8 @@ tar -xzf "$out" -C "$tmp"
 root="$tmp/$name"
 fail=0
 
-for f in docs/install.md docs/build.md docs/architecture.md docs/data-processing.md \
-         docs/unmet-requirements.md deploy/docker-compose.yml deploy/.env.example \
+for f in README.md deploy/README.md \
+         deploy/docker-compose.yml deploy/.env.example \
          backend/Dockerfile backend/requirements.txt ml-stub/Dockerfile \
          frontend/package.json frontend/package-lock.json db/migrations db/seed contracts; do
   if [ -e "$root/$f" ]; then echo "OK    есть $f"; else echo "СБОЙ  нет $f"; fail=1; fi

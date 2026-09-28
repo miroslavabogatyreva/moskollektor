@@ -89,3 +89,10 @@ docs/sensor-level-proposal.md
 docs/График ППР АКМ на 2026г. РЭК.xlsx
 docs/График_ТО_АКМ_и_ДУ_на_2026г_РЭК_3_на_А4.xlsx
 docs/project-structure.md
+
+# Документы в git не идут: в репозитории для экспертов остаются только README (MOS-266).
+/docs/
+/final-presentation/
+/diagrams/
+ml-model/docs/
+ml-model/requirements/ml-serving-licenses.md

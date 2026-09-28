@@ -30,7 +30,6 @@ jobs:
       - name: самопроверки, которым не нужны база и стенд
         run: |
           python3 code/check_schema.py
-          python3 code/check_deploy_set.py
           python3 code/check_stale_fetch.py
 
   deploy:
