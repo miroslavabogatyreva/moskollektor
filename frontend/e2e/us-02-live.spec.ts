@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 const времяОбновления = /обновлено в (\d\d:\d\d:\d\d)/
 
 for (const [экран, путь, метод] of [
-  ['дашборд', '/dashboard', '/api/risks'],
+  ['дашборд', '/dashboard?view=sections', '/api/risks'],
   ['журнал прогнозов', '/log', '/api/forecasts'],
   ['схема коллектора', '/map', '/api/risks'],
   ['заявки', '/orders', '/api/orders'],
@@ -36,7 +36,7 @@ for (const [экран, путь, метод] of [
 test('US-02 сц. 2: после ошибки опроса время в шапке не сдвигается', async ({ page }) => {
   await page.clock.install()
   const первый = page.waitForResponse((r) => r.url().includes('/api/risks'))
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await первый
   const шапка = page.getByRole('banner')
   await expect(шапка).toContainText(времяОбновления)

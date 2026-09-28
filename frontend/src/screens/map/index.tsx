@@ -9,6 +9,7 @@ import { MapFilters } from './MapFilters'
 import { ObjectTree, type TreeCollector } from './ObjectTree'
 import { riskLabel, type RiskClass } from './risk'
 import { DEMO_NODE, SensorDemo } from './SensorDemo'
+import { sensorRiskUrl, синтетикаВключена, type SensorRiskPage } from '../../lib/sensorRisk'
 import type { RiskClassRow, Section } from './types'
 import { fullView, zoomView, type ViewRange } from './viewport'
 
@@ -36,14 +37,32 @@ const LEGEND_STATES: RiskClass[] = ['high', 'normal', null]
 // «объект Каппа» — коллектор узла демо по датчикам (DEMO_NODE, «объект Каппа ДУ»).
 const KAPPA = 15
 
+// Сообщение, если датчика из адреса /map?channel=<id> нет в прогнозе или он вне зоны роли.
+const НЕТ_ДАТЧИКА = 'датчика нет в прогнозе или он вне вашей зоны'
+
 // section — из адреса /map?section=<id> (preact-router кладёт параметры запроса
 // в props): переход «на схеме» из полосы уведомлений, Ф-90, MOS-245.
 // demo=sensors — /map?demo=sensors: выбрать «объект Каппа ДУ» и прокрутить к демо
 // прогноза по датчикам (SensorDemo.tsx).
+// Прогноз по датчикам (эпик MOS-248, SL.6): channel=<id> — датчик из таблицы
+// дашборда, схема выбирает его коллектор, а SensorDemo — линию, пикет и строку;
+// collector=<id> — коллектор из «Где риск сосредоточен»; synthetic=0 — паспорт
+// оборудования не учитывать (переключатель, SyntheticToggle.tsx).
 export function MapScreen({
   section,
   demo,
-}: { section?: string; demo?: string } & Record<string, unknown>) {
+  channel,
+  collector: collectorParam,
+  synthetic,
+}: {
+  section?: string
+  demo?: string
+  channel?: string
+  collector?: string
+  synthetic?: string
+} & Record<string, unknown>) {
+  const синтетика = синтетикаВключена(synthetic)
+  const датчик = channel ? Number(channel) : undefined
   const [всеУчастки, setВсеУчастки] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [collector, setCollector] = useState<number | null>(null)
@@ -82,6 +101,39 @@ export function MapScreen({
     setCollector(KAPPA)
     setNode(DEMO_NODE)
   }, [sections, демоДатчиков])
+
+  // Коллектор из адреса — ссылка «Где риск сосредоточен» с дашборда по датчикам.
+  useEffect(() => {
+    const id = Number(collectorParam)
+    if (!collectorParam || !sections?.some((s) => s.collector === id)) return
+    setCollector(id)
+    setNode(null)
+  }, [sections, collectorParam])
+
+  // Датчик из адреса: коллектор узнаём у сервера — в справочнике участков каналов нет.
+  const [датчикОшибка, setДатчикОшибка] = useState<string | null>(null)
+  useEffect(() => {
+    setДатчикОшибка(null)
+    if (датчик == null || !sections) return
+    let отменено = false
+    apiFetch(sensorRiskUrl({ synthetic: синтетика, channel: датчик, limit: 1 }))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+        return r.json() as Promise<SensorRiskPage>
+      })
+      .then((d) => {
+        if (отменено) return
+        const s = d.items.find((x) => x.channel_id === датчик)
+        if (!s || !sections.some((x) => x.collector === s.collector_id))
+          return setДатчикОшибка(НЕТ_ДАТЧИКА)
+        setCollector(s.collector_id)
+        setNode(null)
+      })
+      .catch((e) => !отменено && setДатчикОшибка(errorMessage(e)))
+    return () => {
+      отменено = true
+    }
+  }, [sections, датчик])
 
   useEffect(() => {
     fetch('/data/sections.json')
@@ -354,7 +406,21 @@ export function MapScreen({
               ))}
             </div>
 
-            {collector === KAPPA && <SensorDemo scrollTo={демоДатчиков} />}
+            {датчикОшибка && (
+              <p class="text-sm" style="color:var(--state-error)">
+                Датчик {датчик} не открыть: {датчикОшибка}
+              </p>
+            )}
+            {collector != null && (
+              <SensorDemo
+                collector={collector}
+                collectorName={collectorName}
+                sections={всеУчастки ?? []}
+                synthetic={синтетика}
+                channel={датчик}
+                scrollTo={демоДатчиков || датчик != null}
+              />
+            )}
           </div>
         </div>
       )}

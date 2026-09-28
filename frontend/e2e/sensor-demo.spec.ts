@@ -40,7 +40,8 @@ test('демо по датчикам: на ПК632 видны и плохие, �
   await page.goto('/map?demo=sensors')
   const демо = page.getByTestId('sensor-demo')
   await expect(демо).toBeVisible({ timeout: 30_000 })
-  await expect(демо.getByRole('note')).toContainText('паспорта оборудования синтетические')
+  // Плашка переключателя синтетики (SL.5, SL.6): «Демо: паспорта синтетические».
+  await expect(демо.getByRole('note')).toContainText('Демо: паспорта синтетические')
 
   // По умолчанию выбран пикет датчика с самым высоким баллом — ПК632.
   await expect(демо.locator('g[data-picket="632"][data-selected]')).toHaveCount(1)

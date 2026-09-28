@@ -28,7 +28,7 @@ for (const login of ['ods1', 'tech1']) {
     test.use({ extraHTTPHeaders: { 'X-User-Login': login } })
 
     test(`US-27 сц. 1: те же числа, что на экране (${login})`, async ({ page, baseURL }) => {
-      await page.goto('/dashboard')
+      await page.goto('/dashboard?view=sections')
       const плитка = page.locator('article', { hasText: 'Участков в расчёте' })
       await expect(плитка).toBeVisible()
       const n = Number((await плитка.locator('div').first().innerText()).trim())
