@@ -268,7 +268,7 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
 
 async def _список(conn, user, **kw):
     параметры = dict(
-        synthetic=1, node=None, collector=None, level=None, limit=500, offset=0
+        synthetic=1, node=None, collector=None, channel=None, level=None, limit=500, offset=0
     )
     параметры.update(kw)
     return await objects.get_sensor_risk(**параметры, conn=conn, user=user)
@@ -341,6 +341,19 @@ def test_api_reads_table_with_filters_and_scope(database):
         свой = await _список(conn, DISP, limit=5000)
         assert свой["total"] == КАНАЛОВ // 2 - 1
         assert {i["collector_id"] for i in свой["items"]} == {15}
+
+        # channel (MOS-255): один элемент с узлом, коллектором и пикетом; вместе с
+        # synthetic=0; чужой канал роли и несуществующий — одинаково пустой items
+        for syn in (0, 1):
+            один = await _список(conn, ADMIN, channel=266003, synthetic=syn)
+            assert один["total"] == 1 and [i["channel_id"] for i in один["items"]] == [266003]
+            i = один["items"][0]
+            assert (i["node_id"], i["collector_id"]) == (5657, 15) and i["picket"] == 3
+            assert (i["equipment"] is None) is (syn == 0)
+        чужой = await _список(conn, DISP, channel=266000 + КАНАЛОВ - 3)
+        assert чужой["total"] == 0 and чужой["items"] == []
+        assert (await _список(conn, DISP, channel=266003))["total"] == 1
+        assert (await _список(conn, ADMIN, channel=424242))["items"] == []
 
         with pytest.raises(objects.HTTPException) as e:
             await _список(conn, ADMIN, node=424242)
