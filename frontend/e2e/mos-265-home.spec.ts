@@ -9,12 +9,35 @@ import { свойБандл } from './helpers/sensor-mock'
 test.beforeEach(({ page }) => свойБандл(page))
 
 // Ожидание — из ответа сервера под той же сессией, что и экран, а не константой.
+// top_collectors сервер собирает только из коллекторов с ▲: на срезе 01.06.2026 07:00
+// у disp2 (коллекторы 5 и 7) ▲ нет, список пуст, и главная открывает первый свой
+// коллектор справочника (map/index.tsx, sections[0]) — это не ошибка сервера.
 async function самыйРискованный(page: Page): Promise<number> {
   const r = await page.request.get('/api/sensor-risk/summary?synthetic=1')
   expect(r.ok()).toBe(true)
   const s = (await r.json()) as { top_collectors: { collector_id: number; high: number }[] }
-  expect(s.top_collectors.length, 'на стенде есть коллектор с ▲').toBeGreaterThan(0)
-  return s.top_collectors[0].collector_id
+  if (s.top_collectors.length > 0) return s.top_collectors[0].collector_id
+  const свои = new Set(
+    ((await (await page.request.get('/api/objects/tree')).json()) as { object_id: number }[]).map(
+      (к) => к.object_id,
+    ),
+  )
+  const участки = (await (await page.request.get('/data/sections.json')).json()) as {
+    collector: number
+  }[]
+  return участки.find((у) => свои.has(у.collector))!.collector
+}
+
+// Сколько рискованных (▲ и ◆) датчиков на коллекторе — чтобы «нет normal» что-то доказывало.
+async function рискованных(page: Page, коллектор: number): Promise<number> {
+  let всего = 0
+  for (const l of ['high', 'watch']) {
+    const r = await page.request.get(
+      `/api/sensor-risk?synthetic=1&collector=${коллектор}&level=${l}&limit=1`,
+    )
+    всего += ((await r.json()) as { total: number }).total
+  }
+  return всего
 }
 
 test('US-01 сц. 6: смена начинается со схемы пикетов', async ({ page }) => {
@@ -32,10 +55,13 @@ test('US-01 сц. 6: смена начинается со схемы пикет�
   const топ = await самыйРискованный(page)
   await expect(page.locator('main select').first()).toHaveValue(String(топ))
 
-  // На оси датчиков — только ▲ и ◆. Значки с уровнем есть (иначе «нет normal» ничего
-  // не доказывает), а «в норме» нет ни одного.
+  // На оси датчиков — только ▲ и ◆. Значки с уровнем есть, когда на коллекторе есть
+  // рискованные датчики (иначе «нет normal» ничего не доказывает), а «в норме» нет ни одного.
   const ось = page.getByTestId('sensor-demo').locator('svg[role="img"]')
-  await expect(ось.locator('[data-level]').first()).toBeAttached()
+  await expect(ось.first()).toBeVisible()
+  if ((await рискованных(page, топ)) > 0)
+    await expect(ось.locator('[data-level]').first()).toBeAttached()
+  else test.info().annotations.push({ type: 'срез', description: `на коллекторе ${топ} риска нет` })
   await expect(ось.locator('[data-level="normal"]')).toHaveCount(0)
 
   await expect(page.getByRole('heading', { name: 'Ждут квитирования' })).toBeVisible()

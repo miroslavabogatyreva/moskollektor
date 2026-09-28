@@ -20,14 +20,20 @@ test('диспетчер ОДС видит весь парк, техник — �
   const accounts = await demoAccounts(page)
   const tech = account(accounts, 'technician')
   const ods = account(accounts, 'ods_dispatcher')
-  const tile = page.locator('article', { hasText: 'Участков в расчёте' }).locator('.num')
+  // После входа открывается главная (/map); плитка — на дашборде «по участкам».
+  const участков = async () => {
+    await page.goto('/dashboard?view=sections')
+    return Number(
+      await page.locator('article', { hasText: 'Участков в расчёте' }).locator('.num').innerText(),
+    )
+  }
 
   await loginAs(page, tech.login, tech.password)
-  const techTotal = Number(await tile.innerText())
+  const techTotal = await участков()
   await logout(page)
 
   await loginAs(page, ods.login, ods.password)
-  const odsTotal = Number(await tile.innerText())
+  const odsTotal = await участков()
 
   expect(techTotal).toBeGreaterThan(0)
   expect(techTotal).toBeLessThan(odsTotal)

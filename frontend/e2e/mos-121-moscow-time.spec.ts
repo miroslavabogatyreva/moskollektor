@@ -57,14 +57,15 @@ test('браузер действительно во Владивостоке, �
   )
 })
 
-test('дашборд: время расчёта и дата данных по Москве', async ({ page }) => {
-  const статус = await jsonОтвета<{ data_edge: string; computed_at: string }>(
-    page,
-    '/api/data-status',
-    () => page.goto('/dashboard'),
+// Плитка «Данные по состоянию на» ушла с дашборда 28.09.2026 (решение Славы):
+// период данных и срез расчёта — в шапке, «данные 01.01.2019 — <срез>».
+test('шапка: срез расчёта — дата по Москве', async ({ page }) => {
+  const сводка = await jsonОтвета<{ as_of: string }>(page, '/api/sensor-risk/summary', () =>
+    page.goto('/dashboard'),
   )
-  await expect(page.getByText(`расчёт от ${мск(статус.computed_at, true)}`)).toBeVisible()
-  await expect(page.getByText(мскДата(статус.data_edge), { exact: true })).toBeVisible()
+  await expect(page.getByTestId('data-period')).toHaveText(
+    `данные 01.01.2019 — ${мскДата(сводка.as_of)}`,
+  )
 })
 
 test('шапка: «обновлена в» — московские часы', async ({ page }) => {

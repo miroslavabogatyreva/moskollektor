@@ -18,12 +18,21 @@ const ошибкиКонсоли = (page: Page) => {
 const число = (s: string) => Number(s.replace(/\s/g, ''))
 const плитка = (page: Page, имя: string) => page.locator('article', { hasText: имя })
 
-test('SL.5: дашборд по датчикам — плитки, коллекторы, таблица постранично', async ({ page }) => {
+// Блок уровня на дашборде: заголовок «Высокий риск · N» и своя таблица (решение Славы 28.09.2026).
+const блок = (page: Page, уровень: string) => page.locator(`[data-level-block="${уровень}"]`)
+const тыс = (n: number) => n.toLocaleString('ru-RU')
+
+test('SL.5: дашборд по датчикам — высокий риск и «наблюдать», норма свёрнута', async ({ page }) => {
   const ошибки = ошибкиКонсоли(page)
   const мок = await mockSensorRisk(page)
   const парк = мок.items(true)
   const high = парк.filter((s) => s.level === 'high')
-  const коллекторов = new Set(high.map((s) => s.collector_id)).size
+  const watch = парк.filter((s) => s.level === 'watch')
+  const normal = парк.filter((s) => s.level === 'normal')
+  test.skip(
+    high.length === 0,
+    'на срезе нет датчиков высокого риска — первую строку сверять не с чем',
+  )
 
   await page.goto('/dashboard')
   await expect(page.getByRole('link', { name: 'По датчикам' })).toHaveAttribute(
@@ -32,24 +41,21 @@ test('SL.5: дашборд по датчикам — плитки, коллек�
   )
   await expect(page.getByTestId('synthetic-toggle')).toBeChecked()
   await expect(page.getByTestId('synthetic-note')).toContainText('Демо: паспорта синтетические')
+  // Плиток и панелей на дашборде больше нет: сводка смены — на главной.
+  await expect(page.locator('main article')).toHaveCount(0)
+  await expect(page.getByTestId('sensor-hotspots')).toHaveCount(0)
 
-  // Плитка: число датчиков high и «на N коллекторах».
-  const высокий = плитка(page, 'Высокий риск')
-  await expect(высокий.locator('div').first()).toHaveText(String(high.length))
-  await expect(высокий).toContainText(`на ${коллекторов} коллектор`)
+  // Два блока с числом в заголовке, норма — одной строкой, а не таблицей.
+  await expect(блок(page, 'high').locator('h3')).toHaveText(`Высокий риск · ${тыс(high.length)}`)
+  if (watch.length > 0)
+    await expect(блок(page, 'watch').locator('h3')).toHaveText(`Наблюдать · ${тыс(watch.length)}`)
+  await expect(блок(page, 'normal')).toHaveCount(0)
+  await expect(page.getByTestId('sensor-normal')).toContainText(`В норме — ${тыс(normal.length)}`)
+  await expect(page.locator('[data-testid="sensor-table"] [data-level="normal"]')).toHaveCount(0)
 
-  // «Где риск сосредоточен» — коллекторы по числу датчиков high, первый — самый нагруженный.
-  const поКоллекторам = new Map<string, number>()
-  for (const s of high)
-    поКоллекторам.set(s.collector_name, (поКоллекторам.get(s.collector_name) ?? 0) + 1)
-  const первый = [...поКоллекторам.entries()].sort((a, b) => b[1] - a[1])[0]
-  const очаги = page.getByTestId('sensor-hotspots').locator('li')
-  await expect(очаги.first()).toContainText(первый[0])
-  await expect(очаги.first()).toContainText(String(первый[1]))
-
-  // Таблица: 50 строк, самый рискованный датчик первым, главная причина — самая весомая.
-  const строки = page.getByTestId('sensor-table').locator('tbody tr')
-  await expect(строки).toHaveCount(50)
+  // Первая строка — самый рискованный датчик, главная причина — по правилу уровня.
+  const строки = блок(page, 'high').getByTestId('sensor-table').locator('tbody tr')
+  await expect(строки).toHaveCount(Math.min(50, high.length))
   await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[0].channel_id))
   const ячейки = строки.first().locator('td')
   await expect(ячейки.nth(0).locator('[data-level]')).toHaveAttribute('data-level', парк[0].level)
@@ -57,19 +63,25 @@ test('SL.5: дашборд по датчикам — плитки, коллек�
   await expect(ячейки.nth(2)).toContainText(парк[0].name)
   await expect(ячейки.nth(3)).toHaveText(парк[0].sensor_kind)
   await expect(ячейки.nth(4)).toHaveText(`${парк[0].collector_name} · ПК${парк[0].picket}`)
-  // Главная — причина, давшая уровень (run_sensors.причина_уровня), не самая весомая.
+  // Главная — среди причин с меткой уровня самая весомая (run_sensors.причина_уровня).
   await expect(ячейки.nth(5)).toContainText(главнаяПричина(парк[0].reasons, парк[0].level)!.text)
 
+  // «Показать» раскрывает норму фильтром «Уровень» — постранично, с первой страницы.
+  await page.getByTestId('sensor-normal').getByRole('button', { name: 'Показать' }).click()
+  await expect(page).toHaveURL(/\/dashboard\?level=normal$/)
+  await expect(page.getByLabel('Уровень')).toHaveValue('normal')
+  const нормы = блок(page, 'normal').getByTestId('sensor-table').locator('tbody tr')
+  await expect(нормы).toHaveCount(Math.min(50, normal.length))
   const страница = page.getByTestId('sensor-page')
-  expect(число((await страница.innerText()).split('из')[1])).toBe(парк.length)
+  expect(число((await страница.innerText()).split('из')[1])).toBe(normal.length)
   await page.getByRole('button', { name: 'следующие →' }).click()
   await expect(страница).toHaveText(/^51–100 из/)
-  await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[50].channel_id))
+  await expect(нормы.first()).toHaveAttribute('data-channel-id', String(normal[50].channel_id))
 
-  // Отбор по уровню — с первой страницы и в адресе (MOS-262).
+  // Отбор по уровню — в адресе (MOS-262).
   await page.getByLabel('Уровень').selectOption('high')
   await expect(page).toHaveURL(/\/dashboard\?level=high$/)
-  await expect(страница).toHaveText(new RegExp(`из ${high.length}$`))
+  await expect(блок(page, 'high').locator('h3')).toHaveText(`Высокий риск · ${тыс(high.length)}`)
   expect(await строки.locator('[data-level="high"]').count()).toBe(Math.min(50, high.length))
 
   expect(ошибки).toEqual([])
@@ -81,15 +93,19 @@ test('SL.5: переключатель синтетики — в адресе, �
   const ошибки = ошибкиКонсоли(page)
   const мок = await mockSensorRisk(page)
   await page.goto('/dashboard')
-  await expect(page.getByTestId('sensor-table').locator('tbody tr')).toHaveCount(50)
+  await expect(page.getByTestId('sensor-table').locator('tbody tr').first()).toBeVisible()
 
   await page.getByTestId('synthetic-toggle').uncheck()
   await expect(page).toHaveURL(/\/dashboard\?synthetic=0$/)
   await expect(page.getByTestId('synthetic-note')).toHaveCount(0)
   const безПаспорта = мок.items(false).filter((s) => s.level === 'high').length
-  await expect(плитка(page, 'Высокий риск').locator('div').first()).toHaveText(String(безПаспорта))
+  if (безПаспорта > 0)
+    await expect(блок(page, 'high').locator('h3')).toHaveText(`Высокий риск · ${тыс(безПаспорта)}`)
+  else await expect(блок(page, 'high')).toHaveCount(0)
   expect(мок.urls.some((u) => u.startsWith('/api/sensor-risk/summary?synthetic=0'))).toBe(true)
-  expect(мок.urls.some((u) => u.startsWith('/api/sensor-risk?synthetic=0&limit=50'))).toBe(true)
+  expect(
+    мок.urls.some((u) => u.startsWith('/api/sensor-risk?synthetic=0&level=high&limit=50')),
+  ).toBe(true)
 
   // Адрес с ?synthetic=0 открывает экран уже выключенным.
   await page.reload()
@@ -114,7 +130,7 @@ test('SL.5: вид «по участкам» остался вторым реж�
   await page.goto('/dashboard')
   await page.getByRole('link', { name: 'По участкам' }).click()
   await expect(page).toHaveURL(/\/dashboard\?view=sections$/)
-  await expect(page.getByRole('heading', { name: /Все участки по риску/ })).toBeVisible({
+  await expect(page.getByRole('heading', { name: /Участки по риску/ })).toBeVisible({
     timeout: 30_000,
   })
   await expect(плитка(page, 'Участков в расчёте')).toBeVisible()
@@ -261,7 +277,7 @@ for (const [ширина, высота] of [
     await page.setViewportSize({ width: ширина, height: высота })
     const д = датчикКаппы(await mockSensorRisk(page))
     await page.goto('/dashboard')
-    await expect(page.getByTestId('sensor-table').locator('tbody tr')).toHaveCount(50)
+    await expect(page.getByTestId('sensor-table').locator('tbody tr').first()).toBeVisible()
     // Содержимое экрана не шире окна: широкая таблица листается в своём блоке.
     // Мерим main: шапку (Nav.tsx) на 390 px проверяет e2e/layout-390.spec.ts.
     expect(await правыйКрай(page)).toBeLessThanOrEqual(ширина)
@@ -322,13 +338,13 @@ test('MOS-262: ?level= переживает перезагрузку, «Наза
 }) => {
   const мок = await mockSensorRisk(page)
   const парк = мок.items(true)
-  const страница = page.getByTestId('sensor-page')
+  const заголовок = (l: string) => блок(page, l).locator('h3')
   const уровень = page.getByLabel('Уровень')
 
   await page.goto('/dashboard?level=high')
   await expect(уровень).toHaveValue('high')
   const high = парк.filter((s) => s.level === 'high').length
-  await expect(страница).toHaveText(new RegExp(`из ${high}$`))
+  await expect(заголовок('high')).toHaveText(`Высокий риск · ${тыс(high)}`)
 
   await page.reload()
   await expect(page).toHaveURL(/\/dashboard\?level=high$/)
@@ -339,14 +355,14 @@ test('MOS-262: ?level= переживает перезагрузку, «Наза
   await уровень.selectOption('watch')
   await expect(page).toHaveURL(/\/dashboard\?level=watch$/)
   const watch = парк.filter((s) => s.level === 'watch').length
-  await expect(страница).toHaveText(new RegExp(`из ${watch.toLocaleString('ru-RU')}$`))
+  await expect(заголовок('watch')).toHaveText(`Наблюдать · ${тыс(watch)}`)
 
   await page.goBack()
   await expect(page).toHaveURL(/\/dashboard\?level=high$/)
   await expect(уровень).toHaveValue('high')
-  await expect(страница).toHaveText(new RegExp(`из ${high}$`))
+  await expect(заголовок('high')).toHaveText(`Высокий риск · ${тыс(high)}`)
 
-  // «все» убирает параметр, синтетика рядом с ним не теряется.
+  // «высокий и наблюдать» убирает параметр, синтетика рядом с ним не теряется.
   await page.goto('/dashboard?synthetic=0&level=high')
   await уровень.selectOption('')
   await expect(page).toHaveURL(/\/dashboard\?synthetic=0$/)
@@ -358,8 +374,8 @@ test('MOS-262: на 390 px первые колонки таблицы — «Ур
   await page.setViewportSize({ width: 390, height: 844 })
   await mockSensorRisk(page)
   await page.goto('/dashboard')
-  const таблица = page.getByTestId('sensor-table')
-  await expect(таблица.locator('tbody tr')).toHaveCount(50)
+  const таблица = page.getByTestId('sensor-table').first()
+  await expect(таблица.locator('tbody tr').first()).toBeVisible()
   const шапка = таблица.locator('thead th')
   await expect(шапка.nth(0)).toHaveText('Уровень')
   await expect(шапка.nth(1)).toHaveText('Балл')

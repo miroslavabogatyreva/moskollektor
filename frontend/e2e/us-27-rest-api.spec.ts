@@ -6,6 +6,10 @@
 // Учётную запись она называет сама заголовком X-User-Login (на стенде
 // AUTH_TRUST_HEADER=1) или не называет вовсе — это сценарий 2.
 import { expect, test, request as pwRequest, type APIRequestContext } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — своя сборка против живого API.
+test.beforeEach(({ page }) => свойБандл(page))
 
 async function система(baseURL: string | undefined, login?: string): Promise<APIRequestContext> {
   return pwRequest.newContext({
@@ -28,7 +32,7 @@ for (const login of ['ods1', 'tech1']) {
     test.use({ extraHTTPHeaders: { 'X-User-Login': login } })
 
     test(`US-27 сц. 1: те же числа, что на экране (${login})`, async ({ page, baseURL }) => {
-      await page.goto('/dashboard?view=sections')
+      await page.goto('/dashboard?view=sections&level=all')
       const плитка = page.locator('article', { hasText: 'Участков в расчёте' })
       await expect(плитка).toBeVisible()
       const n = Number((await плитка.locator('div').first().innerText()).trim())
