@@ -8,7 +8,7 @@ const времяОбновления = /обновлено в (\d\d:\d\d:\d\d)/
 for (const [экран, путь, метод] of [
   ['дашборд', '/dashboard?view=sections', '/api/risks'],
   ['журнал прогнозов', '/log', '/api/forecasts'],
-  ['схема коллектора', '/map', '/api/risks'],
+  ['схема коллектора', '/map', '/api/sensor-risk/summary'],
   ['заявки', '/orders', '/api/orders'],
 ] as const) {
   test(`US-02 сц. 2: экран обновляется сам — ${экран}`, async ({ page }) => {

@@ -25,14 +25,14 @@ import type { DemoAccount } from './types'
 // здесь так же, как её поймал бы сам переход.
 function nextPath(): string {
   const next = new URLSearchParams(window.location.search).get('next')
-  if (!next) return '/dashboard'
+  if (!next) return '/map'
   try {
     const u = new URL(next, window.location.origin)
     return u.origin === window.location.origin && u.pathname !== '/login'
       ? u.pathname + u.search + u.hash
-      : '/dashboard'
+      : '/map'
   } catch {
-    return '/dashboard'
+    return '/map'
   }
 }
 

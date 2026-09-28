@@ -33,7 +33,7 @@ export async function loginAs(page: Page, login: string, password: string) {
   await page.getByLabel('Логин').fill(login)
   await page.getByLabel('Пароль').fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.waitForURL('**/dashboard')
+  await page.waitForURL('**/map')
 }
 
 export async function logout(page: Page) {
