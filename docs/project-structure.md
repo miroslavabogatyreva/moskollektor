@@ -48,7 +48,7 @@ moskollektor/
 │                        плюс наш скилл `skills/story-tdd` — TDD по историям
 │   └── hooks/format.sh   форматирует файл после правки: ruff для Python,
 │                          prettier для фронта. Старые 43 файла не трогает
-├── docs/          157   документы: постановка, ТЗ, архитектура, план, приёмка
+├── docs/          267   документы: постановка, ТЗ, архитектура, план, приёмка
 │   ├── task.md               постановка заказчика, класс А
 │   ├── libraries.md          перечень библиотек с лицензиями, четыре набора —
 │   │                          приёмка НФ-82, проверка code/check_licenses.py
@@ -140,7 +140,7 @@ moskollektor/
 │   │                          на срез прогноза, pred.sensor_risk (MOS-252)
 │   │                          060_ppr_window — окна графика ППР заказчика,
 │   │                          maint.ppr_window (MOS-251)
-│   │                          061_sensor_risk_model — балл датчика считает модель:
+│   │                          061_sensor_risk_model — балл датчика по правилам:
 │   │                          снят CHECK score_synth >= 0, колонка reasons_real
 │   │                          (MOS-263)
 │   └── seed/                 explain_templates, уставки, нормативы, виды работ;
@@ -190,7 +190,7 @@ moskollektor/
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
 ├── deploy/         27   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
-├── code/           65   прототипы и считалки: то, по чему пишется продукт
+├── code/           67   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
@@ -269,9 +269,10 @@ backend/app/
                     прототипа code/toir_state_machine.py, но значения статусов — из
                     базы, там они другие),
                     объяснение прогноза (explain.py),
-                    вероятность отказа датчика (sensor_risk.py) по модели
-                    sensor_model.json и её сумме SHA256SUMS — модель обучена
-                    docs/proof/2026-09-28-sensor-model/train_sensor_model.py;
+                    уровень риска датчика (sensor_risk.py) по правилам давности
+                    и предвестника из sensor_rules.json (пороги выбирает
+                    docs/proof/2026-09-28-sensor-model/rules.py); проверенная
+                    и отвергнутая регрессия sensor_model.json с суммой SHA256SUMS;
                     симулированные отказы и предупреждения прибора по
                     синтетическому паспорту (failure_sim.py) (MOS-263)
 frontend/src/screens/{dashboard, map, log, orders}

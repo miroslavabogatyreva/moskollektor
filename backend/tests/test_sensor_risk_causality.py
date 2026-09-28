@@ -58,7 +58,7 @@ def test_worker_does_not_count_unconfirmed_neighbor():
             return []
 
     rows = asyncio.run(sensor_scores.баллы(Conn(), AT))
-    healthy = sensor_risk.split([], None, AT, kind="Газовый датчик")
+    healthy = sensor_risk.rule_split([], None, AT)
     # Даже если источник вернул ещё неподтверждённый эпизод, он не влияет ни на
     # собственный канал, ни на соседа. Второй канал не имеет своих эпизодов.
     assert all(r[2] == healthy["score_real"] for r in rows)
