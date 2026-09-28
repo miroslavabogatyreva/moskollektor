@@ -44,7 +44,11 @@ q checks      "select e.source_key::int as channel_id, mp.point_no, c.code as ch
 | `metrics.md` | таблицы метрик обоих режимов, кривая порога, выводы |
 | `training-report.md` | отчёт об обучении: данные, окна, признаки, метка, архитектура, повтор со сверкой SHA-256 |
 
-Модель, которую читает продукт, — `backend/app/domain/sensor_model.json`, сумма — `SHA256SUMS` рядом.
+| `rules.py`, `rules.json` | правила экрана: давность (порог выбран на январе–марте 2026 при H = 12 ч из `run.json`) и предвестник P-F 2 сут; замер на апреле–июне в обоих режимах, уровни парка на срезах 01.06.2026 00:00 и 27.06.2026 21:00; пишет `backend/app/domain/sensor_rules.json` |
+
+Продукт читает правила — `backend/app/domain/sensor_rules.json`. Регрессия `backend/app/domain/sensor_model.json` (сумма — `SHA256SUMS` рядом) проверена и не дала прироста, worker её не вызывает.
+
+Повтор правил: `uv run --no-project --with numpy==2.3.3 --with pandas==2.3.3 --with scikit-learn==1.7.2 python3 docs/proof/2026-09-28-sensor-model/rules.py`.
 
 ## Проверка MOS-264
 
