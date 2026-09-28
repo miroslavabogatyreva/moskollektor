@@ -26,7 +26,7 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    под схемой любого из 16 коллекторов. Балл и причины считает
    GET /api/sensor-risk?collector=<id>; паспорта оборудования синтетические
    (docs/sensor-level-proposal.md), история отказов реальная — об этом плашка
-   переключателя. Переключатель «Учитывать паспорт» живёт в адресе (?synthetic=0).
+   переключателя. Переключатель синтетики живёт в адресе (?synthetic=0).
 
    Полоса — одна на линию-префикс тега, как ось AxisLine.tsx: у «объекта Мю»
    две линии (914 и 915), и пикет 0 у каждой свой — на общей полосе датчики
@@ -248,7 +248,7 @@ export function SensorDemo({
   const list = pick
     ? (lines.find(([p]) => p === pick.prefix)?.[1] ?? [])
         .filter((s) => s.picket === pick.picket)
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => ORDER.indexOf(a.level) - ORDER.indexOf(b.level) || b.score - a.score)
     : []
   const важный = (s: SensorRow) =>
     s.level !== 'normal' || s.channel_id === open || s.reasons.some((r) => r.kind === 'plan')
@@ -373,7 +373,7 @@ function SensorLine({
   }, [])
 
   // Датчики по пикетам. В стопке снизу вверх: кольца ППР датчиков в норме, потом
-  // рискованные по возрастанию балла — красные наверху; не больше НА_ПИКЕТЕ, кольца
+  // рискованные: watch, потом high, внутри уровня по возрастанию балла — красные наверху; не больше НА_ПИКЕТЕ, кольца
   // уступают место риску. Датчики в норме — числом normal.
   const stacks = useMemo(() => {
     const m = new Map<number, SensorRow[]>()
@@ -381,7 +381,9 @@ function SensorLine({
     return [...m.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([pk, v]) => {
-        const риск = v.filter((s) => s.level !== 'normal').sort((a, b) => a.score - b.score)
+        const риск = v
+          .filter((s) => s.level !== 'normal')
+          .sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level) || a.score - b.score)
         const ппр = v.filter((s) => s.level === 'normal' && поППР(s))
         const shown = [...ппр, ...риск].slice(-НА_ПИКЕТЕ)
         const hidden = риск.length - shown.filter((s) => s.level !== 'normal').length

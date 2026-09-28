@@ -72,7 +72,7 @@ SELECT p.equipment_id, array_agg(timezone('Europe/Moscow', ms.measured_at)::date
 
 def предвестники(channel_id, eq, object_kind, даты, день, at):
     """Синтетические «предупреждения прибора» канала за 5 сут до среза — тот же
-    генератор app.domain.failure_sim, на котором училась модель; реальные отказы
+    генератор app.domain.failure_sim, по которому выбраны правила; реальные отказы
     он не читает. Нет паспорта или вида — предвестников нет."""
     if not eq or object_kind not in failure_sim.PARAMS:
         return []
