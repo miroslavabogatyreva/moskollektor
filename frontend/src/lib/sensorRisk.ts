@@ -74,6 +74,11 @@ export const срезРасчёта = (as_of: string | null, fmt: (v: string) =>
 // параметра (меню, письмо заказчику) открывает демо целиком.
 export const синтетикаВключена = (param: unknown): boolean => param !== '0'
 
+// Фильтр уровня таблицы на дашборде живёт в адресе: ?level=high|watch|normal (MOS-262).
+// Чужое значение — как «все»: ссылка с опечаткой не должна показать пустую таблицу.
+export const уровеньИзАдреса = (param: unknown): SensorLevel | '' =>
+  param === 'high' || param === 'watch' || param === 'normal' ? param : ''
+
 export function sensorRiskUrl(q: {
   synthetic: boolean
   collector?: number

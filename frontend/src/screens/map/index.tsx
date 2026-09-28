@@ -3,6 +3,7 @@ import { RiskBadge } from '../../components/RiskBadge'
 import { apiFetch } from '../../lib/api'
 import { usePoll, свежо } from '../../lib/poll'
 import { errorMessage, имяУчастка } from '../../lib/format'
+import { участков } from '../../lib/plural'
 import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
 import { MapFilters } from './MapFilters'
@@ -328,7 +329,7 @@ export function MapScreen({
               >
                 {collectors.map(([c, g]) => (
                   <option key={c} value={c}>
-                    {g.name} · {g.count} участков
+                    {g.name} · {участков(g.count)}
                   </option>
                 ))}
               </select>

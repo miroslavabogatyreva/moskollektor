@@ -9,6 +9,7 @@ import {
   линииДатчиков,
   сПараметром,
   синтетикаВключена,
+  уровеньИзАдреса,
   страница,
   sensorRiskUrl,
 } from './sensorRisk.ts'
@@ -27,6 +28,12 @@ const assertEqual = (got: unknown, want: unknown, label: string) => {
 assertEqual(синтетикаВключена(undefined), true, 'нет параметра → синтетика включена')
 assertEqual(синтетикаВключена('1'), true, '?synthetic=1 → включена')
 assertEqual(синтетикаВключена('0'), false, '?synthetic=0 → выключена')
+
+// Фильтр уровня: три уровня как есть, остальное — «все».
+assertEqual(уровеньИзАдреса('high'), 'high', '?level=high')
+assertEqual(уровеньИзАдреса('watch'), 'watch', '?level=watch')
+assertEqual(уровеньИзАдреса(undefined), '', 'нет параметра → все')
+assertEqual(уровеньИзАдреса('HIGH'), '', 'чужое значение → все')
 
 assertEqual(
   sensorRiskUrl({ synthetic: false, collector: 3828, limit: 5000 }),

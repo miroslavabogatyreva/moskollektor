@@ -4,6 +4,7 @@ import { SyntheticToggle } from '../../components/SyntheticToggle'
 import { apiFetch } from '../../lib/api'
 import { errorMessage, formatDate, formatDateTime } from '../../lib/format'
 import { usePoll } from '../../lib/poll'
+import { датчиков, линий } from '../../lib/plural'
 import {
   БЕЗ_ЛИНИИ,
   линииДатчиков,
@@ -242,8 +243,8 @@ export function SensorDemo({
         </h2>
         {data && (
           <span class="text-sm" style="color:var(--text-secondary)">
-            {срезРасчёта(data.as_of, formatDateTime)} · {data.items.length} датчиков:{' '}
-            {count('high')} высокий риск, {count('watch')} наблюдать, {count('normal')} норма
+            {срезРасчёта(data.as_of, formatDateTime)} · {датчиков(data.items.length)}: высокий риск
+            — {count('high')}, наблюдать — {count('watch')}, норма — {count('normal')}
           </span>
         )}
       </div>
@@ -259,8 +260,7 @@ export function SensorDemo({
       ) : (
         <>
           <p class="text-sm" style="color:var(--text-secondary)">
-            {lines.length} {lines.length === 1 ? 'линия' : 'линии'} · нажмите на стопку, чтобы
-            открыть датчики пикета
+            {линий(lines.length)} · нажмите на стопку, чтобы открыть датчики пикета
             {безПикета > 0 && ` · без пикета (охранная зона, здание) ${безПикета} — на оси их нет`}
           </p>
           {lines.map(([prefix, items]) => (
@@ -285,7 +285,7 @@ export function SensorDemo({
         <div class="flex flex-col gap-2">
           <h3 class="text-sm font-semibold" data-testid="sensor-picket">
             {pick.prefix === БЕЗ_ЛИНИИ ? '' : `Линия ${pick.prefix}, `}ПК{pick.picket}:{' '}
-            {list.length} датчиков
+            {датчиков(list.length)}
           </h3>
           <ul class="flex flex-col gap-1" style="list-style:none; padding:0; margin:0">
             {shownList.map((s) => (
@@ -385,7 +385,7 @@ function SensorLine({
       <div class="flex items-center justify-between gap-x-4 gap-y-2 text-sm flex-wrap">
         <span style="color:var(--text-secondary)">
           <strong style="color:var(--text-primary)">{имя}</strong>, ПК{Math.round(lo + v0)}–ПК
-          {Math.round(lo + v1)} · {items.length} датчиков, высокий риск — {high}
+          {Math.round(lo + v1)} · {датчиков(items.length)}, высокий риск — {high}
         </span>
         <div
           role="group"
@@ -476,7 +476,7 @@ function SensorLine({
                       fill="transparent"
                     >
                       <title>
-                        ПК{pk}: {v.length} датч., высокий риск —{' '}
+                        ПК{pk}: {датчиков(v.length)}, высокий риск —{' '}
                         {v.filter((s) => s.level === 'high').length}
                       </title>
                     </rect>
