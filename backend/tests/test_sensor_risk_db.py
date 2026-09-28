@@ -327,7 +327,7 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
             "SELECT bool_and(level_real = 'high') FROM pred.sensor_risk WHERE channel_id % 7 = 0"
         )
         assert all(
-            json.loads(r)[0]["text"].startswith("правило давности (high)")
+            json.loads(r)[0]["text"].startswith("правило давности (высокий риск)")
             for r in await conn.fetchval(
                 "SELECT array_agg(reasons_real::text) FROM pred.sensor_risk WHERE channel_id % 7 = 0"
             )

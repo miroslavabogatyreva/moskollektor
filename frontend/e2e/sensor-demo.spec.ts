@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 // Пикеты тест берёт из ответа /api/sensor-risk (фикстура или стенд), а не зашивает:
-// с SL.10 (MOS-263) уровни считает модель, и самый рискованный пикет меняется.
+// с SL.10 (MOS-263) уровни считают правила по давности отказа, и самый рискованный пикет меняется.
 interface Строка {
   channel_id: number
   picket: number | null
@@ -40,9 +40,7 @@ interface Строка {
   reasons: { kind: string }[]
 }
 
-test('демо по датчикам: на пикете видны датчики с риском и в норме, газовый снят по ППР', async ({
-  page,
-}) => {
+test('демо по датчикам: на пикете видны датчики с риском и в норме', async ({ page }) => {
   const ошибки: string[] = []
   page.on('console', (m) => m.type() === 'error' && ошибки.push(m.text()))
 
@@ -56,7 +54,7 @@ test('демо по датчикам: на пикете видны датчик�
   // Плашка переключателя синтетики (SL.5, SL.6): «Демо: паспорта синтетические».
   await expect(демо.getByRole('note')).toContainText('Демо: паспорта синтетические')
 
-  // По умолчанию выбран пикет датчика с самым высоким баллом — первого в ответе.
+  // По умолчанию выбран пикет первого датчика в ответе: сервер сортирует по уровню, потом по баллу.
   const пк = наОси[0].picket!
   await expect(демо.locator(`g[data-picket="${пк}"][data-selected]`)).toHaveCount(1)
   await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${пк}`)
@@ -76,20 +74,29 @@ test('демо по датчикам: на пикете видны датчик�
   await expect(первый.getByRole('button')).toHaveAttribute('aria-expanded', 'true')
   await expect(первый.getByRole('link')).toHaveAttribute('href', /^\/objects\/\d+$/)
 
-  // Газовый датчик, снятый по графику ППР: причина «плановый демонтаж» на его пикете.
-  const газ = наОси.find((s) => s.reasons.some((r) => r.kind === 'plan'))
-  if (газ) {
-    await демо.locator(`g[data-picket="${газ.picket}"]`).click()
-    await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${газ.picket}`)
-    await expect(
-      демо.locator(`li[data-channel-id="${газ.channel_id}"] [data-kind="plan"]`),
-    ).toContainText('ППР')
-  }
-
   // Клик по другой стопке меняет список.
   const другой = наОси.find((s) => s.picket !== пк)!.picket!
   await демо.locator(`g[data-picket="${другой}"]`).click()
   await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${другой}`)
 
   expect(ошибки).toEqual([])
+})
+
+// Газовый датчик, снятый по графику ППР: причина «плановый демонтаж» на его пикете.
+// Окна ППР — 2026 год (maint.ppr_window): на срезе без такого эпизода датчика нет,
+// и тест пропускается с причиной, а не проходит молча.
+test('демо по датчикам: газовый датчик снят по ППР', async ({ page }) => {
+  const ответ = page.waitForResponse(
+    (r) => r.url().includes('/api/sensor-risk?') && r.request().method() === 'GET',
+  )
+  await page.goto('/map?demo=sensors')
+  const наОси = ((await (await ответ).json()).items as Строка[]).filter((s) => s.picket != null)
+  const газ = наОси.find((s) => s.reasons.some((r) => r.kind === 'plan'))
+  test.skip(!газ, 'на срезе ни у одного датчика нет причины «плановый демонтаж по графику ППР»')
+  const демо = page.getByTestId('sensor-demo')
+  await демо.locator(`g[data-picket="${газ!.picket}"]`).click()
+  await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${газ!.picket}`)
+  await expect(
+    демо.locator(`li[data-channel-id="${газ!.channel_id}"] [data-kind="plan"]`),
+  ).toContainText('ППР')
 })

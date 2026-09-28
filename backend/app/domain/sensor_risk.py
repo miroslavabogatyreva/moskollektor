@@ -5,10 +5,13 @@
 читает готовые строки. Обучение сверяет с features() свои признаки поштучно
 (docs/proof/2026-09-28-sensor-model/train_sensor_model.py).
 
-Балл — вероятность отказа канала в ближайшие HORIZON_H часов после среза, её даёт
-логистическая регрессия, обученная на строках «канал × сутки» (срез 21:00 МСК).
-Коэффициенты лежат в sensor_model.json рядом, предсказание — чистый Python.
-Моделей две, архитектура одна:
+Экран и тик считают балл и уровень двумя правилами (rule_split ниже, пороги —
+sensor_rules.json): давность последнего отказа канала и, с синтетикой, предвестник
+с P-F. Балл — частота отказа канала в ближайшие horizon_h = 24 ч после среза.
+
+Функции score() и split() — логистическая регрессия на строках «канал × сутки»
+(срез 21:00 МСК), коэффициенты в sensor_model.json. Она не лучше правил, тик её
+не зовёт; её держат скрипт обучения и тесты причинности. Моделей две:
   real      — признаки только из журнала СМВУ (smvu.model_failure_event):
               давность последнего отказа, число отказов за 7/30/90 сут, отказы
               соседей на том же пикете и коллекторе за 7 сут, вид датчика;
@@ -317,6 +320,10 @@ def _recency_score(hours, table):
     return table[-1]["score"]
 
 
+# Уровень словами для текста причины: на экране слова, а не коды level.
+LEVEL_RU = {"high": "высокий риск", "watch": "наблюдать"}
+
+
 def _lvl(value, high, watch):
     return "high" if value < high else "watch" if value < watch else "normal"
 
@@ -350,7 +357,7 @@ def rule_split(starts, eq, at, plan=(), pre=()):
     reasons_real = []
     if last:
         какое = (
-            f"правило давности ({level_real}): " if level_real != "normal" else ""
+            f"правило давности ({LEVEL_RU[level_real]}): " if level_real != "normal" else ""
         )
         давно = f"{hours:.0f} ч" if hours < 72 else f"{hours / 24:.0f} сут"
         reasons_real.append({
@@ -372,7 +379,7 @@ def rule_split(starts, eq, at, plan=(), pre=()):
             lp = "high" if state == "due" else "watch"
             level_full = max(level_real, lp, key=RANK.get)
             reasons.append({
-                "text": f"симуляция, правило предвестника ({lp}): предвестник "
+                "text": f"симуляция, правило предвестника ({LEVEL_RU[lp]}): предвестник "
                 f"{p0.astimezone(MSK):%d.%m %H:%M}, P-F {pc['pf_days']:g} сут — отказ "
                 f"ожидается до {due.astimezone(MSK):%d.%m %H:%M}",
                 "weight": round(full - real, 6),
@@ -400,17 +407,18 @@ def _rules_selfcheck():
     свежий = rule_split([at - timedelta(hours=3)], eq, at)
     assert свежий["level_real"] == ("high" if 3 < hi else "watch")
     assert "последний отказ канала 3 ч назад" in свежий["reasons_real"][0]["text"]
+    assert свежий["reasons_real"][0]["text"].startswith("правило давности (высокий риск)")
     # отказ виден только после подтверждения: через 3600 с ещё нет, через 3601 — есть
     assert rule_split([at - timedelta(seconds=3600)], None, at)["reasons_real"] == []
     assert rule_split([at - timedelta(seconds=3601)], None, at)["reasons_real"]
     assert rule_split([at - timedelta(hours=(hi + wa) / 2)], None, at)["level_real"] == "watch"
     assert rule_split([at - timedelta(hours=wa + 1)], None, at)["level_real"] == "normal"
     assert свежий["score_real"] > нет["score_real"]
-    # предвестник: отказ через 6 ч — high, через 30 ч — watch (при H = 12), только с паспортом
+    # предвестник: отказ через H/2 — high, между H и P-F — watch, только с паспортом
     pf = timedelta(days=R["precursor"]["pf_days"])
     H = timedelta(hours=R["horizon_h"])
     скоро = rule_split([], eq, at, pre=[at - pf + H / 2])
-    позже = rule_split([], eq, at, pre=[at - pf + H * 2.5]) if H * 2.5 < pf else None
+    позже = rule_split([], eq, at, pre=[at - (pf - H) / 2]) if H < pf else None
     assert скоро["level_full"] == "high" and скоро["level_real"] == "normal"
     assert скоро["score_synth"] > 0 and скоро["reasons"][0]["kind"] == "synthetic"
     assert "P-F" in скоро["reasons"][0]["text"] and скоро["reasons_real"] == []

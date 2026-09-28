@@ -369,7 +369,7 @@ async def list_channel_episodes(
 # Балл по датчикам (MOS-253): строки pred.sensor_risk последнего среза с узлом
 # и коллектором канала. Коллектор — узел уровня 2 дерева: сам узел канала или его
 # родитель, так же, как у GET /api/objects/tree. $1 — synthetic: при false балл
-# и уровень — модель без синтетики (score_real, level_real, reasons_real; MOS-263).
+# и уровень — правило давности без синтетики (score_real, level_real, reasons_real; MOS-263).
 # $2 — участки роли.
 ДАТЧИКИ = """
 WITH s AS (
@@ -419,12 +419,13 @@ async def get_sensor_risk(
 ):
     """Балл риска по каждому датчику (MOS-253, эпик MOS-248). Балл считает worker
     после прогноза (app.worker.sensor_scores → pred.sensor_risk), метод только читает
-    последний срез — тот же as_of, что у GET /api/risks. Модель — app.domain.sensor_risk
-    (SL.10, MOS-263): балл — вероятность отказа канала на горизонте модели.
+    последний срез — тот же as_of, что у GET /api/risks. Правила — rule_split в
+    app.domain.sensor_risk (SL.10, MOS-263): балл — частота отказа канала в ближайшие
+    24 ч при такой давности последнего отказа, с синтетикой — и при таком предвестнике.
 
     `synthetic=1` (по умолчанию): балл = score_real + score_synth, уровень level_full,
     причины всех видов, `equipment` — синтетический паспорт. `synthetic=0`: балл =
-    score_real, уровень level_real, причины reasons_real модели без синтетики,
+    score_real, уровень level_real, причины reasons_real правила давности,
     причин вида synthetic нет, `equipment` = null —
     паспорт выдуман, и без синтетики его показывать нечем.
 
@@ -436,8 +437,9 @@ async def get_sensor_risk(
     Несуществующий `node` так же даёт пустой items и node_name = null (MOS-251);
     несуществующий `collector` — 404.
     У элемента есть node_id, collector_id и picket, по ним экран выбирает коллектор
-    и пикет. Сортировка — балл по
-    убыванию, затем channel_id. Тик ещё не считал — as_of = null и items пустой.
+    и пикет. Сортировка — уровень
+    (high, watch, normal), внутри уровня балл по убыванию, затем channel_id: балл
+    у правил считается по давности, и watch с баллом 0,5 иначе встал бы выше high. Тик ещё не считал — as_of = null и items пустой.
     """
     syn = bool(synthetic)
     node_name = await _узел(conn, node)
@@ -450,7 +452,8 @@ async def get_sensor_risk(
     total = await conn.fetchval(ДАТЧИКИ + "SELECT count(*) FROM s" + фильтр, *аргументы)
     rows = await conn.fetch(
         ДАТЧИКИ + "SELECT * FROM s" + фильтр
-        + " ORDER BY score DESC, channel_id LIMIT $7 OFFSET $8",
+        + " ORDER BY array_position(ARRAY['high', 'watch', 'normal'], level),"
+        " score DESC, channel_id LIMIT $7 OFFSET $8",
         *аргументы, limit, offset,
     )
     as_of = await conn.fetchval("SELECT max(as_of) FROM pred.sensor_risk")
