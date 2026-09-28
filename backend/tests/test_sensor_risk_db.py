@@ -18,6 +18,8 @@ import json
 import os
 import sys
 import time
+from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -117,7 +119,7 @@ def database():
             """.replace("$1", str(КАНАЛОВ))
             )
             # Отказы: газ узла 5657 — в окне ППР 04.06.2026 (не отказ), каждый 7-й
-            # канал — свежий отказ 30.06 за 1 ч до среза (момент rearm), каждый 11-й — отказ позже среза (не видим).
+            # канал — свежий отказ 30.06 за 3601 с до среза (D5 уже подтверждён), каждый 11-й — отказ позже среза (не видим).
             await conn.execute("""
                 INSERT INTO smvu.model_failure_episode
                        (channel_id, section_id, started_at, ended_at, fault_value, model_version)
@@ -125,7 +127,7 @@ def database():
                        'Неисправен', 'lgbm-v3-bag-2026.09.21'
                   FROM smvu.channel c
                   JOIN (VALUES (timestamptz '2026-06-04 09:30+03', 'ppr'),
-                               (timestamptz '2026-06-30 23:00+03', 'fresh'),
+                               (timestamptz '2026-06-30 22:59:58+03', 'fresh'),
                                (timestamptz '2026-07-10 10:00+03', 'future')) AS s(t, what)
                     ON (s.what = 'ppr' AND c.object_id = 5657 AND c.sensor_kind = 'Газовый датчик')
                     OR (s.what = 'fresh' AND c.channel_id % 7 = 0)
@@ -319,7 +321,7 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
         ):
             assert r["score_real"] > здоровый(r["channel_id"]), r
             assert json.loads(r["reasons_real"])[0]["kind"] == "real"
-        # отказ час назад — момент rearm: модель журнала даёт high всем таким каналам
+        # Подтверждённый свежий эпизод выше high текущего замороженного артефакта.
         assert await conn.fetchval(
             "SELECT bool_and(level_real = 'high') FROM pred.sensor_risk WHERE channel_id % 7 = 0"
         )
@@ -338,10 +340,52 @@ def test_tick_writes_every_channel_on_forecast_as_of(database):
     _в_базе(database, тело)
 
 
+def test_worker_sql_waits_for_confirmation_and_check_observation(database):
+    """Архивное окончание эпизода и поверка позже среза не доступны раньше."""
+
+    async def тело(conn):
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            at = datetime(2026, 6, 30, 21, tzinfo=sensor_risk.MSK)
+            await conn.execute("""
+                INSERT INTO smvu.channel (channel_id, tag, object_id, section_id,
+                                          sensor_kind, collector, picket)
+                VALUES (999011, 'causal-confirmed', 5657, 1, 'Газовый датчик', 'test', 1),
+                       (999012, 'causal-unconfirmed', 5657, 1, 'Газовый датчик', 'test', 1);
+                INSERT INTO smvu.model_failure_episode
+                       (channel_id, section_id, started_at, ended_at, fault_value, model_version)
+                VALUES (999011, 1, '2026-06-30 19:59:59+03', '2026-06-30 23:00:00+03',
+                        'Неисправен', 'lgbm-v3-bag-2026.09.21'),
+                       (999012, 1, '2026-06-30 20:00:00+03', '2026-06-30 23:00:00+03',
+                        'Неисправен', 'lgbm-v3-bag-2026.09.21');
+            """)
+            rows = await conn.fetch(sensor_scores.ОТКАЗЫ, at, sensor_risk.CONFIRM_SECONDS)
+            assert {r["channel_id"] for r in rows if r["channel_id"] in (999011, 999012)} == {999011}
+
+            point = await conn.fetchrow("""
+                SELECT p.id, p.equipment_id FROM asset.measuring_point p
+                JOIN asset.equipment e ON e.id = p.equipment_id
+                WHERE e.source_system = 'synthetic-demo' ORDER BY p.id LIMIT 1
+            """)
+            await conn.execute("DELETE FROM asset.measurement WHERE point_id = $1", point["id"])
+            await conn.execute("""
+                INSERT INTO asset.measurement (point_id, measured_at, value_num)
+                VALUES ($1, '2026-06-29 10:00+03', 1), ($1, '2026-06-30 22:00+03', 1)
+            """, point["id"])
+            checks = await conn.fetch(sensor_scores.ПРОВЕРКИ, sensor_risk.SRC, at)
+            assert next(r["last"] for r in checks if r["equipment_id"] == point["equipment_id"]) == date(2026, 6, 29)
+        finally:
+            await tr.rollback()
+
+    _в_базе(database, тело)
+
+
 async def _список(conn, user, **kw):
-    параметры = dict(
-        synthetic=1, node=None, collector=None, channel=None, level=None, limit=500, offset=0
-    )
+    параметры = {
+        "synthetic": 1, "node": None, "collector": None, "channel": None,
+        "level": None, "limit": 500, "offset": 0,
+    }
     параметры.update(kw)
     return await objects.get_sensor_risk(**параметры, conn=conn, user=user)
 
@@ -442,26 +486,35 @@ def test_api_reads_table_with_filters_and_scope(database):
         with pytest.raises(objects.HTTPException):
             await _список(conn, ADMIN, collector=5657)  # узел, а не коллектор
 
+        stored = await conn.fetch("""
+            SELECT c.object_id, r.level_real, r.level_full
+            FROM pred.sensor_risk r JOIN smvu.channel c USING (channel_id)
+        """)
+        expected_collectors = {}
         for syn in (0, 1):
             сводка = await objects.get_sensor_risk_summary(
                 synthetic=syn, conn=conn, user=ADMIN
             )
             assert сводка["synthetic"] is bool(syn)
             assert сводка["high"] + сводка["watch"] + сводка["normal"] == КАНАЛОВ - 1
-            высоких = sum(
-                1
-                for i in (полный if syn else реальный)["items"]
-                if i["level"] == "high"
+            field = "level_full" if syn else "level_real"
+            expected_levels = Counter(r[field] for r in stored)
+            assert {k: сводка[k] for k in ("high", "watch", "normal")} == {
+                k: expected_levels[k] for k in ("high", "watch", "normal")
+            }
+            # Высоких рисков может не быть: количество определяет артефакт,
+            # а API обязан точно агрегировать сохранённые уровни всего парка.
+            expected_collectors[syn] = Counter(
+                15 if r["object_id"] == 5657 else 16 for r in stored if r[field] == "high"
             )
-            assert сводка["high"] == высоких
-            assert сводка["collectors_with_high"] == 2
-            assert [c["collector_id"] for c in сводка["top_collectors"]] and sum(
-                c["high"] for c in сводка["top_collectors"]
-            ) == высоких
+            assert сводка["collectors_with_high"] == len(expected_collectors[syn])
+            assert {c["collector_id"]: c["high"] for c in сводка["top_collectors"]} == expected_collectors[syn]
         сводка = await objects.get_sensor_risk_summary(
             synthetic=1, conn=conn, user=DISP
         )
-        assert [c["collector_id"] for c in сводка["top_collectors"]] == [15]
+        assert {c["collector_id"]: c["high"] for c in сводка["top_collectors"]} == {
+            k: v for k, v in expected_collectors[1].items() if k == 15
+        }
         assert sensor_risk.SRC == "synthetic-demo"
 
     _в_базе(database, тело)
