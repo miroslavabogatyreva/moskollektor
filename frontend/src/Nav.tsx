@@ -18,9 +18,11 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
   const at = useLastUpdate()
   const menuRoutes = me?.roles.includes('admin') ? [...ROUTES, ...ADMIN_ROUTES] : ROUTES
 
+  // flex-wrap у шапки и меню: на 390 px без переноса шапка была шире окна — до 812 px
+  // с меню администратора (e2e/layout-390.spec.ts).
   return (
     <header
-      class="flex items-center gap-5 px-5 py-2.5 min-h-16 text-white"
+      class="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-2.5 min-h-16 text-white"
       style="background:var(--brand-header-bg)"
     >
       <div class="flex items-center gap-3 mr-auto">
@@ -29,7 +31,7 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
         </a>
         <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>
       </div>
-      <nav aria-label="Разделы" class="flex gap-0.5">
+      <nav aria-label="Разделы" class="flex flex-wrap gap-0.5">
         {menuRoutes.map((r) => {
           const active = currentPath === r.path
           return (
@@ -55,7 +57,7 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
         </span>
       )}
       {me && (
-        <div class="flex items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
+        <div class="flex flex-wrap items-center gap-2.5 text-[13.5px]" style="color:#CFE0F5">
           <span>
             {me.full_name || me.login} · {roleLabels(me.roles)}
           </span>
