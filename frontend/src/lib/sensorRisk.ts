@@ -134,9 +134,17 @@ export function сПараметром(
   return s ? `${path}?${s}` : path
 }
 
-// Главная причина — самая весомая из тех, что прибавили к баллу. Плановая (окно
+// Главная причина — та, что дала уровень датчика: high по давности (вес 0,019)
+// при предвестнике watch (вес 0,49) — это правило давности, а не предвестник.
+// Уровень правила стоит в тексте скобкой, как LEVEL_RU в sensor_risk.py; так же
+// выбирает run_sensors.причина_уровня() для прогноза и заявки. Уровня normal
+// или метки нет — самая весомая из тех, что прибавили к баллу. Плановая (окно
 // ППР) веса не прибавляет, а объясняет: берём её, только когда других нет.
-export function главнаяПричина(reasons: SensorReason[]): SensorReason | null {
+const МЕТКА_УРОВНЯ: Record<string, string> = { high: '(высокий риск)', watch: '(наблюдать)' }
+export function главнаяПричина(reasons: SensorReason[], level?: string): SensorReason | null {
+  const метка = level ? МЕТКА_УРОВНЯ[level] : undefined
+  const давшая = метка ? reasons.find((r) => r.text.includes(метка)) : undefined
+  if (давшая) return давшая
   const весомые = reasons.filter((r) => r.kind !== 'plan')
   if (весомые.length === 0) return reasons[0] ?? null
   return весомые.reduce((a, b) => (b.weight > a.weight ? b : a))
@@ -183,7 +191,7 @@ export function почемуРиск(items: SensorRow[]): string[] {
       `Датчиков участка: ${items.length}, все в норме — ни правило давности, ни правило предвестника не сработало`,
     ]
   const строки = риск.slice(0, ПОКАЗАТЬ).map((s) => {
-    const п = главнаяПричина(s.reasons)
+    const п = главнаяПричина(s.reasons, s.level)
     return п ? `${s.name}: ${п.text}` : s.name
   })
   if (риск.length > ПОКАЗАТЬ)

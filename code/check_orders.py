@@ -283,6 +283,45 @@ async def check_m09(conn):
     )
 
 
+ПОСЛЕДНЯЯ_ВЕРСИЯ = (
+    "SELECT model_version FROM pred.run WHERE status = 'done' ORDER BY run_id DESC LIMIT 1"
+)
+# Участок high без заявки: нет ни автозаявки sensor:<участок>:…, ни живой заявки
+# на его техническом месте (Ф-48 глушит новую), ни открытого наряда-допуска.
+HIGH_БЕЗ_ЗАЯВКИ = """
+SELECT fc.section_id FROM pred.forecast_current fc
+  JOIN ref.object_xref x ON x.section_id = fc.section_id
+ WHERE fc.risk_class = 'high'
+   AND NOT EXISTS (SELECT 1 FROM maint.notification n
+                    WHERE n.source_system = 'forecast'
+                      AND n.source_key LIKE 'sensor:' || fc.section_id || ':%')
+   AND NOT EXISTS (SELECT 1 FROM maint.notification n
+                    WHERE n.func_location_id = x.func_location_id
+                      AND n.status IN ('OPEN', 'IN_PROCESS') AND n.due_at > fc.as_of)
+   AND NOT EXISTS (SELECT 1 FROM permit.permit p
+                    WHERE p.location_id = x.permit_location_id AND p.closed_at IS NULL
+                      AND now() >= p.valid_from AND now() < p.valid_to)
+ ORDER BY 1
+"""
+
+
+async def _m10_sensors(conn, base_text):
+    """М-10 на пути правил датчика: у каждого участка high есть заявка без диспетчера."""
+    high = await conn.fetchval(
+        "SELECT count(*) FROM pred.forecast_current WHERE risk_class = 'high'")
+    if not high:
+        return False, f"{base_text}; участков high в текущем прогнозе 0 — проверять не на чем"
+    без = [r[0] for r in await conn.fetch(HIGH_БЕЗ_ЗАЯВКИ)]
+    заявок = await conn.fetchval(
+        "SELECT count(*) FROM maint.notification "
+        "WHERE source_system = 'forecast' AND source_key LIKE 'sensor:%'")
+    суть = (f"правила датчика: участков high {high}, без заявки {len(без)}; "
+            f"автозаявок sensor: всего {заявок}")
+    if без:
+        return False, f"{суть}; без заявки: {', '.join(map(str, без[:10]))}"
+    return True, f"{суть}; {base_text}"
+
+
 async def check_m10(conn, score):
     """Открытое предупреждение модели превращается в заявку без диспетчера.
 
@@ -296,6 +335,10 @@ async def check_m10(conn, score):
     base_ok, base_text = await _m10_source(conn)
     if not base_ok:
         return False, base_text
+    # С 28.09.2026 прогноз считают правила датчика (run_sensors.py): заявку открывает
+    # датчик high, ключ sensor:<участок>:<сутки>, score.json тут ни при чём.
+    if await conn.fetchval(ПОСЛЕДНЯЯ_ВЕРСИЯ) == "sensor-rules-24h":
+        return await _m10_sensors(conn, base_text)
     if score is None:
         return False, (
             f"{base_text}; открытые предупреждения сверить не с чем — "

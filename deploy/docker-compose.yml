@@ -221,11 +221,9 @@ services:
       TZ: ${TZ}
       SCHEDULER_INTERVAL_MIN: ${SCHEDULER_INTERVAL_MIN:-4}
       SCHEDULER_REFRESH_INTERVAL_MIN: ${SCHEDULER_REFRESH_INTERVAL_MIN:-5}
-      # Пусто — расчёт идёт прежним путём, своими 22 признаками feat.v1.
-      # Задано — worker берёт вероятности и 42 признака из выдачи модели v3
-      # (backend/app/worker/run_v3.py). Файл кладёт образ ml-score по расписанию.
+      # С 28.09.2026 прогноз считают правила датчика (backend/app/worker/run_sensors.py);
+      # из файла ml-score worker берёт только срез as_of при проигрывании архива.
       SCORE_V3_PATH: ${SCORE_V3_PATH:-}
-      SCORE_V3_MAX_AGE_H: ${SCORE_V3_MAX_AGE_H:-1.5}
       # 1 — проигрывание архива: срез прогона берётся из score.json, если он раньше
       # края данных. Пара к ML_SCORE_REPLAY_* в deploy/ml-score.sh, docs/server.md.
       SCORE_V3_REPLAY: ${SCORE_V3_REPLAY:-0}

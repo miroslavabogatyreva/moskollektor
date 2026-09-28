@@ -335,27 +335,3 @@ def test_real_sql_weights_change_without_additional_orders(database):
         finally:
             await conn.close()
     asyncio.run(case())
-
-
-def test_stale_worker_score_does_not_freeze_selection(database, monkeypatch):
-    from app.worker import run
-    monkeypatch.setattr(run, "ПУТЬ_SCORE", "test-stale-score.json")
-    monkeypatch.setattr(run.client, "get_model", lambda: {"model_version": "test-720", "feature_schema": "feat.v3"})
-    monkeypatch.setattr(run.client, "проверить_контракт", lambda *args: None)
-    async def stale_score(*args):
-        return {"участки": sorted(SECTIONS), "вероятности": [.495] * 6,
-                "факторы": [[] for _ in SECTIONS], "срез": "2026-06-01T00:00:00",
-                "предупреждения": [warning("stale")]}
-    monkeypatch.setattr(run.run_v3, "собрать", stale_score)
-    async def case():
-        import asyncpg
-        conn = await asyncpg.connect(database)
-        try:
-            result = await run.прогон(conn, as_of=order_rules.момент_файла("2026-06-30T23:59:59"), horizon_h=720)
-            assert result["status"] == "failed"
-            assert "ФайлНеГодится" in result["error_text"] and "срез файла" in result["error_text"]
-            assert await conn.fetchval("SELECT count(*) FROM pred.warning_order_selection WHERE pfx='stale'") == 0
-            assert (await counts(conn, "stale"))["orders"] == 0
-        finally:
-            await conn.close()
-    asyncio.run(case())

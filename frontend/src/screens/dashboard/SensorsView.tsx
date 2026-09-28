@@ -185,7 +185,7 @@ export function SensorTable({
               </thead>
               <tbody>
                 {data.items.map((s) => {
-                  const причина = главнаяПричина(s.reasons)
+                  const причина = главнаяПричина(s.reasons, s.level)
                   return (
                     <tr
                       key={s.channel_id}

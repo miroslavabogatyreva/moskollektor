@@ -53,12 +53,14 @@
 | `worker` | тот же образ, другая команда | планировщик APScheduler: расчёт прогноза, свёртка, погода, статусы заявок | — | `app` |
 | `migrate` | тот же образ | накат `db/migrations/*.sql` и `db/seed/*.sql`, живёт секунды и выходит | — | `app` |
 | `emulator-smvu` | тот же образ | раз в минуту шлёт в `POST /api/ingest/readings` показания архива со сдвигом на 364 дня | — | `app` |
-| `ml` | задаётся `ML_IMAGE`; в поставке — заглушка `ml-stub/` | модель: `GET /model`, `POST /predict` | 8100 внутри сети compose | `app` |
+| `ml` | задаётся `ML_IMAGE`; в поставке — заглушка `ml-stub/` | модель: `GET /model`, `POST /predict`; с 28.09.2026 worker её не зовёт — прогноз считают правила датчика | 8100 внутри сети compose | `app` |
 | `ldap` | собираем из `deploy/ldap/Dockerfile` | демонстрационный каталог LDAP с четырьмя учётками | 389 внутри сети compose | `ldap` |
 
 Ещё одна часть живёт вне compose: скрипт `deploy/ml-score.sh`. Его раз в час
 запускает crontab хоста; он поднимает образ `ml-score` модели v3 и кладёт файл
-`score.json` в том `score`. Worker читает этот том только на чтение. Скрипт запускается
+`score.json` в том `score`. Worker читает этот том только на чтение, и с 28.09.2026
+берёт из файла одно поле `as_of` — срез при проигрывании архива; вероятности модели
+прогон не читает, прогноз считают правила датчика (`backend/app/worker/run_sensors.py`). Скрипт запускается
 снаружи, потому что иначе worker должен был бы получить сокет Docker, а это права root
 на всю машину (разбор — в шапке самого скрипта).
 
@@ -94,8 +96,8 @@
 | 1 | браузер | `nginx` | интерфейс, REST, SSE | HTTPS, 443 | да |
 | 2 | `nginx` | `api` | запросы `/api/*` без обрезки префикса | HTTP, 8000 | нет |
 | 3 | `api`, `worker`, `migrate` | `db` | запросы SQL | PostgreSQL, 5432 | нет |
-| 4 | `worker` | `ml` | `GET /model` перед каждым расчётом, `POST /predict` | HTTP, 8100 | нет |
-| 5 | `ml-score` | `worker` | `score.json` через том `score` | файл | нет |
+| 4 | `worker` | `ml` | `GET /model` перед каждым расчётом, `POST /predict`; с 28.09.2026 не используется | HTTP, 8100 | нет |
+| 5 | `ml-score` | `worker` | `score.json` через том `score`; с 28.09.2026 worker берёт из него только срез `as_of` при проигрывании | файл | нет |
 | 6 | `worker` | `api` | погода и статусы заявок из эмуляторов | HTTP, 8000 | нет |
 | 7 | `emulator-smvu` | `api` | пачки показаний с токеном `INGEST_TOKEN` | HTTP, 8000 | нет |
 | 8 | `api` | `ldap` | проверка пароля simple bind | LDAP, 389 | нет |
@@ -112,7 +114,7 @@
 | бэкенд | Python, FastAPI, uvicorn, asyncpg, APScheduler 3.x | 3.14, 0.141.1, 0.52.4, 0.31.0, 3.11.3 | `docs/HLD.md` разд. 3.1, 7.1.2 |
 | фронтенд | Vite, Preact, TypeScript, Tailwind | — | `docs/HLD.md` разд. 4.1: бюджет 150 КБ сжатого JS на всё |
 | веб-сервер | nginx | 1.31 | `docs/HLD.md` разд. 7.1 |
-| модель | LightGBM в образе ML-команды | модель `lgbm-v3-bag-2026.09.21b` | `docs/HLD.md` разд. 6 |
+| прогноз | правила датчика `backend/app/domain/sensor_rules.json` в `worker` (с 28.09.2026); до этого — LightGBM в образе ML-команды | `sensor-rules-24h`; прежде `lgbm-v3-bag-2026.09.21b` | `docs/HLD.md` разд. 3.4, 6 |
 | поставка | Docker Compose, один хост | — | `docs/HLD.md` разд. 7 |
 
 Все зависимости Python закреплены версиями в `backend/requirements.txt`, их перечень
@@ -207,7 +209,13 @@ PostgreSQL, Python, nginx, Debian, JavaScript (`docs/HLD.md` разд. 1.2).
 (`GET /api/sources`). Если остановить эмулятор командой `docker compose stop
 emulator-smvu`, остальная система продолжит работать, а экран назовёт отставший источник.
 
-**Оговорка про модель v3.** Прогноз на стенде считает модель v3 ML-команды:
+**С 28.09.2026 прогноз на стенде и в поставке считают правила датчика**
+(`backend/app/worker/run_sensors.py`, `backend/app/domain/sensor_rules.json`), без образов
+`ml` и `ml-score` и без весов модели: worker на каждом прогоне считает балл каждого
+датчика и отдаёт участку балл самого рискованного. Абзац ниже описывает, как было
+до 28.09.2026.
+
+**Оговорка про модель v3 (до 28.09.2026).** Прогноз на стенде считала модель v3 ML-команды:
 её образы `ml` и `ml-score` собираются из `ml-model/Dockerfile` и
 `ml-model/Dockerfile.score`, а веса модели и подготовленные файлы журнала в репозиторий
 не входят (`ml-model/README.md`). Без них поставка работает на заглушке: переменная
@@ -224,7 +232,7 @@ emulator-smvu`, остальная система продолжит работ�
 | заполнить `deploy/.env` из `deploy/.env.example`, выпустить сертификат | `docs/install.md` разд. 4, `deploy/README.md` |
 | собрать образы и фронт | `docs/build.md` |
 | накатить схему, залить выгрузку, поднять `api` и `worker` | `deploy/README.md`, `docs/install.md` разд. 5 |
-| включить расчёт модели v3 по crontab | `docs/server.md`, раздел «Проигрывание архива» |
+| включить проигрывание архива по crontab (срез из `score.json`) | `docs/server.md`, раздел «Проигрывание архива» |
 | резервные копии и восстановление | `docs/install.md` разд. 6, `docs/restore.md` |
 
 Базовая команда подъёма всей системы:
