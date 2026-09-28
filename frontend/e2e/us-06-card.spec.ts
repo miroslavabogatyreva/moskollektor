@@ -77,7 +77,12 @@ test('US-06 сц. 2: какой канал под угрозой', async ({ page
   expect(items.length, 'у участка есть каналы').toBeGreaterThan(0)
 
   await page.goto(`/objects/${о.section_id}`)
-  const отказы = page.locator('section', { hasText: 'Отказы по каналам' }).locator('tbody tr')
+  const секция = page.locator('section', { hasText: 'Отказы по каналам' })
+  const отказы = секция.locator('tbody tr')
+  // Каналы без отказов свёрнуты под кнопку (28.09.2026) — раскрываем, если она есть.
+  const кнопка = секция.getByRole('button', { name: /^Показать каналы без отказов/ })
+  await expect(секция.locator('table')).toBeVisible()
+  if (await кнопка.count()) await кнопка.click()
   await expect(отказы).toHaveCount(items.length)
   for (const к of items)
     await expect(

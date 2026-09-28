@@ -62,3 +62,19 @@ test('паспорт и прогнозы свёрнуты и раскрываю�
   await прогнозы.getByRole('button', { name: /^Показать ещё \d+$/ }).click()
   expect(await прогнозы.locator('tbody tr').count()).toBeGreaterThan(5)
 })
+
+test('каналы без отказов свёрнуты под кнопку', async ({ page }) => {
+  const { items: к } = (await (
+    await page.request.get(`/api/objects/${УЧАСТОК}/channels?limit=200`)
+  ).json()) as { items: { faults_cnt: number }[] }
+  const сОтказами = к.filter((c) => c.faults_cnt > 0).length
+  expect(к.length - сОтказами, 'у участка есть каналы без отказов').toBeGreaterThan(0)
+  await page.goto(`/objects/${УЧАСТОК}`)
+  const секция = page.locator('section', { hasText: 'Отказы по каналам' })
+  const строки = секция.locator('tbody tr')
+  await expect(строки).toHaveCount(сОтказами)
+  await секция
+    .getByRole('button', { name: `Показать каналы без отказов: ${к.length - сОтказами}` })
+    .click()
+  await expect(строки).toHaveCount(к.length)
+})

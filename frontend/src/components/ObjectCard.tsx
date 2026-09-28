@@ -127,6 +127,7 @@ export function ObjectCard({
   const [channelFaultsError, setChannelFaultsError] = useState<string | null>(null)
   const [всеПрогнозы, setВсеПрогнозы] = useState(false)
   const [весьПаспорт, setВесьПаспорт] = useState(false)
+  const [всеКаналы, setВсеКаналы] = useState(false)
 
   useEffect(() => {
     if (!sectionId) return
@@ -497,7 +498,10 @@ export function ObjectCard({
                     </tr>
                   </thead>
                   <tbody>
-                    {channelFaults.map((c) => (
+                    {(всеКаналы
+                      ? channelFaults
+                      : channelFaults.filter((c) => c.faults_cnt > 0)
+                    ).map((c) => (
                       // Строка канала с отказами открывает его историю — как строки
                       // «Последних прогнозов»; синяя ссылка в ячейке выбивалась (28.09.2026).
                       <tr
@@ -523,6 +527,20 @@ export function ObjectCard({
                   </tbody>
                 </table>
               </div>
+            )}
+            {/* Каналы без отказов свёрнуты: у участка 158 их 49 из 60, и таблица
+                была самым длинным блоком карточки (Слава, 28.09.2026). */}
+            {channelFaults && !всеКаналы && channelFaults.every((c) => c.faults_cnt === 0) && (
+              <p class="text-sm" style="color:var(--text-muted)">
+                Отказов у каналов участка не было.
+              </p>
+            )}
+            {channelFaults?.some((c) => c.faults_cnt === 0) && (
+              <Раскрыть
+                открыто={всеКаналы}
+                переключить={() => setВсеКаналы(!всеКаналы)}
+                подпись={`Показать каналы без отказов: ${channelFaults.filter((c) => c.faults_cnt === 0).length}`}
+              />
             )}
           </section>
 
