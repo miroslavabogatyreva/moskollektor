@@ -16,6 +16,7 @@ import {
   type RecentForecast,
   эпизодыПотериСвязи,
 } from './ObjectCard.logic'
+import { GasScale, ГАЗОВЫЙ_ДАТЧИК } from './GasScale'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
    по клику на маршрут /objects/:sectionId. Форма ответа GET /api/objects/{id}
@@ -466,6 +467,14 @@ export function ObjectCard({
           </table>
         )}
       </section>
+
+      {data.channels.some((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК) && (
+        <GasScale
+          channels={data.channels.filter((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК)}
+          readings={readings}
+          readingsError={readingsError}
+        />
+      )}
 
       <section>
         <h2 class="text-sm font-semibold mb-2" style="color:var(--text-muted)">
