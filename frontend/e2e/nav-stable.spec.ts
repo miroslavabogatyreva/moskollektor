@@ -37,7 +37,8 @@ test('на 390 px постоянное место под «обновлено» 
 }) => {
   await свойБандл(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  for (const адрес of ['/map', '/dashboard', '/orders'] // /log шире 390 px и до правки — отдано визуальной доработке) {
+  // /log шире 390 px и до этой правки (200 px лишних) — отдано визуальной доработке.
+  for (const адрес of ['/map', '/dashboard', '/orders']) {
     await page.goto(адрес)
     await page.waitForLoadState('networkidle')
     const лишнее = await page.evaluate(
