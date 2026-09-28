@@ -125,6 +125,9 @@ export function ObjectCard({
 
   const [channelFaults, setChannelFaults] = useState<ChannelFaults[] | null>(null)
   const [channelFaultsError, setChannelFaultsError] = useState<string | null>(null)
+  const [всеПрогнозы, setВсеПрогнозы] = useState(false)
+  const [весьПаспорт, setВесьПаспорт] = useState(false)
+  const [всеКаналы, setВсеКаналы] = useState(false)
 
   useEffect(() => {
     if (!sectionId) return
@@ -144,6 +147,8 @@ export function ObjectCard({
     // readFrom/readTo === '' и выходит, не тронув readings (нашла ab, 22.09.2026:
     // 12 NaN-rect и один RangeError на переходе 2204 → 2157).
     setReadings(null)
+    setВсеПрогнозы(false)
+    setВесьПаспорт(false)
     apiFetch(`/api/objects/${sectionId}`)
       .then((r) => {
         // 403 — чужой объект или id вне области видимости (MOS-107): тому, кто видит
@@ -264,6 +269,18 @@ export function ObjectCard({
 
   const risk = data.current_risk
   const explanationLines = risk?.explanation_ru ? risk.explanation_ru.split('\n') : []
+  const прогнозы = groupRepeatedForecasts(data.recent_forecasts)
+  // Паспорт свёрнут до первых ПАСПОРТ_СТРОК каналов: у участка 158 их 60, и таблица
+  // одна занимала 2 200 px. Остаток — кнопкой, по группам в том же порядке.
+  let паспортОстаток = весьПаспорт ? Infinity : ПАСПОРТ_СТРОК
+  const паспорт = groupChannelsBySystem(data.channels)
+    .map((g) => {
+      const channels = g.channels.slice(0, паспортОстаток)
+      паспортОстаток -= channels.length
+      return { ...g, всего: g.channels.length, channels }
+    })
+    .filter((g) => g.channels.length > 0)
+  const разделы = РАЗДЕЛЫ.filter(([id]) => id !== 'card-risk' || risk)
 
   return (
     <main class="p-5 flex flex-col gap-4">
@@ -288,6 +305,49 @@ export function ObjectCard({
         ))}
       </div>
 
+      {/* Липкая строка разделов (28.09.2026): карточка участка 158 была 11 194 px
+          в высоту, и до показаний листали четыре экрана. Имя и вероятность
+          остаются перед глазами при прокрутке, кнопки ведут к блокам. На 390 px
+          кнопки прокручиваются вбок внутри строки, страница вбок не едет. */}
+      <nav
+        aria-label="Разделы карточки"
+        data-testid="card-sections"
+        class="sticky top-0 z-10 -mx-5 px-5 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1"
+        style="background:var(--bg-app); border-bottom:1px solid var(--border-subtle)"
+      >
+        <span class="text-sm font-semibold min-w-0 truncate">
+          {имяУчастка(data.smvu_key)}
+          {risk && (
+            <span class="font-normal" style="color:var(--text-secondary)">
+              {' '}
+              · {DIRECTION_LABEL[risk.direction].toLowerCase()}{' '}
+              <b class="num" style="color:var(--text-primary)">
+                {risk.probability.toFixed(4)}
+              </b>
+              , ранг <span class="num">{risk.risk_rank}</span>
+            </span>
+          )}
+        </span>
+        <div class="flex gap-1 overflow-x-auto max-w-full xl:ml-auto">
+          {разделы.map(([id, подпись]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              {...{ native: true }}
+              class="text-sm px-3 rounded-md whitespace-nowrap inline-flex items-center min-h-11 md:min-h-8"
+              style="color:var(--link); background:var(--bg-surface); border:1px solid var(--border-subtle); text-decoration:none"
+              onClick={(e) => {
+                // Без адреса с # : preact-router не должен видеть смену пути.
+                e.preventDefault()
+                document.getElementById(id)?.scrollIntoView({ block: 'start' })
+              }}
+            >
+              {подпись}
+            </a>
+          ))}
+        </div>
+      </nav>
+
       {channel && sectionId && <ChannelHistory sectionId={sectionId} channelId={channel} />}
 
       {/* Участок в работах (US-13 сц. 1): открыт наряд-допуск — потеря связи во время
@@ -304,288 +364,409 @@ export function ObjectCard({
         </p>
       ))}
 
-      {/* Уровень риска — сразу под шапкой (US-06, НФ-71): вероятность, объяснение
-          и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
-          и без двух экранов прокрутки их не было видно. */}
-      {risk && (
-        <section class="card" data-tour="risk">
-          <h2 class="card-title mb-2">Уровень риска</h2>
-          <div class="text-sm flex flex-col gap-1">
-            <div>
-              {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
-              <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
-              <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
-              {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
-            </div>
-            {/* Две даты и две подписи — MOS-129. Раньше здесь стояла одна строка
-                «Данные по состоянию на … — момент среза выгрузки заказчика»,
-                и она врала дважды: `as_of` это срез ПРОГОНА, а не свойство
-                выгрузки, и к данным именно этого участка он отношения не имеет.
-                Участок 2477 показывал сверху 19.09.2026, а его последняя запись
-                — 22.04.2026, разрыв 150 суток, и объяснение модели в этой же
-                карточке говорило «датчики молчат 150 суток подряд». Три
-                утверждения на одном экране, и неверным было ровно это.
-
-                Имя «последняя запись участка» взято у соседнего блока «Показания
-                датчиков», а не придумано новое («край данных по участку», как
-                названо в тикете): одно число обязано на экране называться одним
-                словом, иначе диспетчер читает две подписи как два разных факта —
-                ровно та беда, ради которой этот тикет и заведён. */}
-            {/* US-06 сц. 4: время расчёта рядом с последней записью — разрыв между
-                ними и есть «данные участка устарели». */}
-            <div style="color:var(--text-secondary)">
-              Расчёт от {formatDateTime(risk.computed_at, true)}
-            </div>
-            <div style="color:var(--text-secondary)">
-              Считали на срез {formatDate(risk.as_of)} — не время расчёта и не последняя запись по
-              этому участку
-            </div>
-            <div style="color:var(--text-secondary)">
-              {data.last_reading_at
-                ? `Последняя запись участка — ${formatDateTime(data.last_reading_at, true)}: позже неё датчики участка не писали ничего`
-                : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
-            </div>
-          </div>
-
-          {explanationLines.length > 0 && (
-            <div
-              class="text-sm p-3 mt-3 rounded-md"
-              style="background:var(--accent-tint); border-left:3px solid var(--accent)"
-            >
-              <div class="font-semibold mb-1" style="color:var(--accent-text)">
-                Почему такой риск
+      {/* Две колонки от 1280 px (28.09.2026). Слева то, что читают: риск с причиной
+          и ленты показаний — им нужна ширина. Справа таблицы, которым ширина не
+          нужна: отказы по каналам, газ, последние прогнозы, паспорт. Отказы стоят
+          справа сверху, поэтому «насколько опасно» и «что сломано» видны на первом
+          экране рядом. Уже 1280 px колонки превращаются в display:contents, и блоки
+          встают одной лентой в порядке order: риск, отказы, газ, показания,
+          прогнозы, паспорт. */}
+      <div class="flex flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,38rem)] xl:items-start">
+        <div class="contents xl:flex xl:flex-col xl:gap-4 xl:min-w-0">
+          {/* Уровень риска — сразу под шапкой (US-06, НФ-71): вероятность, объяснение
+              и две даты раньше стояли на 1 556 px, под паспортом и таблицей отказов,
+              и без двух экранов прокрутки их не было видно. */}
+          {risk && (
+            <section id="card-risk" class="card order-1 scroll-mt-24" data-tour="risk">
+              <h2 class="card-title mb-2">Уровень риска</h2>
+              <div class="text-sm flex flex-col gap-1">
+                <div>
+                  {DIRECTION_LABEL[risk.direction]}: вероятность{' '}
+                  <b class="num">{risk.probability.toFixed(4)}</b>, ранг{' '}
+                  <b class="num">{risk.risk_rank}</b>, горизонт {risk.horizon_h} ч
+                  {risk.is_stale && <span style="color:var(--state-warning)"> · устарело</span>}
+                </div>
+                {/* Две даты и две подписи — MOS-129: `as_of` это срез ПРОГОНА, а не
+                    свойство выгрузки. Участок 2477 показывал сверху 19.09.2026, а его
+                    последняя запись — 22.04.2026. Имя «последняя запись участка» —
+                    то же, что у блока «Показания датчиков»: одно число на экране
+                    называется одним словом. US-06 сц. 4: время расчёта рядом
+                    с последней записью — разрыв между ними и есть «данные устарели». */}
+                <div style="color:var(--text-secondary)">
+                  Расчёт от {formatDateTime(risk.computed_at, true)}
+                </div>
+                <div style="color:var(--text-secondary)">
+                  Считали на срез {formatDate(risk.as_of)} — не время расчёта и не последняя запись
+                  по этому участку
+                </div>
+                <div style="color:var(--text-secondary)">
+                  {data.last_reading_at
+                    ? `Последняя запись участка — ${formatDateTime(data.last_reading_at, true)}: позже неё датчики участка не писали ничего`
+                    : 'Последней записи у этого участка нет вовсе — датчики не писали ни разу'}
+                </div>
               </div>
-              {explanationLines.map((line, i) => (
-                <p key={i} class="m-0">
-                  {line}
-                </p>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
-      <section class="card">
-        <h2 class="card-title mb-2">Паспорт: каналы участка</h2>
-        <table class="w-full text-sm" style="border-collapse:collapse">
-          <thead>
-            <tr>
-              {['Тег', 'Название', 'Тип датчика'].map((h) => (
-                <th key={h} class="th">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {groupChannelsBySystem(data.channels).map((g) => (
-              <>
-                <tr key={`system-${g.systemKind}`}>
-                  <td
-                    colSpan={3}
-                    class="px-2 py-2 text-xs font-semibold"
-                    style="background:var(--bg-subtle); border-bottom:1px solid var(--border-subtle)"
-                  >
-                    <SystemShape kind={g.systemKind} />
-                    {g.systemKind}{' '}
-                    <span class="font-normal num" style="color:var(--text-muted)">
-                      · {g.channels.length}
-                    </span>
-                  </td>
-                </tr>
-                {g.channels.map((c) => (
-                  <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
-                    <td class="px-2 py-2 num">{c.tag}</td>
-                    <td class="px-2 py-2">{c.name}</td>
-                    <td class="px-2 py-2">{c.sensor_kind}</td>
-                  </tr>
-                ))}
-              </>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section class="card" data-tour="faults">
-        <h2 class="card-title mb-2">Отказы по каналам</h2>
-        {channelFaultsError && (
-          <p style="color:var(--state-error)">
-            Не удалось загрузить отказы по каналам: {channelFaultsError}
-          </p>
-        )}
-        {channelFaults === null && !channelFaultsError && (
-          <p style="color:var(--text-muted)">Загрузка…</p>
-        )}
-        {channelFaults && (
-          <table class="w-full text-sm" style="border-collapse:collapse">
-            <thead>
-              <tr>
-                {['Датчик', 'Канал', 'Отказов', 'Последний', 'В среднем лежит'].map((h) => (
-                  <th key={h} class="th">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {channelFaults.map((c) => (
-                // Строка канала с отказами открывает его историю — как строки «Последних
-                // прогнозов» ниже; синяя ссылка в ячейке выбивалась из таблиц (28.09.2026).
-                <tr
-                  key={c.channel_id}
-                  style="border-bottom:1px solid var(--border-subtle)"
-                  {...(c.faults_cnt > 0
-                    ? rowLink(() => route(`/objects/${sectionId}?channel=${c.channel_id}`))
-                    : {})}
+              {explanationLines.length > 0 && (
+                <div
+                  class="text-sm p-3 mt-3 rounded-md"
+                  style="background:var(--accent-tint); border-left:3px solid var(--accent)"
                 >
-                  <td class="px-2 py-2">{c.sensor_kind}</td>
-                  <td class="px-2 py-2">{c.name}</td>
-                  <td class="px-2 py-2 num">{c.faults_cnt}</td>
-                  <td class="px-2 py-2 num">
-                    {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
-                  </td>
-                  <td class="px-2 py-2 num">
-                    {c.faults_cnt === 0 || c.avg_duration_h == null
-                      ? 'в строю'
-                      : `${c.avg_duration_h.toFixed(1).replace('.', ',')} ч`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+                  <div class="font-semibold mb-1" style="color:var(--accent-text)">
+                    Почему такой риск
+                  </div>
+                  {explanationLines.map((line, i) => (
+                    <p key={i} class="m-0">
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
-      {data.channels.some((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК) && (
-        <GasScale
-          channels={data.channels.filter((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК)}
-          readings={readings}
-          readingsError={readingsError}
-        />
-      )}
+          <section id="card-readings" class="card order-4 scroll-mt-24" data-tour="readings">
+            <h2 class="card-title mb-1">Показания датчиков</h2>
+            <p class="text-sm mb-2" style="color:var(--text-secondary)">
+              {risk
+                ? `Окно расчёта: 7 суток до среза ${formatDate(risk.as_of)}, на котором считал прогноз.`
+                : data.last_reading_at
+                  ? `Последняя запись участка: ${formatDateTime(data.last_reading_at, true)}. Окно ниже подобрано вокруг неё.`
+                  : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}{' '}
+              Прибор пишет в журнал СМВУ только при смене состояния: канал без записей в окне —
+              канал, у которого ничего не менялось. Раздвиньте даты, чтобы увидеть соседние записи.
+            </p>
+            <div
+              class="flex flex-wrap items-end gap-4 text-sm mb-3"
+              style="color:var(--text-secondary)"
+            >
+              <label class="flex flex-col gap-1">
+                С даты
+                <input
+                  type="date"
+                  value={readFrom}
+                  onInput={(e) => setReadFrom((e.target as HTMLInputElement).value)}
+                  class="input"
+                />
+              </label>
+              <label class="flex flex-col gap-1">
+                По дату
+                <input
+                  type="date"
+                  value={readTo}
+                  onInput={(e) => setReadTo((e.target as HTMLInputElement).value)}
+                  class="input"
+                />
+              </label>
+            </div>
 
-      <section class="card">
-        <h2 class="card-title mb-2">Последние прогнозы</h2>
-        <table class="w-full text-sm" style="border-collapse:collapse">
-          <thead>
-            <tr>
-              {['Время расчёта', 'Направление', 'Вероятность', 'Ранг'].map((h) => (
-                <th key={h} class="th">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {groupRepeatedForecasts(data.recent_forecasts).map(({ forecast: f, repeats }) => (
-              <tr
-                key={f.forecast_id}
-                {...rowLink(() => route(`/forecasts/${f.forecast_id}`))}
-                style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
-              >
-                <td class="px-2 py-2 num">
-                  {formatDateTime(f.computed_at, true)}
-                  {repeats > 1 && <span style="color:var(--text-muted)"> · {repeats}×</span>}
-                </td>
-                <td class="px-2 py-2">{DIRECTION_LABEL[f.direction]}</td>
-                <td class="px-2 py-2 num">{f.probability.toFixed(4)}</td>
-                <td class="px-2 py-2 num">{f.risk_rank}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {data.recent_forecasts.length === 0 && (
-          <p style="color:var(--text-muted)">Прогнозов по участку нет.</p>
-        )}
-      </section>
+            {readingsError && (
+              <p style="color:var(--state-error)">
+                Не удалось загрузить показания: {readingsError}
+              </p>
+            )}
+            {readings === null && !readingsError && (
+              <p style="color:var(--text-muted)">Загрузка…</p>
+            )}
 
-      <TechEventsTable sectionId={data.section_id} />
-
-      <section class="card" data-tour="readings">
-        <h2 class="card-title mb-1">Показания датчиков</h2>
-        <p class="text-sm mb-2" style="color:var(--text-secondary)">
-          {risk
-            ? `Окно расчёта: 7 суток до среза ${formatDate(risk.as_of)}, на котором считал прогноз.`
-            : data.last_reading_at
-              ? `Последняя запись участка: ${formatDateTime(data.last_reading_at, true)}. Окно ниже подобрано вокруг неё.`
-              : 'Записей по участку ещё не было — окно ниже за последние 7 суток от сегодня.'}{' '}
-          Прибор пишет в журнал СМВУ только при смене состояния: канал без записей в окне — канал, у
-          которого ничего не менялось. Раздвиньте даты, чтобы увидеть соседние записи.
-        </p>
-        <div
-          class="flex flex-wrap items-end gap-4 text-sm mb-3"
-          style="color:var(--text-secondary)"
-        >
-          <label class="flex flex-col gap-1">
-            С даты
-            <input
-              type="date"
-              value={readFrom}
-              onInput={(e) => setReadFrom((e.target as HTMLInputElement).value)}
-              class="input"
-            />
-          </label>
-          <label class="flex flex-col gap-1">
-            По дату
-            <input
-              type="date"
-              value={readTo}
-              onInput={(e) => setReadTo((e.target as HTMLInputElement).value)}
-              class="input"
-            />
-          </label>
+            {readings && (
+              <Ленты channels={data.channels} readings={readings} from={readFrom} to={readTo} />
+            )}
+          </section>
         </div>
 
-        {readingsError && (
-          <p style="color:var(--state-error)">Не удалось загрузить показания: {readingsError}</p>
-        )}
-        {readings === null && !readingsError && <p style="color:var(--text-muted)">Загрузка…</p>}
+        <div class="contents xl:flex xl:flex-col xl:gap-4 xl:min-w-0">
+          <section id="card-faults" class="card order-2 scroll-mt-24" data-tour="faults">
+            <h2 class="card-title mb-2">Отказы по каналам</h2>
+            {channelFaultsError && (
+              <p style="color:var(--state-error)">
+                Не удалось загрузить отказы по каналам: {channelFaultsError}
+              </p>
+            )}
+            {channelFaults === null && !channelFaultsError && (
+              <p style="color:var(--text-muted)">Загрузка…</p>
+            )}
+            {channelFaults && (
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm" style="border-collapse:collapse">
+                  <thead>
+                    <tr>
+                      {['Датчик', 'Канал', 'Отказов', 'Последний', 'В среднем лежит'].map((h) => (
+                        <th key={h} class="th">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(всеКаналы
+                      ? channelFaults
+                      : channelFaults.filter((c) => c.faults_cnt > 0)
+                    ).map((c) => (
+                      // Строка канала с отказами открывает его историю — как строки
+                      // «Последних прогнозов»; синяя ссылка в ячейке выбивалась (28.09.2026).
+                      <tr
+                        key={c.channel_id}
+                        style="border-bottom:1px solid var(--border-subtle)"
+                        {...(c.faults_cnt > 0
+                          ? rowLink(() => route(`/objects/${sectionId}?channel=${c.channel_id}`))
+                          : {})}
+                      >
+                        <td class="px-2 py-1.5">{c.sensor_kind}</td>
+                        <td class="px-2 py-1.5">{c.name}</td>
+                        <td class="px-2 py-1.5 num">{c.faults_cnt}</td>
+                        <td class="px-2 py-1.5 num">
+                          {c.last_fault_at ? formatDate(c.last_fault_at) : '—'}
+                        </td>
+                        <td class="px-2 py-1.5 num">
+                          {c.faults_cnt === 0 || c.avg_duration_h == null
+                            ? 'в строю'
+                            : `${c.avg_duration_h.toFixed(1).replace('.', ',')} ч`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {/* Каналы без отказов свёрнуты: у участка 158 их 49 из 60, и таблица
+                была самым длинным блоком карточки (Слава, 28.09.2026). */}
+            {channelFaults && !всеКаналы && channelFaults.every((c) => c.faults_cnt === 0) && (
+              <p class="text-sm" style="color:var(--text-muted)">
+                Отказов у каналов участка не было.
+              </p>
+            )}
+            {channelFaults?.some((c) => c.faults_cnt === 0) && (
+              <Раскрыть
+                открыто={всеКаналы}
+                переключить={() => setВсеКаналы(!всеКаналы)}
+                подпись={`Показать каналы без отказов: ${channelFaults.filter((c) => c.faults_cnt === 0).length}`}
+              />
+            )}
+          </section>
 
-        {readings && (
-          <div class="flex flex-col gap-5">
-            {data.channels.map((c) => {
-              const chReadings = readings
-                .filter((r) => r.channel_id === c.channel_id)
-                .sort((a, b) => a.read_time.localeCompare(b.read_time))
-              const numericShare =
-                chReadings.length === 0
-                  ? 0
-                  : chReadings.filter((r) => r.value_num != null).length / chReadings.length
-              return (
-                <div key={c.channel_id} data-channel-chart={c.channel_id}>
-                  <div class="text-sm font-semibold mb-1">
-                    {c.name}{' '}
-                    <span class="font-normal" style="color:var(--text-secondary)">
-                      · {c.sensor_kind}
-                    </span>
-                  </div>
-                  {chReadings.length < 2 ? (
-                    <p
-                      class="text-sm px-3 py-1.5 rounded-md"
-                      style="background:var(--bg-subtle); border:1px dashed var(--border-strong); color:var(--text-secondary)"
-                    >
-                      <b style="color:var(--text-primary)">
-                        {chReadings.length === 0
-                          ? 'Нет показаний за период.'
-                          : `За окно ${shortDate(readFrom)}–${shortDate(readTo)} у канала 1 запись.`}
-                      </b>{' '}
-                      {chReadings.length === 0
-                        ? 'Состояние канала за эти дни не менялось.'
-                        : 'Одна смена состояния — рисовать ленту не из чего.'}
-                    </p>
-                  ) : numericShare > 0.5 ? (
-                    <NumericLine readings={chReadings} unit={ЕДИНИЦА[c.sensor_kind]} />
-                  ) : (
-                    <StateRibbon readings={chReadings} from={readFrom} to={readTo} />
+          {data.channels.some((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК) && (
+            <div class="order-3">
+              <GasScale
+                channels={data.channels.filter((c) => c.sensor_kind === ГАЗОВЫЙ_ДАТЧИК)}
+                readings={readings}
+                readingsError={readingsError}
+              />
+            </div>
+          )}
+
+          <section id="card-forecasts" class="card order-5 scroll-mt-24">
+            <h2 class="card-title mb-2">Последние прогнозы</h2>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm" style="border-collapse:collapse">
+                <thead>
+                  <tr>
+                    {['Время расчёта', 'Направление', 'Вероятность', 'Ранг'].map((h) => (
+                      <th key={h} class="th">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(всеПрогнозы ? прогнозы : прогнозы.slice(0, ПРОГНОЗОВ_СРАЗУ)).map(
+                    ({ forecast: f, repeats }) => (
+                      <tr
+                        key={f.forecast_id}
+                        {...rowLink(() => route(`/forecasts/${f.forecast_id}`))}
+                        style="border-bottom:1px solid var(--border-subtle); cursor:pointer"
+                      >
+                        <td class="px-2 py-1.5 num">
+                          {formatDateTime(f.computed_at, true)}
+                          {repeats > 1 && (
+                            <span style="color:var(--text-muted)"> · {repeats}×</span>
+                          )}
+                        </td>
+                        <td class="px-2 py-1.5">{DIRECTION_LABEL[f.direction]}</td>
+                        <td class="px-2 py-1.5 num">{f.probability.toFixed(4)}</td>
+                        <td class="px-2 py-1.5 num">{f.risk_rank}</td>
+                      </tr>
+                    ),
                   )}
-                  {chReadings.length >= 2 && <EpisodeList readings={chReadings} to={readTo} />}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
+                </tbody>
+              </table>
+            </div>
+            {прогнозы.length > ПРОГНОЗОВ_СРАЗУ && (
+              <Раскрыть
+                открыто={всеПрогнозы}
+                переключить={() => setВсеПрогнозы(!всеПрогнозы)}
+                подпись={`Показать ещё ${прогнозы.length - ПРОГНОЗОВ_СРАЗУ}`}
+              />
+            )}
+            {data.recent_forecasts.length === 0 && (
+              <p style="color:var(--text-muted)">Прогнозов по участку нет.</p>
+            )}
+          </section>
+
+          <section id="card-passport" class="card order-6 scroll-mt-24">
+            <h2 class="card-title mb-2">Паспорт: каналы участка</h2>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm" style="border-collapse:collapse">
+                <thead>
+                  <tr>
+                    {['Тег', 'Название', 'Тип датчика'].map((h) => (
+                      <th key={h} class="th">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {паспорт.map((g) => (
+                    <>
+                      <tr key={`system-${g.systemKind}`}>
+                        <td
+                          colSpan={3}
+                          class="px-2 py-1.5 text-xs font-semibold"
+                          style="background:var(--bg-subtle); border-bottom:1px solid var(--border-subtle)"
+                        >
+                          <SystemShape kind={g.systemKind} />
+                          {g.systemKind}{' '}
+                          <span class="font-normal num" style="color:var(--text-muted)">
+                            · {g.всего}
+                          </span>
+                        </td>
+                      </tr>
+                      {g.channels.map((c) => (
+                        <tr key={c.channel_id} style="border-bottom:1px solid var(--border-subtle)">
+                          <td class="px-2 py-1.5 num">{c.tag}</td>
+                          <td class="px-2 py-1.5">{c.name}</td>
+                          <td class="px-2 py-1.5">{c.sensor_kind}</td>
+                        </tr>
+                      ))}
+                    </>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {data.channels.length > ПАСПОРТ_СТРОК && (
+              <Раскрыть
+                открыто={весьПаспорт}
+                переключить={() => setВесьПаспорт(!весьПаспорт)}
+                подпись={`Показать все каналы: ${data.channels.length}`}
+              />
+            )}
+          </section>
+        </div>
+      </div>
+
+      <div id="card-events" class="scroll-mt-24">
+        <TechEventsTable sectionId={data.section_id} />
+      </div>
     </main>
+  )
+}
+
+// Разделы в липкой строке — в порядке блоков на узком экране.
+const РАЗДЕЛЫ: [string, string][] = [
+  ['card-risk', 'Риск'],
+  ['card-faults', 'Отказы'],
+  ['card-readings', 'Показания'],
+  ['card-forecasts', 'Прогнозы'],
+  ['card-passport', 'Паспорт'],
+  ['card-events', 'События'],
+]
+const ПРОГНОЗОВ_СРАЗУ = 5
+const ПАСПОРТ_СТРОК = 8
+
+function Раскрыть({
+  открыто,
+  переключить,
+  подпись,
+}: {
+  открыто: boolean
+  переключить: () => void
+  подпись: string
+}) {
+  return (
+    <button
+      type="button"
+      class="btn btn-secondary mt-2 text-sm"
+      aria-expanded={открыто}
+      onClick={переключить}
+    >
+      {открыто ? 'Свернуть' : подпись}
+    </button>
+  )
+}
+
+// Ленты показаний по каналам. Каналы без единой записи в окне сведены в одну
+// плашку списком (28.09.2026): у участка 158 таких десятки, и каждый стоял
+// отдельной рамкой в 55 px с одной и той же фразой.
+function Ленты({
+  channels,
+  readings,
+  from,
+  to,
+}: {
+  channels: Channel[]
+  readings: Reading[]
+  from: string
+  to: string
+}) {
+  const поКаналу = channels.map((c) => ({
+    c,
+    ряд: readings
+      .filter((r) => r.channel_id === c.channel_id)
+      .sort((a, b) => a.read_time.localeCompare(b.read_time)),
+  }))
+  const молчат = поКаналу.filter((x) => x.ряд.length === 0)
+  return (
+    <div class="flex flex-col gap-4">
+      {поКаналу
+        .filter((x) => x.ряд.length > 0)
+        .map(({ c, ряд }) => {
+          const numericShare = ряд.filter((r) => r.value_num != null).length / ряд.length
+          return (
+            <div key={c.channel_id} data-channel-chart={c.channel_id}>
+              <div class="text-sm font-semibold mb-1">
+                {c.name}{' '}
+                <span class="font-normal" style="color:var(--text-secondary)">
+                  · {c.sensor_kind}
+                </span>
+              </div>
+              {ряд.length < 2 ? (
+                <p class="text-sm" style="color:var(--text-secondary)">
+                  <b style="color:var(--text-primary)">
+                    За окно {shortDate(from)}–{shortDate(to)} у канала 1 запись.
+                  </b>{' '}
+                  Одна смена состояния — рисовать ленту не из чего.
+                </p>
+              ) : numericShare > 0.5 ? (
+                <NumericLine readings={ряд} unit={ЕДИНИЦА[c.sensor_kind]} />
+              ) : (
+                <StateRibbon readings={ряд} from={from} to={to} />
+              )}
+              {ряд.length >= 2 && <EpisodeList readings={ряд} to={to} />}
+            </div>
+          )
+        })}
+      {молчат.length > 0 && (
+        <div
+          class="text-sm px-3 py-2 rounded-md"
+          style="background:var(--bg-subtle); border:1px dashed var(--border-strong); color:var(--text-secondary)"
+        >
+          <b style="color:var(--text-primary)">
+            Нет показаний за период: каналов <span class="num">{молчат.length}</span>.
+          </b>{' '}
+          Состояние этих каналов за эти дни не менялось.
+          <ul
+            class="flex flex-wrap gap-x-4 gap-y-0.5 mt-1"
+            style="list-style:none; padding:0; margin:0"
+          >
+            {молчат.map(({ c }) => (
+              <li key={c.channel_id} data-channel-chart={c.channel_id}>
+                <span style="color:var(--text-primary)">{c.name}</span> · {c.sensor_kind}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 

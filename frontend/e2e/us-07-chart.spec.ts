@@ -1,6 +1,10 @@
 // US-07. Прочитать график показаний — docs/user-stories.md, приёмка Ф-91.
 // Названия test() — названия сценариев истории.
 import { expect, test, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — карточку проверяем своей сборкой, а не фронтом стенда.
+test.beforeEach(({ page }) => свойБандл(page))
 
 interface Объект {
   section_id: number
