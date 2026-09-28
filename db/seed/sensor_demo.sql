@@ -22,7 +22,7 @@
 -- файл — пересчитай её: python3 code/synth_sensor_level.py --fix-mark.
 DO $synth$
 DECLARE
-  mark constant text := 'Оборудование СМВУ, synthetic-demo ef6d66e17682';
+  mark constant text := 'Оборудование СМВУ, synthetic-demo 4454376257ab';
   -- Дата, от которой отсчитана синтетика (конец архива СМВУ). Константа, а не срез
   -- прогноза: паспорт не должен меняться от того, на какой момент считаем балл.
   ref_date constant date := '2026-06-30';
@@ -164,10 +164,10 @@ SELECT 9000000000 + s.channel_id,
 
 -- История проверок: последняя — от 10 сут до двух интервалов до ref_date (около
 -- трети просрочена), дальше назад шагом интервал ± 20 сут, пока не упрёмся во ввод.
--- Газоанализаторы узла 5657 «объект Каппа ДУ» сняты на поверку по настоящему графику
--- ППР заказчика (окно — app.domain.sensor_risk.ППР) и поверены в день вывоза из ОМ,
--- 18.06.2026: иначе экран писал бы рядом «плановый демонтаж на поверку» и «поверка
--- просрочена». Погрешность поверки 0,5…11 %, выше 10 % — вне допуска. Моточасы
+-- Датчики узлов из окон match = 'sure' графика ППР заказчика (maint.ppr_window,
+-- сид ppr_2026.sql накатывается раньше этого) поверены в день вывоза из ОМ: газ
+-- 5657 «объект Каппа ДУ» — 18.06.2026, 5675 «объект Мю ДУ» — 07.05.2026. Иначе экран
+-- писал бы рядом «плановый демонтаж на поверку» и «поверка просрочена». Погрешность поверки 0,5…11 %, выше 10 % — вне допуска. Моточасы
 -- растут от ввода с годовой наработкой вида × 0,6…1,3.
 INSERT INTO asset.measurement (point_id, measured_at, value_num, delta_num,
                                is_out_of_limit, source_system)
@@ -184,9 +184,10 @@ SELECT m.point_id, (m.d + time '10:00') AT TIME ZONE 'Europe/Moscow', m.v,
            END AS v
       FROM (
         SELECT s.*, mp.id AS point_id,
-               CASE WHEN s.object_id = 5657 AND s.sensor_kind = 'Газовый датчик'
-                    THEN date '2026-06-18'
-                    ELSE ref_date - (10 + floor(s.u_last * (2 * s.iv - 10))::int) END AS last
+               coalesce((SELECT max(w.return_to) FROM maint.ppr_window w
+                          WHERE w.match = 'sure' AND w.object_id = s.object_id
+                            AND w.sensor_kind = s.sensor_kind AND w.return_to <= ref_date),
+                        ref_date - (10 + floor(s.u_last * (2 * s.iv - 10))::int)) AS last
           FROM syn s
           JOIN asset.measuring_point mp ON mp.point_no = 9000000000 + s.channel_id
       ) p
