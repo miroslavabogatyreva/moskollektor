@@ -6,6 +6,10 @@
 // комплекса 4068 «объект Сигма» из «района Б».
 import { expect, test } from '@playwright/test'
 import { проверитьЭкраны, видимые } from './helpers/scope'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — карточку проверяем своей сборкой, а не фронтом стенда.
+test.beforeEach(({ page }) => свойБандл(page))
 
 // E2E_US16_LOGIN — прогнать сц. 1–3 под другой ролью с областью видимости (tech1)
 // до того, как сид с disp2 доехал до стенда.
