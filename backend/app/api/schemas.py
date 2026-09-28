@@ -11,9 +11,9 @@ orders.py/audit.py/settings.py: FastAPI сериализует response_model п
 оно взято, — LEFT/LATERAL: строгий тип на таком поле не ловит лишнего, а на первой
 же настоящей строке с NULL валит ответ 500 вместо отдачи данных.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, PlainSerializer
 
@@ -430,3 +430,39 @@ class UserItem(BaseModel):
     is_active: bool
     roles: list[str]
     has_password: bool  # хранит ли сервис хеш пароля; у auth_source=ldap всегда false (US-24)
+
+
+class SensorRiskReason(BaseModel):
+    text: str
+    weight: float
+    kind: Literal["real", "synthetic", "plan"]
+
+
+class SensorEquipment(BaseModel):
+    equipment_no: str
+    manufacturer: str | None
+    model_no: str | None
+    in_service_from: date | None
+    service_life_years: int | None
+    last_check_at: date | None
+    last_check_ok: bool | None
+
+
+class SensorRiskItem(BaseModel):
+    channel_id: int
+    name: str
+    sensor_kind: str | None
+    picket: int | None
+    section_id: int | None
+    score: float
+    level: Literal["high", "watch", "normal"]
+    reasons: list[SensorRiskReason]
+    equipment: SensorEquipment | None
+
+
+class SensorRisk(BaseModel):
+    node: int
+    node_name: str
+    as_of: IsoDatetime
+    synthetic: bool
+    items: list[SensorRiskItem]
