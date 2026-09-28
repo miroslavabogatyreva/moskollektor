@@ -17,6 +17,14 @@ fail=0
 
 q() { docker exec "$DB_CONTAINER" sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"$1\"" 2>&1; }
 
+# Выключенные копии — не зелёная строка: НФ-78 требует, чтобы копии шли, а их нет.
+# Но и не «сломано»: причина названа, включить — одна переменная.
+on=$(docker exec "$DB_CONTAINER" sh -c 'echo "${BACKUP_ENABLED:-1}"' 2>&1)
+if [ "$on" != 1 ]; then
+  echo "ВЫКЛ  копии выключены: BACKUP_ENABLED=$on в deploy/.env, архива и копий нет; docs/restore.md, «Включить и выключить копии»"
+  exit 1
+fi
+
 mode=$(q "show archive_mode")
 if [ "$mode" != on ]; then
   echo "СБОЙ  архив WAL: archive_mode = $mode, журналы не копируются"

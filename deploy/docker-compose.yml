@@ -71,6 +71,9 @@ services:
       # забытый пароль поднимал базу с паролем, известным всему git (задача 1.6).
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
       TZ: ${TZ}
+      # Выключатель копий: 0 — archive-wal.sh не кладёт сегменты в архив
+      # (docs/restore.md, «Включить и выключить копии»).
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-1}
     volumes:
       - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - ./archive-wal.sh:/archive-wal.sh:ro
@@ -79,8 +82,11 @@ services:
       # Смонтировать том на .../data, как делали до 17-й ветки, — значит отдать
       # кластер анонимному тому: `docker compose down -v` сотрёт базу, а бэкап
       # заберёт ноль байт из пустого каталога.
-      - pgdata:/var/lib/postgresql
-      - backups:/backups
+      #
+      # PGDATA_DIR и BACKUP_DIR — каталог на хосте вместо тома докера: так базу
+      # или копии выносят на второй диск. Пусто — тома pgdata и backups, как было.
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql
+      - ${BACKUP_DIR:-backups}:/backups
     ports:
       # Наружу база не смотрит: только петля хоста, чтобы ходить psql-ом со стенда.
       # Порт — переменной: демо-стенд живёт на том же сервере вторым проектом
@@ -113,8 +119,9 @@ services:
       TZ: ${TZ}
       BACKUP_AT: ${BACKUP_AT:-02:00}
       BACKUP_KEEP: ${BACKUP_KEEP:-1}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-1}
     volumes:
-      - backups:/backups
+      - ${BACKUP_DIR:-backups}:/backups
       - ./backup.sh:/backup.sh:ro
     depends_on:
       db:
