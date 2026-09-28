@@ -37,9 +37,9 @@ test('на 390 px постоянное место под «обновлено» 
 }) => {
   await свойБандл(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  // /log (200 px лишних) и /orders (84 px) шире 390 px и без этой правки — отданы
-  // визуальной доработке; когда она придёт, добавить их сюда.
-  for (const адрес of ['/map', '/dashboard']) {
+  // /log (было 200 px лишних) и /orders (84 px) починила визуальная доработка
+  // 28.09.2026: таблица листается внутри своей карточки, а не вся страница.
+  for (const адрес of ['/map', '/dashboard', '/log', '/orders']) {
     await page.goto(адрес)
     await page.waitForLoadState('networkidle')
     const лишнее = await page.evaluate(

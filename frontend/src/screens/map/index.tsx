@@ -342,9 +342,7 @@ export function MapScreen({
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Схема коллектора по пикетам
-      </h1>
+      <h1 style="font-family:var(--font-display)">Схема коллектора по пикетам</h1>
 
       <HomeStrip
         summary={сводка.summary}
@@ -380,8 +378,7 @@ export function MapScreen({
               <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
                 Коллектор
                 <select
-                  class="text-sm px-2 py-1 rounded"
-                  style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+                  class="input"
                   value={collector ?? undefined}
                   onChange={(e) => selectCollector(Number((e.target as HTMLSelectElement).value))}
                 >
@@ -517,19 +514,9 @@ function AxisSwitch({
     ['по участкам', `/map?${q}axis=sections`, поУчасткам],
   ]
   return (
-    <nav
-      aria-label="Ось схемы"
-      class="inline-flex self-start rounded-md overflow-hidden text-sm"
-      style="border:1px solid var(--border-strong)"
-    >
-      {пункты.map(([имя, href, выбран], i) => (
-        <a
-          key={имя}
-          href={href}
-          aria-current={выбран ? 'page' : undefined}
-          class="px-3 py-1"
-          style={`text-decoration:none; ${выбран ? 'background:var(--brand); color:var(--text-on-brand)' : 'background:var(--bg-surface); color:var(--text-primary)'}${i > 0 ? '; border-left:1px solid var(--border-strong)' : ''}`}
-        >
+    <nav aria-label="Ось схемы" class="seg self-start">
+      {пункты.map(([имя, href, выбран]) => (
+        <a key={имя} href={href} aria-current={выбран ? 'page' : undefined}>
           {имя}
         </a>
       ))}

@@ -2,7 +2,8 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { fetchOrder, fetchTopChannel } from './api'
-import { PRIORITY_LABEL, STATUS_LABEL, type OrderDetail, type TopChannel } from './types'
+import { STATUS_LABEL, type OrderDetail, type TopChannel } from './types'
+import { Badge, OrderStatusBadge, PriorityBadge, externalTone } from '../../components/Badge'
 import { errorMessage, formatDateTime } from '../../lib/format'
 
 /* Карточка заявки — задачи 6.6 и 6.7 (MOS-61, MOS-62). Форма ответа —
@@ -88,87 +89,119 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
   }
 
   return (
-    <main class="p-5 flex flex-col gap-5">
-      <div>
-        <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-          Заявка <span class="num">{data.notification_no}</span>
-        </h1>
-        <p style="color:var(--text-secondary)">{data.subject}</p>
-      </div>
+    <main class="p-5 flex flex-col gap-4 max-w-5xl">
+      <header class="flex flex-col gap-1.5">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <h1 style="font-family:var(--font-display)">
+            Заявка <span class="num">{data.notification_no}</span>
+          </h1>
+          <OrderStatusBadge status={data.status} />
+          <PriorityBadge code={data.priority.code} name={data.priority.name} />
+        </div>
+        <p class="text-[15px]" style="color:var(--text-secondary)">
+          {data.subject}
+        </p>
+      </header>
 
-      <section class="text-sm flex flex-col gap-2">
-        <Field label="Объект">
-          {data.object.name} <span class="num">· {data.object.smvu_key}</span>
-        </Field>
-        <Field label="Канал">
-          <ChannelLine канал={канал} sectionId={data.object.section_id} />
-        </Field>
-        {/* Вид работ расчёт выбирает по классу критичности участка
-            (backend/app/domain/order_rules.py, ВИД_РАБОТ) — этот показатель и стоит
-            рядом, с причиной класса и вероятностью, из-за которой заявка заведена
-            (US-22 сц. 2, Ф-73). */}
-        <Field label="Вид работ">
-          {data.work_type.activity_type_name}
-          <div style="color:var(--text-muted)">
-            выбран по классу критичности участка «{data.object.criticality_code}»:{' '}
-            {data.object.criticality_reason}; вероятность потери связи за{' '}
-            <span class="num">{data.forecast.horizon_h}</span> ч —{' '}
-            <span class="num">{data.forecast.probability.toFixed(3).replace('.', ',')}</span>
-          </div>
-        </Field>
-        <Field label="Срок выполнения">
-          {formatDateTime(data.due_at)}{' '}
-          <span style="color:var(--text-muted)">
-            · срок заявки <span class="num">{data.deadline_hours}</span> ч от обнаружения
-          </span>
-        </Field>
-        {data.warning_opened_at && (
-          <Field label="Предупреждение модели открыто">
-            {formatDateTime(data.warning_opened_at)}
+      <section class="card flex flex-col gap-3">
+        <h2 class="card-title">Что сделать</h2>
+        <div class="text-sm">
+          <Field label="Объект">
+            <span class="font-semibold">{data.object.name}</span>{' '}
+            <span class="num" style="color:var(--text-secondary)">
+              · {data.object.smvu_key}
+            </span>
           </Field>
-        )}
-        {data.risk_window_end && (
-          <Field label="Окно риска до">{formatDateTime(data.risk_window_end)}</Field>
-        )}
-        <Field label="Обоснование">{data.reason}</Field>
-        {data.external_status && (
-          <Field label="Статус в системе учёта">
-            {data.external_status}
-            {data.external_assignee && <> · {data.external_assignee}</>}
-            {data.external_status_at && (
-              <span style="color:var(--text-muted)">
-                {' '}
-                · с {formatDateTime(data.external_status_at)} (получено из системы учёта)
-              </span>
-            )}
+          <Field label="Канал">
+            <ChannelLine канал={канал} sectionId={data.object.section_id} />
           </Field>
-        )}
+          {/* Вид работ расчёт выбирает по классу критичности участка
+              (backend/app/domain/order_rules.py, ВИД_РАБОТ) — этот показатель и стоит
+              рядом, с причиной класса и вероятностью, из-за которой заявка заведена
+              (US-22 сц. 2, Ф-73). */}
+          <Field label="Вид работ">
+            <span class="font-semibold">{data.work_type.activity_type_name}</span>
+            <div style="color:var(--text-secondary)">
+              выбран по классу критичности участка «{data.object.criticality_code}»:{' '}
+              {data.object.criticality_reason}; вероятность потери связи за{' '}
+              <span class="num">{data.forecast.horizon_h}</span> ч —{' '}
+              <span class="num">{data.forecast.probability.toFixed(3).replace('.', ',')}</span>
+            </div>
+          </Field>
+          <Field label="Срок выполнения">
+            <span class="num font-semibold">{formatDateTime(data.due_at)}</span>{' '}
+            <span style="color:var(--text-secondary)">
+              · срок заявки <span class="num">{data.deadline_hours}</span> ч от обнаружения
+            </span>
+          </Field>
+          <Field label="Обоснование">{data.reason}</Field>
+        </div>
       </section>
 
-      <section class="text-sm flex flex-col gap-1" style="color:var(--text-secondary)">
-        <div>
-          Статус <b>{STATUS_LABEL[data.status] ?? data.status}</b> · приоритет{' '}
-          <b>{PRIORITY_LABEL[data.priority.code] ?? data.priority.name}</b> (норматив реакции{' '}
-          <span class="num">{data.priority.response_hours}</span> ч)
+      <section class="card flex flex-col gap-3">
+        <h2 class="card-title">Статус</h2>
+        <div class="text-sm">
+          <Field label="Норматив реакции">
+            <span class="num font-semibold">{data.priority.response_hours} ч</span>{' '}
+            <span style="color:var(--text-secondary)">по приоритету «{data.priority.name}»</span>
+          </Field>
+          {data.external_status && (
+            <Field label="Статус в системе учёта">
+              <Badge tone={externalTone(data.external_status)}>{data.external_status}</Badge>
+              {data.external_assignee && <> · {data.external_assignee}</>}
+              {data.external_status_at && (
+                <span style="color:var(--text-secondary)">
+                  {' '}
+                  · с {formatDateTime(data.external_status_at)} (получено из системы учёта)
+                </span>
+              )}
+            </Field>
+          )}
+          <Field label="Кто завёл">
+            Завёл: {data.created_by ?? 'расчёт'}, {formatDateTime(data.created_at)}
+          </Field>
         </div>
-        <div>
-          Завёл: {data.created_by ?? 'расчёт'}, {formatDateTime(data.created_at)}
-        </div>
+      </section>
+
+      <section class="card flex flex-col gap-3">
+        <h2 class="card-title">Прогноз</h2>
+        {(data.warning_opened_at || data.risk_window_end) && (
+          <div class="text-sm">
+            {data.warning_opened_at && (
+              <Field label="Предупреждение модели открыто">
+                <span class="num">{formatDateTime(data.warning_opened_at)}</span>
+              </Field>
+            )}
+            {data.risk_window_end && (
+              <Field label="Окно риска до">
+                <span class="num">{formatDateTime(data.risk_window_end)}</span>
+              </Field>
+            )}
+          </div>
+        )}
+        <a
+          href={`/forecasts/${data.forecast.forecast_id}`}
+          onClick={(e) => {
+            e.preventDefault()
+            route(`/forecasts/${data.forecast.forecast_id}`)
+          }}
+          class="btn btn-secondary self-start whitespace-normal"
+        >
+          Прогноз, срез данных {formatDateTime(data.forecast.as_of)} ›
+        </a>
       </section>
 
       {/* История заявки (US-19 сц. 1, Ф-87): смена статуса строкой, и видно, откуда
           он пришёл — из системы учёта или проставлен человеком. */}
       {data.status_history.length > 0 && (
-        <section data-testid="order-history" class="text-sm flex flex-col gap-1">
-          <h2 class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
-            История заявки
-          </h2>
-          <ol class="flex flex-col gap-1">
+        <section data-testid="order-history" class="card text-sm flex flex-col gap-2">
+          <h2 class="card-title">История заявки</h2>
+          <ol class="flex flex-col gap-1.5">
             {data.status_history.map((с, i) => (
               <li key={i}>
-                <span class="num">{formatDateTime(с.changed_at)}</span> — статус «
+                <span class="num font-semibold">{formatDateTime(с.changed_at)}</span> — статус «
                 {STATUS_LABEL[с.status] ?? с.status}»{с.assignee && <> · {с.assignee}</>}{' '}
-                <span style="color:var(--text-muted)">
+                <span style="color:var(--text-secondary)">
                   ·{' '}
                   {с.source === 'order_system' ? 'получен из системы учёта' : 'проставлен вручную'}
                 </span>
@@ -177,20 +210,6 @@ export function OrderCard({ orderId }: { orderId?: string } & Record<string, unk
           </ol>
         </section>
       )}
-
-      <section>
-        <a
-          href={`/forecasts/${data.forecast.forecast_id}`}
-          onClick={(e) => {
-            e.preventDefault()
-            route(`/forecasts/${data.forecast.forecast_id}`)
-          }}
-          class="text-sm"
-          style="color:var(--link)"
-        >
-          Прогноз, срез данных {formatDateTime(data.forecast.as_of)}
-        </a>
-      </section>
     </main>
   )
 }
@@ -223,20 +242,19 @@ function ChannelLine({
           e.preventDefault()
           route(`/objects/${sectionId}?channel=${канал.channel_id}`)
         }}
-        style="color:var(--link)"
+        class="font-semibold"
       >
-        История канала на участке
+        История канала на участке ›
       </a>
     </>
   )
 }
 
+// Подпись и значение — соседние div: E2E ищут значение через following-sibling::div.
 function Field({ label, children }: { label: string; children: ComponentChildren }) {
   return (
-    <div>
-      <div class="text-xs uppercase tracking-wide" style="color:var(--text-muted)">
-        {label}
-      </div>
+    <div class="field">
+      <div>{label}</div>
       <div>{children}</div>
     </div>
   )

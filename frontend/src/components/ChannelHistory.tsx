@@ -45,10 +45,7 @@ export function ChannelHistory({ sectionId, channelId }: { sectionId: string; ch
   }, [sectionId, channelId])
 
   return (
-    <section
-      class="text-sm px-3 py-2 rounded"
-      style="background:var(--bg-surface); border-left:3px solid var(--brand)"
-    >
+    <section class="card text-sm" style="border-left:4px solid var(--accent)">
       <h2 class="font-semibold mb-1">
         История канала{data && ` «${data.channel.name.trim()}» · ${data.channel.sensor_kind ?? ''}`}
       </h2>

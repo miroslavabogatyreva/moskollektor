@@ -52,10 +52,8 @@ export function GasScale({
   readingsError: string | null
 }) {
   return (
-    <section data-testid="gas-scales">
-      <h2 class="text-sm font-semibold mb-1" style="color:var(--text-muted)">
-        Загазованность
-      </h2>
+    <section data-testid="gas-scales" class="card">
+      <h2 class="card-title mb-1">Загазованность</h2>
       <p class="text-sm mb-2" style="color:var(--text-secondary)">
         Метан, % об. Уставки 0,75 и 1,5 % об.; метка — последнее показание в окне «Показаний
         датчиков» ниже.
@@ -88,9 +86,7 @@ function Scale({ channel, value, at }: { channel: Channel; value: number | null;
   const [lo, hi] = ШКАЛА_МЕТАНА
   return (
     <div data-gas-scale={channel.channel_id} data-zone={м.zone} class="max-w-xl">
-      <div class="text-xs uppercase tracking-wide mb-1" style="color:var(--text-muted)">
-        {channel.name}
-      </div>
+      <div class="text-sm font-semibold mb-1">{channel.name}</div>
       <div class="text-sm mb-6" style={`color:${ЗОНА[м.zone].color}`}>
         {value != null && <span class="num font-semibold">{fmtValue(value)} % об. · </span>}
         {ЗОНА[м.zone].text}
