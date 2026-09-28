@@ -112,7 +112,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
       TZ: ${TZ}
       BACKUP_AT: ${BACKUP_AT:-02:00}
-      BACKUP_KEEP: ${BACKUP_KEEP:-2}
+      BACKUP_KEEP: ${BACKUP_KEEP:-1}
     volumes:
       - backups:/backups
       - ./backup.sh:/backup.sh:ro

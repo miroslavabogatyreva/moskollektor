@@ -31,7 +31,7 @@
 set -eu
 
 B=/backups
-KEEP=${BACKUP_KEEP:-2}
+KEEP=${BACKUP_KEEP:-1}
 AT=${BACKUP_AT:-02:00}
 export PGHOST=${PGHOST:-db} PGUSER=${POSTGRES_USER:?} PGPASSWORD=${POSTGRES_PASSWORD:?}
 DB=${POSTGRES_DB:?}
@@ -51,6 +51,21 @@ backup() {
   name=$(date +%Y%m%dT%H%M%S)
   dir="$B/base/$name"
   start=$(date +%s)
+  # Место до копии, а не по ходу. Том backups на стенде лежит на корневом диске
+  # вместе с базой: не влезшая копия забивала его до 100 % и только потом падала
+  # (проверено 28.09.2026 на томе в 700 МБ), а у базы на полном диске встаёт
+  # журнал. Новая копия весит примерно как прошлая; плюс 10 % на рост базы и 2 ГБ,
+  # чтобы после копии базе осталось место под pg_wal (max_wal_size = 1 ГБ).
+  # Первую копию не проверяем: сравнить не с чем.
+  prev=$(ls -1 "$B/base" | sort | tail -1)
+  if [ -n "$prev" ]; then
+    need=$(( $(du -sk "$B/base/$prev" | cut -f1) * 11 / 10 + 2097152 ))
+    free=$(df -Pk "$B" | awk 'NR==2 {print $4}')
+    if [ "$free" -lt "$need" ]; then
+      log "СБОЙ $name запуск=$trigger места нет — нужно $(( need / 1024 )) МБ (прошлая копия плюс 10 % и 2 ГБ), свободно $(( free / 1024 )) МБ; docs/restore.md, «Сколько хранить»"
+      return 1
+    fi
+  fi
   # -X stream: журнал, нужный самой копии, едет внутри неё (pg_wal.tar), и копия
   # поднимается даже без архива. -c fast: контрольная точка сразу, а не через
   # checkpoint_timeout. Сжимает сервер: по сети идёт уже сжатое.
@@ -141,8 +156,8 @@ drill() {
   d=${DRILL_DIR:-$B/drill}
   rm -rf "$d"
   mkdir -p "$(dirname "$d")"
-  # Сначала место, потом разворот: база в 55 ГБ, развёрнутая в недостающие
-  # 45 ГБ, забила бы диск живой базы вместе с её архивом журнала.
+  # Сначала место, потом разворот: база в 55 ГБ, развёрнутая в 33 ГБ свободного
+  # места стенда (замер 28.09.2026), забила бы диск живой базы вместе с её архивом.
   need=$(psql -d "$DB" -tAc "select (sum(pg_database_size(datname)) * 1.1)::bigint from pg_database")
   free=$(df -B1 --output=avail "$(dirname "$d")" | tail -1)
   if [ "$free" -lt "$need" ]; then
