@@ -145,6 +145,13 @@ async def list_orders(
         ],
     }
 
+HISTORY_SQL = """
+SELECT status, assignee, changed_at, source
+  FROM maint.notification_status_log
+ WHERE notification_id = $1
+ ORDER BY changed_at, id
+"""
+
 
 @router.get("/orders/{order_id}", response_model=OrderDetail)
 async def get_order(
@@ -157,6 +164,8 @@ async def get_order(
     if row is None:
         raise HTTPException(404, "заявка не найдена")
 
+    # История заявки: смены статуса с источником (миграция 058, US-19, Ф-87).
+    history = await conn.fetch(HISTORY_SQL, order_id)
     collector, picket = row["smvu_key"].split(":")
     criticality_reason = row["criticality_reason"] or (
         f"класс критичности «{row['criticality_name']}» — "
@@ -220,4 +229,5 @@ async def get_order(
         "reason": row["reason"],
         "created_at": row["created_at"],
         "created_by": row["created_by"],
+        "status_history": [dict(h) for h in history],
     }

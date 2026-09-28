@@ -352,6 +352,15 @@ class OrderForecastRef(BaseModel):
     risk_rank: int
 
 
+class OrderStatusEntry(BaseModel):
+    """Строка истории заявки, maint.notification_status_log (миграция 058, US-19)."""
+
+    status: str
+    assignee: str | None
+    changed_at: IsoDatetime  # момент смены в источнике
+    source: str  # order_system — из системы учёта; user — проставлен человеком
+
+
 class OrderDetail(BaseModel):
     schema_version: str
     id: int
@@ -376,6 +385,7 @@ class OrderDetail(BaseModel):
     reason: str | None
     created_at: IsoDatetime
     created_by: str | None
+    status_history: list[OrderStatusEntry]
 
 
 class AuditItem(BaseModel):

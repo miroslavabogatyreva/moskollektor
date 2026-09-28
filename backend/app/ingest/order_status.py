@@ -14,13 +14,13 @@
 
 ЧТО ОБНОВЛЯЕМ И ПОЧЕМУ ТАК. external_status, external_status_at (момент смены
 статуса В ИСТОЧНИКЕ, не момент нашего тика) и external_assignee — колонки
-maint.notification из db/migrations/051_order_external_status.sql. UPDATE идёт
+maint.notification из db/migrations/051_order_external_status.sql. Каждая смена
+ещё и строка истории заявки maint.notification_status_log с source='order_system'
+(db/migrations/058_notification_status_log.sql, US-19, Ф-87). UPDATE идёт
 только при изменении внешнего статуса, чтобы не путать external_status_at
-с моментом тика и не писать одинаковые строки впустую. Отдельной колонки
-«источник смены статуса» нет: непустой external_status_at сам служит отметкой
-«пришёл из внешней системы, а не проставлен человеком» (Ф-87) — его выставляет
-только этот модуль, ручная смена maint.notification.status через API его
-не трогает.
+с моментом тика и не писать одинаковые строки впустую. «Пришёл из внешней
+системы, а не проставлен человеком» (Ф-87) говорит колонка source строки
+истории: order_system ставит только этот модуль.
 
 КАКИЕ ЗАЯВКИ ОПРАШИВАЕМ. Только те, у кого есть due_at (автозаявки от прогноза
 — заявки без due_at заведены руками и в хелпдеск заказчика не попадали) и кто
@@ -85,17 +85,25 @@ async def синхронизировать(conn, url: str = URL) -> int:
     изменено = 0
     for т in тикеты:
         момент = datetime.fromisoformat(т["external_status_at"])
+        # Смена статуса и строка истории заявки (миграция 058, US-19, Ф-87) — одним
+        # запросом: строка появляется, только если UPDATE правда что-то поменял.
         итог = await conn.execute(
             """
-            UPDATE maint.notification
-               SET external_status = $2, external_status_at = $3, external_assignee = $4
-             WHERE notification_no = $1
-               AND (external_status IS DISTINCT FROM $2
-                    OR external_status_at IS DISTINCT FROM $3)
+            WITH смена AS (
+                UPDATE maint.notification
+                   SET external_status = $2, external_status_at = $3, external_assignee = $4
+                 WHERE notification_no = $1
+                   AND (external_status IS DISTINCT FROM $2
+                        OR external_status_at IS DISTINCT FROM $3)
+                RETURNING id
+            )
+            INSERT INTO maint.notification_status_log
+                   (notification_id, status, assignee, changed_at, source)
+            SELECT id, $2, $4, $3, 'order_system' FROM смена
             """,
             т["notification_no"], т["external_status"], момент, т["external_assignee"],
         )
-        if итог != "UPDATE 0":
+        if итог != "INSERT 0 0":
             изменено += 1
     return изменено
 
