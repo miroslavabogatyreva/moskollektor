@@ -244,8 +244,7 @@ for (const [ширина, высота] of [
     await page.goto('/dashboard')
     await expect(page.getByTestId('sensor-table').locator('tbody tr')).toHaveCount(50)
     // Содержимое экрана не шире окна: широкая таблица листается в своём блоке.
-    // Мерим main, а не страницу: шапка (Nav.tsx) на 390 px сама шире окна — до 812 px
-    // на любом экране, включая /orders; это отдельная находка, не SL.5.
+    // Мерим main: шапку (Nav.tsx) на 390 px проверяет e2e/layout-390.spec.ts.
     expect(await правыйКрай(page)).toBeLessThanOrEqual(ширина)
     await page.screenshot({ path: `${КАТАЛОГ}/dashboard-${ширина}.png`, fullPage: true })
     await page.goto('/map?channel=267052')
