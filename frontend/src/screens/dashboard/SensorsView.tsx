@@ -102,14 +102,12 @@ export function SensorTable({
     }
   }, [synthetic, level, offset, tick])
 
-  const кнопка =
-    'px-3 py-1 rounded text-sm bg-[var(--bg-surface)] enabled:hover:bg-[var(--bg-row-hover)] disabled:opacity-40 disabled:cursor-not-allowed'
+  const кнопка = 'btn btn-secondary'
   const листать = data && (
     <div class="flex flex-wrap items-center gap-3 text-sm">
       <button
         type="button"
         class={кнопка}
-        style="border:1px solid var(--border-strong); color:var(--text-primary)"
         disabled={offset === 0}
         onClick={() => setOffset(Math.max(0, offset - НА_СТРАНИЦЕ))}
       >
@@ -121,7 +119,6 @@ export function SensorTable({
       <button
         type="button"
         class={кнопка}
-        style="border:1px solid var(--border-strong); color:var(--text-primary)"
         disabled={offset + data.items.length >= data.total}
         onClick={() => setOffset(offset + НА_СТРАНИЦЕ)}
       >
@@ -133,14 +130,13 @@ export function SensorTable({
   return (
     <>
       <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 mt-2">
-        <h2 id="sensor-table" class="text-sm font-semibold">
+        <h2 id="sensor-table" class="card-title">
           Все датчики по риску
         </h2>
         <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
           Уровень
           <select
-            class="text-sm px-2 py-1 rounded"
-            style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+            class="input"
             value={level}
             onChange={(e) => setLevel((e.target as HTMLSelectElement).value as SensorLevel | '')}
           >
@@ -164,7 +160,7 @@ export function SensorTable({
         <>
           <SkipTable targetId="sensor-table-end" />
           {/* На телефоне таблица шире экрана — листается она, а не страница. */}
-          <div class="overflow-x-auto">
+          <div class="card p-0 overflow-x-auto">
             <table
               data-testid="sensor-table"
               class="w-full text-sm"
@@ -176,11 +172,7 @@ export function SensorTable({
                       и без прокрутки видно только первые колонки (MOS-262). */}
                   {['Уровень', 'Балл', 'Датчик', 'Тип', 'Коллектор, пикет', 'Главная причина'].map(
                     (h) => (
-                      <th
-                        key={h}
-                        class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                        style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                      >
+                      <th key={h} class="th">
                         {h}
                       </th>
                     ),

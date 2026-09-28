@@ -47,9 +47,7 @@ export function SourcesScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)" class="text-lg font-semibold">
-        Источники данных
-      </h1>
+      <h1 style="font-family:var(--font-display)">Источники данных</h1>
 
       {forbidden && (
         <p style="color:var(--state-error)">Доступ запрещён: раздел виден только администратору.</p>
@@ -58,35 +56,35 @@ export function SourcesScreen(_props: Record<string, unknown>) {
       {!sources && !forbidden && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
       {sources && (
-        <table class="w-full text-sm" style="border-collapse:collapse">
-          <thead>
-            <tr>
-              {['Источник', 'Последние данные', 'Норма', 'Состояние'].map((h) => (
-                <th
-                  key={h}
-                  class="text-left px-2 py-2 text-xs uppercase tracking-wide"
-                  style="color:var(--text-muted); border-bottom:1px solid var(--border-subtle)"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sources.map((s) => (
-              <tr key={s.code} style="border-bottom:1px solid var(--border-subtle)">
-                <td class="px-2 py-2">{s.name}</td>
-                <td class="px-2 py-2 num" data-testid="last-data">
-                  {s.last_data_at ? formatDateTime(s.last_data_at) : '—'}
-                </td>
-                <td class="px-2 py-2 num">не старше {Math.round(s.norm_s / 60)} мин</td>
-                <td class="px-2 py-2" data-testid="state">
-                  <span style={`color:var(--state-${s.lagging ? 'error' : 'success'})`}>{состояние(s)}</span>
-                </td>
+        <div class="card p-0 overflow-x-auto">
+          <table class="w-full text-sm" style="border-collapse:collapse">
+            <thead>
+              <tr>
+                {['Источник', 'Последние данные', 'Норма', 'Состояние'].map((h) => (
+                  <th key={h} class="th">
+                    {h}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sources.map((s) => (
+                <tr key={s.code} style="border-bottom:1px solid var(--border-subtle)">
+                  <td class="px-2 py-2">{s.name}</td>
+                  <td class="px-2 py-2 num" data-testid="last-data">
+                    {s.last_data_at ? formatDateTime(s.last_data_at) : '—'}
+                  </td>
+                  <td class="px-2 py-2 num">не старше {Math.round(s.norm_s / 60)} мин</td>
+                  <td class="px-2 py-2" data-testid="state">
+                    <span style={`color:var(--state-${s.lagging ? 'error' : 'success'})`}>
+                      {состояние(s)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   )

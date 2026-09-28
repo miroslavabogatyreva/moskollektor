@@ -197,20 +197,10 @@ export function VerdictDialog({
         {error && <p style="color:var(--state-error)">Не удалось сохранить: {error}</p>}
 
         <div class="flex gap-2 justify-end">
-          <button
-            type="button"
-            onClick={() => ref.current?.close()}
-            class="px-3 py-1 rounded"
-            style={FIELD}
-          >
+          <button type="button" onClick={() => ref.current?.close()} class="btn btn-secondary">
             Отмена
           </button>
-          <button
-            type="submit"
-            disabled={!canSave}
-            class="px-3 py-1 rounded disabled:opacity-50"
-            style={FIELD}
-          >
+          <button type="submit" disabled={!canSave} class="btn btn-primary">
             Сохранить
           </button>
         </div>

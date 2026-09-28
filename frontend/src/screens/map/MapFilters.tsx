@@ -28,8 +28,7 @@ export function MapFilters({ filters, onChange, matchCount, totalCount }: Props)
       <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
         Уровень риска
         <select
-          class="text-sm px-2 py-1 rounded"
-          style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          class="input"
           value={filters.risk}
           onChange={(e) =>
             onChange({ ...filters, risk: (e.target as HTMLSelectElement).value as RiskFilter })
@@ -46,8 +45,7 @@ export function MapFilters({ filters, onChange, matchCount, totalCount }: Props)
       <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
         Тип объекта
         <select
-          class="text-sm px-2 py-1 rounded"
-          style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+          class="input"
           value={filters.kind}
           onChange={(e) =>
             onChange({ ...filters, kind: (e.target as HTMLSelectElement).value as KindFilter })

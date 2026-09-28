@@ -316,8 +316,8 @@ export function SensorDemo({
           {свёрнуто > 0 && (
             <button
               type="button"
-              class="self-start text-sm underline"
-              style="color:var(--text-secondary)"
+              class="self-start text-sm font-semibold underline underline-offset-2"
+              style="color:var(--link)"
               onClick={() => setAllNormal(true)}
             >
               Показать ещё {свёрнуто} в норме
@@ -420,14 +420,14 @@ function SensorLine({
           role="group"
           aria-label={`Масштаб полосы датчиков, ${имя}`}
           class="inline-flex flex-wrap rounded-md overflow-hidden"
-          style="border:1px solid var(--border-strong)"
+          style="border:1px solid var(--accent-border)"
         >
           {кнопки.map(([надпись, выкл, действие], i) => (
             <button
               key={надпись}
               type="button"
-              class="px-3 py-1 text-sm bg-[var(--bg-surface)] enabled:hover:bg-[var(--bg-row-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-              style={`color:var(--text-primary)${i > 0 ? '; border-left:1px solid var(--border-subtle)' : ''}`}
+              class="px-3 py-1 text-sm font-semibold bg-[var(--bg-surface)] enabled:hover:bg-[var(--accent-tint)] disabled:opacity-40"
+              style={`color:var(--accent-text)${i > 0 ? '; border-left:1px solid var(--accent-border)' : ''}`}
               disabled={выкл}
               onClick={действие}
             >
