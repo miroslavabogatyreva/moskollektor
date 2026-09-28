@@ -169,10 +169,12 @@ RE_ALTER_FK = re.compile(
     r'\(([a-z_]+)\)\s*REFERENCES\s+(' + NAME + r')\s*\(\s*([a-z_]+)\s*\)', re.S)
 # Колонка, добавленная позже CREATE TABLE. Без неё тип такой колонки неизвестен
 # («?»), и ключ из ADD CONSTRAINT на неё проваливает сверку типов (052, MOS-55).
-# ponytail: ловит только первую колонку ALTER; несколько ADD COLUMN через запятую
-# в одном ALTER — дописать, когда такой ключ появится.
+# Разбирает add_columns(): каждую ADD COLUMN в ALTER, а не только первую, и ключ
+# внутри неё — «ADD COLUMN x bigint REFERENCES a.b(c)», как в 045 (MOS-242).
+RE_ALTER_START = re.compile(
+    r'ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(' + NAME + r')\s+', re.S)
 RE_ADD_COL = re.compile(
-    r'ALTER\s+TABLE\s+(' + NAME + r')\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+    r'ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?'
     r'([a-z_]+)\s+((?:character varying|double precision|[a-z_]+))', re.S)
 RE_COL = re.compile(r'^([a-z_]+)\s+((?:character varying|double precision|[a-z_]+)(?:\s*\([^)]*\))?)')
 RE_PARTITION = re.compile(r'PARTITION\s+BY\s+(?:RANGE|LIST|HASH)\s*\(\s*([a-z_]+)\s*\)')
@@ -277,6 +279,27 @@ def split_clauses(body):
     return [c.strip() for c in clauses if c.strip()]
 
 
+def add_columns(sql):
+    """Все ADD COLUMN из ALTER TABLE: (таблица, колонка, тип, цель, колонка цели, позиция).
+
+    Цель и её колонка — None, если в ADD COLUMN нет REFERENCES. Клаузы режет
+    split_clauses(), поэтому вторая колонка в «ADD COLUMN y …, ADD COLUMN x …»
+    получает свой тип, а не «?» (MOS-242).
+    """
+    out = []
+    for m in RE_ALTER_START.finditer(sql):
+        body = sql[m.end():sql.index(";", m.end())]
+        for clause in split_clauses(body):
+            c = RE_ADD_COL.match(clause)
+            if not c:
+                continue
+            r = RE_REF.search(clause)
+            out.append((m.group(1), c.group(1), c.group(2),
+                        r.group(1) if r else None, (r.group(2) or None) if r else None,
+                        m.start()))
+    return out
+
+
 def parse_body(body):
     """Колонки таблицы: {имя: тип}, колонки PK и одиночные UNIQUE, ссылки колонок."""
     cols, pk, uniq, refs = {}, [], set(), []
@@ -328,11 +351,14 @@ def scan(root):
             for col, tgt, tcol in refs:
                 links.append((t, col, tgt, tcol, name))
                 events.append((pos + 1, "ref", (t, tgt)))
-        for t, col, typ in RE_ADD_COL.findall(sql):
+        for t, col, typ, tgt, tcol, pos in add_columns(sql):
             if t in tables:
                 # Отдельно от cols: правило «похоже на ключ» по ним не гоняем —
                 # добавило бы находки в чужих миграциях, которых задача не касалась.
                 tables[t][0].setdefault("added", {}).setdefault(col, typ)
+            if tgt:
+                links.append((t, col, tgt, tcol, name))
+                events.append((pos, "alter", (t, tgt)))
         for m in RE_ALTER_FK.finditer(sql):
             t, col, tgt, tcol = m.groups()
             links.append((t, col, tgt, tcol, name))
@@ -513,6 +539,27 @@ def _selfcheck():
         assert not any("используется, но нет CREATE SCHEMA" in p for p in problems_one), \
             problems_one
         assert any("nowhere" in p and "не объявляет" in p for p in problems_one), problems_one
+
+    # MOS-242: ключ внутри ADD COLUMN сверяется по типам, как и ADD CONSTRAINT.
+    # Вторая ADD COLUMN того же ALTER получает свой тип, а не «?».
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "001_a.sql").write_text(
+            "CREATE SCHEMA IF NOT EXISTS a;\n"
+            "CREATE TABLE a.run (run_id bigint PRIMARY KEY);\n"
+            "CREATE TABLE a.note (note_id bigint PRIMARY KEY);\n")
+        (root / "002_b.sql").write_text(
+            "ALTER TABLE a.note ADD COLUMN y text,\n"
+            "    ADD COLUMN run_id bigint REFERENCES a.run(run_id);\n")
+        tables, _, good = check(root)
+        # INTENTIONAL и DANGLING_OK глобальные — в чужом каталоге они шумят, смотрим только a.*
+        good = [p for p in good if " a." in p]
+        assert not good, good
+        assert tables["a.note"][0]["added"] == {"y": "text", "run_id": "bigint"}, tables
+        (root / "002_b.sql").write_text(
+            "ALTER TABLE a.note ADD COLUMN run_id text REFERENCES a.run(run_id);\n")
+        _, _, bad = check(root)
+        assert "типы не совпадают: a.note.run_id text -> a.run.run_id bigint" in bad, bad
 
 
 def main():
