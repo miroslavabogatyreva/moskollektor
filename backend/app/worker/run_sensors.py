@@ -47,6 +47,22 @@ def главная_причина(reasons: list[dict]) -> dict | None:
     return max(весомые, key=lambda r: r["weight"])
 
 
+def причина_уровня(reasons: list[dict], level: str) -> dict | None:
+    """Причина, которая дала уровень датчика, а не самая весомая.
+
+    Датчик high по давности (вес 0,019) и с предвестником watch (вес 0,49): самая
+    весомая — предвестник, но high дало правило давности, и заявка «сработало
+    правило высокого риска» обязана назвать его. Уровень правила стоит в тексте
+    причины скобкой — sensor_risk.LEVEL_RU. Уровень normal — главная причина.
+    """
+    if level in sensor_risk.LEVEL_RU:
+        метка = f"({sensor_risk.LEVEL_RU[level]})"
+        for r in reasons:
+            if метка in r["text"]:
+                return r
+    return главная_причина(reasons)
+
+
 def по_участкам(участки: list[int], датчики: list[dict]) -> dict:
     """Датчики -> одно число, класс, факторы и текст на участок.
 
@@ -97,7 +113,7 @@ def по_участкам(участки: list[int], датчики: list[dict])
             p, уровень = float(первый["score"]), УРОВЕНЬ[первый["level"]]
             ф, строки = [], []
             for д in риск[:ПОКАЗАТЬ]:
-                п = главная_причина(д["reasons"])
+                п = причина_уровня(д["reasons"], д["level"])
                 строки.append(f"{д['name']}: {п['text']}" if п else д["name"])
                 if п:
                     ф.append(
@@ -135,7 +151,7 @@ async def собрать(conn, as_of) -> dict:
             {
                 "channel_id": channel_id,
                 "section_id": к["section_id"],
-                "name": к["name"],
+                "name": к["name"] or f"канал {channel_id}",
                 "score": round(real + synth, 6),
                 "level": level_full,
                 "reasons": json.loads(reasons),
@@ -175,6 +191,15 @@ def _selfcheck():
     и = по_участкам([4], [д(i, 4, 0.5, "watch") for i in range(5)])
     assert и["тексты"][0].endswith("Ещё датчиков с риском на участке: 2"), и["тексты"]
     assert len(и["факторы"][0]) == 3
+    # Причина — та, что дала уровень: high по давности, хотя предвестник watch весомее.
+    давн = {"text": "правило давности (высокий риск): отказ 13 ч назад", "weight": 0.019,
+            "kind": "real"}
+    пред = {"text": "симуляция, правило предвестника (наблюдать): …", "weight": 0.49,
+            "kind": "synthetic"}
+    assert причина_уровня([пред, давн], "high") is давн
+    assert причина_уровня([пред, давн], "watch") is пред
+    и = по_участкам([5], [{**д(1, 5, 0.5, "high"), "reasons": [пред, давн]}])
+    assert "правило давности" in и["тексты"][0] and "предвестника" not in и["тексты"][0], и
     # ППР не становится главной причиной, пока есть весомая.
     assert (
         главная_причина(

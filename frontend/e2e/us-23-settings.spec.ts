@@ -44,18 +44,19 @@ function местноеВремя(d: Date): string {
 
 const выше = (x: number, на: number) => String(Math.round((x + на) * 100) / 100)
 
-// Порог высокого риска на стенде не меняем (он у всех): проверяем то же правило
-// на текущем значении. Что расчёт берёт порог из ref.app_setting на каждом прогоне,
-// закрепляет backend/tests/test_risk_threshold_setting.py.
-test('US-23 сц. 1: новый порог работает со следующего расчёта', async ({ browser, request }) => {
-  const порог = await настройка(request, 'risk_threshold_high')
+// С 28.09.2026 класс high даёт уровень датчика (правила, run_sensors.py), а не порог
+// risk_threshold_high: на экране «Настройки» порог только для чтения. Сценарий
+// проверяет, что дашборд показывает «высокий риск» ровно у тех участков, которым
+// класс high дал расчёт.
+test('US-23 сц. 1: «высокий риск» на дашборде — у участков с классом high расчёта', async ({
+  browser,
+}) => {
   const ctx = await browser.newContext({ extraHTTPHeaders: ODS })
   const page = await ctx.newPage()
   const риски = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
   await page.goto('/dashboard?view=sections')
   const строки = (await (await риски).json()) as { probability: number; risk_class: string }[]
-  const неНижеПорога = строки.filter((r) => r.probability >= порог).length
-  expect(строки.filter((r) => r.risk_class === 'high').length).toBe(неНижеПорога)
+  const неНижеПорога = строки.filter((r) => r.risk_class === 'high').length
   const таблица = page.locator('main table tbody tr')
   await expect(таблица).toHaveCount(строки.length, { timeout: 30_000 })
   await expect(таблица.filter({ hasText: 'высокий риск' })).toHaveCount(неНижеПорога)

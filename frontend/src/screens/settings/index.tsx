@@ -38,6 +38,10 @@ const ПОДПИСИ: Record<string, string> = {
   recall_min: 'Целевой Recall',
 }
 
+// С 28.09.2026 эти две настройки расчёт не читает: горизонт и класс high задают
+// правила датчика (backend/app/domain/sensor_rules.json, run_sensors.py).
+const ЗАДАНО_ПРАВИЛАМИ = new Set(['forecast_horizon_h', 'risk_threshold_high'])
+
 const inputStyle =
   'background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)'
 
@@ -100,6 +104,7 @@ function Строка({ s: начальная }: { s: Setting }) {
   const [value, setValue] = useState(String(начальная.value))
   const [итог, setИтог] = useState<{ ok: boolean; text: string } | null>(null)
   const подпись = ПОДПИСИ[s.key] ?? s.key
+  const правила = ЗАДАНО_ПРАВИЛАМИ.has(s.key)
 
   async function сохранить(e: Event) {
     e.preventDefault()
@@ -132,6 +137,7 @@ function Строка({ s: начальная }: { s: Setting }) {
         {подпись}
         <div class="text-xs" style="color:var(--text-muted)">
           {s.key}
+          {правила && ' · задаётся правилами датчика, sensor_rules.json'}
         </div>
       </td>
       <td class="px-2 py-2">
@@ -141,6 +147,7 @@ function Строка({ s: начальная }: { s: Setting }) {
             inputMode="decimal"
             aria-label={подпись}
             value={value}
+            readOnly={правила}
             onInput={(e) => setValue((e.target as HTMLInputElement).value)}
             class="px-2 py-1 rounded text-sm num w-32"
             style={inputStyle}
@@ -150,9 +157,11 @@ function Строка({ s: начальная }: { s: Setting }) {
       <td class="px-2 py-2">{s.unit ?? '—'}</td>
       <td class="px-2 py-2 num">{formatDateTime(s.changed_at)}</td>
       <td class="px-2 py-2">
-        <button type="submit" form={`setting-${s.key}`} class="btn btn-primary">
-          Сохранить
-        </button>
+        {!правила && (
+          <button type="submit" form={`setting-${s.key}`} class="btn btn-primary">
+            Сохранить
+          </button>
+        )}
         {итог && (
           <span
             role="status"

@@ -298,6 +298,9 @@ SELECT fc.section_id FROM pred.forecast_current fc
    AND NOT EXISTS (SELECT 1 FROM maint.notification n
                     WHERE n.func_location_id = x.func_location_id
                       AND n.status IN ('OPEN', 'IN_PROCESS') AND n.due_at > fc.as_of)
+   AND NOT EXISTS (SELECT 1 FROM permit.permit p
+                    WHERE p.location_id = x.permit_location_id AND p.closed_at IS NULL
+                      AND now() >= p.valid_from AND now() < p.valid_to)
  ORDER BY 1
 """
 

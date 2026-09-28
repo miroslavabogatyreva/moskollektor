@@ -195,8 +195,8 @@ async def прогон(conn, as_of: datetime | None = None,
         участков = посчитано = len(участки)
         with часы.стадия("ms_explain"):
             высокие = {sid: {"датчик": д["главные"][sid]["name"],
-                             "причина": (run_sensors.главная_причина(
-                                 д["главные"][sid]["reasons"]) or {"text": "—"})["text"]}
+                             "причина": (run_sensors.причина_уровня(
+                                 д["главные"][sid]["reasons"], "high") or {"text": "—"})["text"]}
                        for sid, у in zip(участки, уровни) if у == 0}
         if заявки:
             # План — ДО записи прогноза: его участки publish.записать положит
