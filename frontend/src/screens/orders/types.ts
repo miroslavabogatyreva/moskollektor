@@ -37,6 +37,15 @@ export interface NotificationsResponse {
   items: UnackedNotification[]
 }
 
+// Статусы уведомления — CHECK в db/migrations/001_assets.sql и переходы
+// в backend/app/domain/state_machine.py. Экран печатал код OPEN (MOS-130).
+export const STATUS_LABEL: Record<string, string> = {
+  OPEN: 'Открыта',
+  IN_PROCESS: 'В работе',
+  COMPLETED: 'Выполнена',
+  CANCELLED: 'Отменена',
+}
+
 // Коды и названия — db/migrations/010_orders.sql, сид ref.priority. Код '1'
 // заявкам расчёта не достаётся никогда (см. комментарий там же), но встречается
 // у ручных заявок, поэтому карта на все четыре.

@@ -471,6 +471,13 @@ def main():
     р.add_argument("--d5", default=ОТКАЗЫ_D5, help="эпизоды цели модели D5, CSV")
     а = р.parse_args()
 
+    # Модуль едет в образ ради констант окна для check_orders.py, а отчёт и
+    # доказательства — нет: docs/ в образ не попадает (MOS-156).
+    if not os.path.exists(а.report):
+        print(f"СБОЙ нет {а.report}: запускать из распакованного пакета, "
+              "а не из контейнера (docs/install.md разд. 8)")
+        return 1
+
     _selfcheck()
     if а.selfcheck:
         return 0
