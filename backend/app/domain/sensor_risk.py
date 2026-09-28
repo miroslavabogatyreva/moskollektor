@@ -1,7 +1,8 @@
-"""Балл риска по датчику (демо на «объект Каппа ДУ», 28.09.2026).
+"""Балл риска по датчику (эпик MOS-248, 28.09.2026).
 
-Одна реализация на двоих: GET /api/sensor-risk (backend/app/api/objects.py)
-и code/synth_sensor_level.py импортируют score() отсюда.
+Единственная реализация формулы: её зовёт тик worker (app.worker.sensor_scores),
+который пишет pred.sensor_risk; GET /api/sensor-risk (backend/app/api/objects.py)
+только читает готовые строки. Реальную часть и синтетическую добавку делит split().
 
 Балл = 0,5·давность последнего отказа + 0,3·число отказов за 90 сут (реальные
 отказы smvu.model_failure_event — то же определение, что у таблицы «Отказы
@@ -117,6 +118,21 @@ def score(starts, eq, at, plan=()):
     return {"score": total, "level": level(total), "reasons": reasons}
 
 
+def split(starts, eq, at, plan=()):
+    """Балл двумя слагаемыми для pred.sensor_risk (MOS-252): score_real — без
+    паспорта, score_synth — что добавил синтетический паспорт. Причины — полного
+    балла; синтетические выбрасывает метод при ?synthetic=0."""
+    real = score(starts, None, at, plan)
+    full = score(starts, eq, at, plan)
+    return {
+        "score_real": real["score"],
+        "score_synth": round(full["score"] - real["score"], 3),
+        "level_real": real["level"],
+        "level_full": full["level"],
+        "reasons": full["reasons"],
+    }
+
+
 def _selfcheck():
     at = datetime(2026, 6, 22, 21, tzinfo=MSK)
     eq = {
@@ -152,6 +168,13 @@ def _selfcheck():
         "normal",
     ]
     assert base["level"] == "normal"
+    # split: реальная часть — балл без паспорта, сумма слагаемых — полный балл
+    sp = split([at - timedelta(days=30)], eq, at, plan)
+    full = score([at - timedelta(days=30)], eq, at, plan)
+    assert sp["score_real"] == score([at - timedelta(days=30)], None, at)["score"]
+    assert round(sp["score_real"] + sp["score_synth"], 3) == full["score"], (sp, full)
+    assert sp["level_full"] == full["level"] and sp["reasons"] == full["reasons"]
+    assert split([], None, at)["score_synth"] == 0 and split([], eq, at)["score_real"] == 0
     print("sensor_risk selfcheck ok")
 
 
