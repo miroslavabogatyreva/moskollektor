@@ -14,5 +14,6 @@ test('плашка: «отказ датчика на участке в ближ�
   await expect(плашка).toContainText(
     /отказ датчика на участке в ближайшие \d+ ч: вероятность \d+ %/,
   )
+  await expect(плашка).toContainText('Высокий риск отказа датчика')
   await expect(плашка).not.toContainText(/горизонт \d+ ч/)
 })
