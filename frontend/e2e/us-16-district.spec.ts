@@ -74,7 +74,7 @@ test.describe('диспетчер района А и техник комплек
     expect(обе.size, 'объединение: район А плюс комплекс Сигма').toBe(районА.size + сигма.length)
     for (const id of [...районА, ...сигма]) expect(обе.has(id)).toBe(true)
 
-    await page.goto('/dashboard?view=sections')
+    await page.goto('/dashboard?view=sections&level=all')
     await expect(page.locator('main table tbody tr')).toHaveCount(обе.size, { timeout: 30_000 })
   })
 })

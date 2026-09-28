@@ -26,8 +26,13 @@ interface AppUser {
 // на стенде пустил бы мимо каталога, и тест не отличил бы вход через LDAP от доверия.
 test.use({ extraHTTPHeaders: {} })
 
-const участков = (page: Page) =>
-  page.locator('article', { hasText: 'Участков в расчёте' }).locator('.num')
+// После входа открывается главная (/map); плитка — на дашборде «по участкам».
+const участков = (page: Page) => ({
+  innerText: async () => {
+    await page.goto('/dashboard?view=sections')
+    return page.locator('article', { hasText: 'Участков в расчёте' }).locator('.num').innerText()
+  },
+})
 
 async function пользователи(page: Page): Promise<AppUser[]> {
   const r = await page.request.get('/api/auth/users')

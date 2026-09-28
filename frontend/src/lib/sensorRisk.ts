@@ -140,14 +140,17 @@ export function сПараметром(
 // выбирает run_sensors.причина_уровня() для прогноза и заявки. Уровня normal
 // или метки нет — самая весомая из тех, что прибавили к баллу. Плановая (окно
 // ППР) веса не прибавляет, а объясняет: берём её, только когда других нет.
+// Уровень бывает дан двумя правилами сразу — давность (высокий риск) и предвестник
+// (высокий риск): тогда среди них самая весомая, а не первая по порядку ответа.
 const МЕТКА_УРОВНЯ: Record<string, string> = { high: '(высокий риск)', watch: '(наблюдать)' }
+const весомейшая = (rs: SensorReason[]) => rs.reduce((a, b) => (b.weight > a.weight ? b : a))
 export function главнаяПричина(reasons: SensorReason[], level?: string): SensorReason | null {
   const метка = level ? МЕТКА_УРОВНЯ[level] : undefined
-  const давшая = метка ? reasons.find((r) => r.text.includes(метка)) : undefined
-  if (давшая) return давшая
+  const давшие = метка ? reasons.filter((r) => r.text.includes(метка)) : []
+  if (давшие.length > 0) return весомейшая(давшие)
   const весомые = reasons.filter((r) => r.kind !== 'plan')
   if (весомые.length === 0) return reasons[0] ?? null
-  return весомые.reduce((a, b) => (b.weight > a.weight ? b : a))
+  return весомейшая(весомые)
 }
 
 const число = new Intl.NumberFormat('ru-RU')

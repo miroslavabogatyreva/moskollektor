@@ -3,8 +3,11 @@
 // оси AxisLine.tsx вылезала за окно на 3 px. Ось пикетов под кнопками — SVG
 // с viewBox, она сжимается сама; вылезает только ряд кнопок, если он не переносится.
 import { expect, test, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
 
 test.use({ viewport: { width: 390, height: 844 } })
+// E2E_BUNDLE=dist — шапка своей сборки до выкладки.
+test.beforeEach(({ page }) => свойБандл(page))
 
 const правыйКрай = (page: Page, селектор: string) =>
   page.evaluate(
