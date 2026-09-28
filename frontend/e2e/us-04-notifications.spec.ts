@@ -272,7 +272,7 @@ test('US-04 сц. 7: переход на схему сбрасывает фил�
     risk_class: string | null
   }[]
   const класс = risks.find((r) => r.section_id === n.section_id)?.risk_class
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await page
     .getByLabel('Уровень риска')
     .selectOption({ label: класс === 'high' ? 'Низкий' : 'Высокий' })

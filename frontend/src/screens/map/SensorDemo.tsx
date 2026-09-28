@@ -33,11 +33,19 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
    датчиков, и 100 кружков в 140 px сливались в сплошную колонну. Все датчики пикета —
    в списке под схемой.
 
+   С MOS-265 (главная — эта схема) значками рисуются только «высокий» и «наблюдать»
+   плюс кольца ППР: на Гамме 1 075 датчиков из 1 081 в норме, и серые кружки
+   прятали шесть рискованных. Пикет, где все в норме, — серый штрих на оси; при
+   масштабе от ПОДПИСЬ_ОТ px на пикет рядом подпись «N в норме». «+N» — только
+   рискованные, не влезшие в стопку.
+
    /map?channel=<id> выбирает коллектор (index.tsx), здесь — линию и пикет
    датчика, приближает полосу к пикету и раскрывает строку датчика. */
 
 // Сколько значков рисуем в стопке пикета: красные и жёлтые сверху, остальное — «+N».
 const НА_ПИКЕТЕ = 8
+// С какого масштаба (px на пикет) у стопки подпись «N в норме»: уже она налезает на соседей.
+const ПОДПИСЬ_ОТ = 24
 
 // «объект Каппа ДУ» — узел демо SL.0; /map?demo=sensors открывает его коллектор.
 export const DEMO_NODE = 5657
@@ -57,21 +65,26 @@ interface Выбор {
   picket: number
 }
 
+const поППР = (s: Pick<SensorRow, 'reasons'>) => s.reasons.some((x) => x.kind === 'plan')
+
 // Значок датчика: high — треугольник, watch — ромб, normal — круг (форма читается
 // без цвета, как на оси). Датчик, снятый по графику ППР, обведён кольцом --state-info.
+// ringOnly — на оси у датчика в норме под ППР рисуем одно кольцо, без круга.
 function Dot({
   s,
   cx,
   cy,
   r,
+  ringOnly,
 }: {
   s: Pick<SensorRow, 'level' | 'reasons'>
   cx: number
   cy: number
   r: number
+  ringOnly?: boolean
 }) {
   const c = SENSOR_LEVELS[s.level]
-  const p = { fill: c.fill, stroke: c.border, 'stroke-width': 1 }
+  const p = { fill: c.fill, stroke: c.border, 'stroke-width': 1, 'data-level': s.level }
   const shape =
     s.level === 'high' ? (
       <polygon
@@ -88,8 +101,8 @@ function Dot({
     )
   return (
     <>
-      {shape}
-      {s.reasons.some((x) => x.kind === 'plan') && (
+      {!ringOnly && shape}
+      {поППР(s) && (
         <circle
           cx={cx}
           cy={cy}
@@ -342,22 +355,34 @@ function SensorLine({
     return () => ro.disconnect()
   }, [])
 
-  // Датчики по пикетам, внутри стопки снизу вверх по возрастанию балла — красные наверху.
+  // Датчики по пикетам. В стопке снизу вверх: кольца ППР датчиков в норме, потом
+  // рискованные по возрастанию балла — красные наверху; не больше НА_ПИКЕТЕ, кольца
+  // уступают место риску. Датчики в норме — числом normal.
   const stacks = useMemo(() => {
     const m = new Map<number, SensorRow[]>()
     for (const s of items) m.set(s.picket, [...(m.get(s.picket) ?? []), s])
-    for (const v of m.values()) v.sort((a, b) => a.score - b.score)
-    return [...m.entries()].sort((a, b) => a[0] - b[0])
+    return [...m.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([pk, v]) => {
+        const риск = v.filter((s) => s.level !== 'normal').sort((a, b) => a.score - b.score)
+        const ппр = v.filter((s) => s.level === 'normal' && поППР(s))
+        const shown = [...ппр, ...риск].slice(-НА_ПИКЕТЕ)
+        const hidden = риск.length - shown.filter((s) => s.level !== 'normal').length
+        return { pk, all: v, shown, hidden, normal: v.length - риск.length }
+      })
   }, [items])
 
-  const lo = stacks[0]?.[0] ?? 0
-  const max = Math.max(1, (stacks.at(-1)?.[0] ?? 1) - lo)
+  const lo = stacks[0]?.pk ?? 0
+  const max = Math.max(1, (stacks.at(-1)?.pk ?? 1) - lo)
   const [v0, v1] = view ?? [0, max]
   const inner = Math.max(1, width - PAD * 2)
   const x = (pk: number) => PAD + ((pk - lo - v0) / (v1 - v0)) * inner
-  const tallest = Math.min(НА_ПИКЕТЕ, Math.max(...stacks.map(([, v]) => v.length)))
+  const подпись = inner / (v1 - v0) >= ПОДПИСЬ_ОТ
+  // Под подпись «N в норме» стопка поднимается на 12 px.
+  const под = подпись ? 12 : 0
+  const tallest = Math.max(0, ...stacks.map((st) => st.shown.length))
   const step = 7
-  const baseY = 22 + Math.max(1, tallest * step)
+  const baseY = 22 + под + Math.max(1, tallest * step)
   const height = baseY + BASE_GAP
   const tick = tickStep((v1 - v0) / inner)
   const ticks: number[] = []
@@ -453,14 +478,18 @@ function SensorLine({
               </g>
             ))}
             {stacks
-              .filter(([pk]) => pk >= lo + v0 && pk <= lo + v1)
-              .map(([pk, v]) => {
-                const shown = v.slice(-НА_ПИКЕТЕ)
-                const hidden = v.length - shown.length
+              .filter(({ pk }) => pk >= lo + v0 && pk <= lo + v1)
+              .map(({ pk, all, shown, hidden, normal }) => {
+                const низ = baseY - 5 - (normal > 0 ? под : 0)
+                const верх = shown.length
+                  ? низ - (shown.length - 1) * step - 5 - (hidden ? 12 : 0)
+                  : baseY - 6 - (normal > 0 ? под : 0)
                 return (
                   <g
                     key={pk}
                     data-picket={pk}
+                    // Число в норме — и на стопке, где подписи при мелком масштабе нет.
+                    data-normal={normal}
                     data-selected={pk === picket ? '' : undefined}
                     style="cursor:pointer"
                     onClick={() => onPick(pk)}
@@ -470,29 +499,58 @@ function SensorLine({
                       участков (US-05 сц. 6), датчики туда попадать не должны. */}
                     <rect
                       x={x(pk) - 5}
-                      y={baseY - shown.length * step - (hidden ? 18 : 6)}
+                      y={верх - 2}
                       width={10}
-                      height={shown.length * step + (hidden ? 18 : 6)}
+                      height={baseY - верх + 2}
                       fill="transparent"
                     >
                       <title>
-                        ПК{pk}: {датчиков(v.length)}, высокий риск —{' '}
-                        {v.filter((s) => s.level === 'high').length}
+                        ПК{pk}: {датчиков(all.length)}, высокий риск —{' '}
+                        {all.filter((s) => s.level === 'high').length}, в норме — {normal}
                       </title>
                     </rect>
+                    {/* Пикет, где все в норме, — серый штрих 1×6 px на оси. */}
+                    {shown.length === 0 && (
+                      <rect
+                        x={x(pk) - 0.5}
+                        y={baseY - 6}
+                        width={1}
+                        height={6}
+                        fill="var(--text-muted)"
+                      />
+                    )}
                     {shown.map((s, i) => (
-                      <Dot key={s.channel_id} s={s} cx={x(pk)} cy={baseY - 5 - i * step} r={2.6} />
+                      <Dot
+                        key={s.channel_id}
+                        s={s}
+                        cx={x(pk)}
+                        cy={низ - i * step}
+                        r={2.6}
+                        ringOnly={s.level === 'normal'}
+                      />
                     ))}
                     {hidden > 0 && (
                       <text
                         data-hidden={hidden}
                         x={x(pk)}
-                        y={baseY - shown.length * step - 6}
+                        y={низ - (shown.length - 1) * step - 8}
                         font-size="10"
                         text-anchor="middle"
                         fill="var(--text-muted)"
                       >
                         +{hidden}
+                      </text>
+                    )}
+                    {подпись && normal > 0 && (
+                      <text
+                        data-normal={normal}
+                        x={x(pk)}
+                        y={baseY - (shown.length ? 3 : 9)}
+                        font-size="9"
+                        text-anchor="middle"
+                        fill="var(--text-muted)"
+                      >
+                        {normal} в норме
                       </text>
                     )}
                   </g>
@@ -518,9 +576,14 @@ function Legend() {
       {ORDER.map((l) => (
         <li key={l} class="flex items-center gap-2">
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14">
-            <Dot s={{ level: l, reasons: [] }} cx={7} cy={7} r={4} />
+            {l === 'normal' ? (
+              <rect x={6.5} y={4} width={1} height={6} fill="var(--text-muted)" />
+            ) : (
+              <Dot s={{ level: l, reasons: [] }} cx={7} cy={7} r={4} />
+            )}
           </svg>
           {SENSOR_LEVELS[l].label}
+          {l === 'normal' && ' — штрих на оси, число в списке пикета'}
         </li>
       ))}
       <li class="flex items-center gap-2">

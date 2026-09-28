@@ -26,7 +26,7 @@ export function Nav({ currentPath, me }: { currentPath: string; me: AuthUser | n
       style="background:var(--brand-header-bg)"
     >
       <div class="flex items-center gap-3 mr-auto">
-        <a href="/dashboard" class="text-white">
+        <a href="/map" class="text-white">
           <Logo height={40} />
         </a>
         <span class="text-xs uppercase tracking-wider text-[#B9CCE6]">ОДС · прогноз аварий</span>

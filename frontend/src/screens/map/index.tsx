@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { RiskBadge } from '../../components/RiskBadge'
+import { Tile, UnackedPanel } from '../../components/Tiles'
 import { apiFetch } from '../../lib/api'
 import { usePoll, свежо } from '../../lib/poll'
-import { errorMessage, имяУчастка } from '../../lib/format'
+import { errorMessage, formatDate, formatDateTime, имяУчастка } from '../../lib/format'
 import { участков } from '../../lib/plural'
 import { AxisLine, RiskMark } from './AxisLine'
 import { DEFAULT_FILTERS, matchesFilters, type MapFilterState } from './filters'
@@ -10,7 +11,16 @@ import { MapFilters } from './MapFilters'
 import { ObjectTree, type TreeCollector } from './ObjectTree'
 import { riskLabel, type RiskClass } from './risk'
 import { DEMO_NODE, SensorDemo } from './SensorDemo'
-import { sensorRiskUrl, синтетикаВключена, type SensorRiskPage } from '../../lib/sensorRisk'
+import {
+  sensorRiskUrl,
+  синтетикаВключена,
+  срезРасчёта,
+  type SensorRiskPage,
+  type SensorSummary,
+} from '../../lib/sensorRisk'
+import { fetchOrdersSummary, fetchUnacked } from '../dashboard/api'
+import { useSensorSummary } from '../dashboard/SensorsView'
+import type { OrdersSummary, Unacked } from '../dashboard/types'
 import type { RiskClassRow, Section } from './types'
 import { fullView, zoomView, type ViewRange } from './viewport'
 
@@ -29,7 +39,14 @@ import { fullView, zoomView, type ViewRange } from './viewport'
    («объект Зита» — пять), и пикет 0 у каждого свой. Одна общая ось наложила бы
    их участки друг на друга (275 позиций, 575 участков из 3 173 — нашла e8) —
    поэтому под коллектором рисуется по одной линии AxisLine.tsx на префикс,
-   каждая со своим масштабом (5.15, MOS-126, арифметика — в viewport.ts). */
+   каждая со своим масштабом (5.15, MOS-126, арифметика — в viewport.ts).
+
+   С 28.09.2026 это главный экран (MOS-265, план 5.41), как рабочее место СМВУ 2.0:
+   сверху полоса-сводка, справа «Ждут квитирования», посередине — схема коллектора
+   с наибольшим числом датчиков высокого риска (top_collectors[0] из
+   GET /api/sensor-risk/summary). Ось участков — под переключателем ?axis=sections:
+   риск участка — это риск коллектора, разнесённый на все его участки, и на Гамме
+   она красила высоким 400 участков из 400, а ось датчиков — 6 датчиков из 1 081. */
 
 // Порядок легенды (MOS-170) — те же три состояния, что красит риск.ts. Слова
 // должны дословно совпасть с легендой на дашборде (зона fe) — текст согласован
@@ -55,14 +72,18 @@ export function MapScreen({
   channel,
   collector: collectorParam,
   synthetic,
+  axis,
 }: {
   section?: string
   demo?: string
   channel?: string
   collector?: string
   synthetic?: string
+  axis?: string
 } & Record<string, unknown>) {
   const синтетика = синтетикаВключена(synthetic)
+  // Участок из адреса (переход «на схеме» из полосы уведомлений) рисуется на оси участков.
+  const поУчасткам = axis === 'sections' || section != null
   const датчик = channel ? Number(channel) : undefined
   const [всеУчастки, setВсеУчастки] = useState<Section[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -90,13 +111,39 @@ export function MapScreen({
     const свои = new Set(tree.map((c) => c.object_id))
     return всеУчастки.filter((s) => свои.has(s.collector))
   }, [всеУчастки, tree, treeLoaded, treeError])
+  // Сводка по датчикам, уведомления и заявки — раз в минуту от общего опроса (НФ-89).
+  const { tick } = usePoll()
+  const сводка = useSensorSummary(синтетика, tick, true)
+  const [unacked, setUnacked] = useState<Unacked | null>(null)
+  const [orders, setOrders] = useState<OrdersSummary | null>(null)
   useEffect(() => {
-    if (sections && !sections.some((s) => s.collector === collector))
-      setCollector(sections[0]?.collector ?? null)
-  }, [sections])
+    let отменено = false
+    fetchUnacked()
+      .then((u) => !отменено && setUnacked(u))
+      .catch(() => {})
+    fetchOrdersSummary()
+      .then((o) => !отменено && setOrders(o))
+      .catch(() => {})
+    return () => {
+      отменено = true
+    }
+  }, [tick])
 
   // Демо по датчикам — только если коллектор Каппы роли виден (дерево сервер режет по роли).
   const демоДатчиков = demo === 'sensors'
+
+  // Коллектор по умолчанию — с наибольшим числом датчиков высокого риска из своей зоны.
+  // Без коллектора в адресе ждём сводку (или её отказ): иначе схема сперва открылась бы
+  // на первом по списку и перескочила. Коллектор из адреса ставят эффекты ниже.
+  const адресВыбрал = !!(collectorParam || section || channel || демоДатчиков)
+  useEffect(() => {
+    if (!sections || sections.some((s) => s.collector === collector)) return
+    if (!адресВыбрал && !сводка.summary && !сводка.error) return
+    const топ = сводка.summary?.top_collectors.find((c) =>
+      sections.some((s) => s.collector === c.collector_id),
+    )
+    setCollector(топ?.collector_id ?? sections[0]?.collector ?? null)
+  }, [sections, сводка.summary, сводка.error])
   useEffect(() => {
     if (!демоДатчиков || !sections?.some((s) => s.collector === KAPPA)) return
     setCollector(KAPPA)
@@ -146,9 +193,10 @@ export function MapScreen({
       .catch((e) => setError(errorMessage(e)))
   }, [])
 
-  // Риски на оси — раз в минуту от общего опроса (НФ-89, MOS-123).
-  const { tick } = usePoll()
+  // Риски на оси — раз в минуту от общего опроса (НФ-89, MOS-123), и только
+  // для оси участков: 435 КБ раз в минуту режиму «по датчикам» не нужны.
   useEffect(() => {
+    if (!поУчасткам) return
     // Перезапуск раз в минуту — ответ прошлого тика выключаем, как на дашборде.
     let отменено = false
     apiFetch('/api/risks')
@@ -166,7 +214,7 @@ export function MapScreen({
     return () => {
       отменено = true
     }
-  }, [tick])
+  }, [tick, поУчасткам])
 
   useEffect(() => {
     apiFetch('/api/objects/tree')
@@ -298,133 +346,249 @@ export function MapScreen({
         Схема коллектора по пикетам
       </h1>
 
+      <HomeStrip
+        summary={сводка.summary}
+        summaryError={сводка.error}
+        unacked={unacked}
+        orders={orders}
+      />
+
       {error && <p style="color:var(--state-error)">Не удалось загрузить участки: {error}</p>}
       {!sections && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
 
-      {sections && (
-        <div class="flex flex-col md:flex-row gap-5 md:items-start">
-          {treeError ? (
-            <p class="text-sm w-64 shrink-0" style="color:var(--state-error)">
-              Дерево объектов не загрузилось: {treeError}
-            </p>
-          ) : (
-            tree.length > 0 && (
-              <ObjectTree
-                tree={tree}
-                collector={collector}
-                node={node}
-                onCollector={selectCollector}
-                onNode={setNode}
-              />
-            )
-          )}
-          <div class="flex flex-col gap-4 flex-1 min-w-0">
-            <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
-              Коллектор
-              <select
-                class="text-sm px-2 py-1 rounded"
-                style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
-                value={collector ?? undefined}
-                onChange={(e) => selectCollector(Number((e.target as HTMLSelectElement).value))}
-              >
-                {collectors.map(([c, g]) => (
-                  <option key={c} value={c}>
-                    {g.name} · {участков(g.count)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <MapFilters
-              filters={filters}
-              onChange={setFilters}
-              matchCount={filteredAxis.length}
-              totalCount={onAxis.length}
-            />
-
-            {выбранный && (
-              <p class="text-sm" style="color:var(--text-primary)">
-                {/* Имя — по префиксу smvu_key, как у сервера («Коллектор 884, пикет 730»), а не по collector. */}
-                Выбран участок: {имяУчастка(выбранный.smvu_key)}
+      {/* Три колонки с 1280 px: дерево, схема, журнал. Уже — одной колонкой в том же
+          порядке, журнал под схемой (на 390 px без горизонтальной прокрутки). */}
+      <div class="flex flex-col xl:flex-row gap-5 xl:items-start">
+        {sections && (
+          <div class="flex flex-col md:flex-row gap-5 md:items-start flex-1 min-w-0">
+            {treeError ? (
+              <p class="text-sm w-64 shrink-0" style="color:var(--state-error)">
+                Дерево объектов не загрузилось: {treeError}
               </p>
-            )}
-
-            <p class="text-sm" style="color:var(--text-secondary)">
-              Коллектор «{collectorName}»: {lines.length} {lines.length === 1 ? 'линия' : 'линии'}
-            </p>
-
-            <div class="flex flex-col gap-4">
-              {lines.map(([prefix, all]) => (
-                <AxisLine
-                  key={prefix}
-                  prefix={prefix}
-                  all={all}
-                  visible={filteredByPrefix.get(prefix) ?? []}
-                  riskBySection={riskBySection}
-                  selected={выбранный?.section_id}
-                  viewRange={viewRanges[prefix] ?? null}
-                  onViewRangeChange={(v) => setViewRanges((prev) => ({ ...prev, [prefix]: v }))}
+            ) : (
+              tree.length > 0 && (
+                <ObjectTree
+                  tree={tree}
+                  collector={collector}
+                  node={node}
+                  onCollector={selectCollector}
+                  onNode={setNode}
                 />
-              ))}
-            </div>
-
-            {offAxis.length > 0 && (
-              <p data-testid="off-axis" class="text-sm" style="color:var(--text-secondary)">
-                На оси другого коллектора — у них там больше каналов:{' '}
-                {offAxis.map((s, i) => (
-                  <span key={s.section_id}>
-                    {i > 0 && ', '}участок {s.section_id} ({s.smvu_key}),{' '}
-                    <button
-                      type="button"
-                      class="underline"
-                      style="color:var(--link)"
-                      onClick={() => selectCollector(s.collector)}
-                    >
-                      {s.collector_name ?? s.collector}
-                    </button>
-                  </span>
-                ))}
-              </p>
+              )
             )}
+            <div class="flex flex-col gap-4 flex-1 min-w-0">
+              <label class="text-sm flex items-center gap-2" style="color:var(--text-secondary)">
+                Коллектор
+                <select
+                  class="text-sm px-2 py-1 rounded"
+                  style="background:var(--bg-surface); border:1px solid var(--border-strong); color:var(--text-primary)"
+                  value={collector ?? undefined}
+                  onChange={(e) => selectCollector(Number((e.target as HTMLSelectElement).value))}
+                >
+                  {collectors.map(([c, g]) => (
+                    <option key={c} value={c}>
+                      {g.name} · {участков(g.count)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
+              <AxisSwitch поУчасткам={поУчасткам} collector={collector} синтетика={синтетика} />
+
+              {поУчасткам && (
+                <>
+                  <MapFilters
+                    filters={filters}
+                    onChange={setFilters}
+                    matchCount={filteredAxis.length}
+                    totalCount={onAxis.length}
+                  />
+
+                  {выбранный && (
+                    <p class="text-sm" style="color:var(--text-primary)">
+                      {/* Имя — по префиксу smvu_key, как у сервера («Коллектор 884, пикет 730»), а не по collector. */}
+                      Выбран участок: {имяУчастка(выбранный.smvu_key)}
+                    </p>
+                  )}
+
+                  <p class="text-sm" style="color:var(--text-secondary)">
+                    Коллектор «{collectorName}»: {lines.length}{' '}
+                    {lines.length === 1 ? 'линия' : 'линии'}
+                  </p>
+
+                  <div class="flex flex-col gap-4">
+                    {lines.map(([prefix, all]) => (
+                      <AxisLine
+                        key={prefix}
+                        prefix={prefix}
+                        all={all}
+                        visible={filteredByPrefix.get(prefix) ?? []}
+                        riskBySection={riskBySection}
+                        selected={выбранный?.section_id}
+                        viewRange={viewRanges[prefix] ?? null}
+                        onViewRangeChange={(v) =>
+                          setViewRanges((prev) => ({ ...prev, [prefix]: v }))
+                        }
+                      />
+                    ))}
+                  </div>
+
+                  {offAxis.length > 0 && (
+                    <p data-testid="off-axis" class="text-sm" style="color:var(--text-secondary)">
+                      На оси другого коллектора — у них там больше каналов:{' '}
+                      {offAxis.map((s, i) => (
+                        <span key={s.section_id}>
+                          {i > 0 && ', '}участок {s.section_id} ({s.smvu_key}),{' '}
+                          <button
+                            type="button"
+                            class="underline"
+                            style="color:var(--link)"
+                            onClick={() => selectCollector(s.collector)}
+                          >
+                            {s.collector_name ?? s.collector}
+                          </button>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+
+                  {/* Легенда состояний (MOS-170): названия рядом с цветом, не только
               в title значка — на настенном экране диспетчерской мышью не водят.
               Значок оси и бейдж с тем же словом, что в столбце «Риск» дашборда. */}
-            <div
-              class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"
-              style="color:var(--text-secondary)"
-            >
-              {LEGEND_STATES.map((cls) => (
-                <span key={String(cls)} class="flex items-center gap-2">
-                  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
-                    <RiskMark cls={cls} cx={6} cy={6} size={10} />
-                  </svg>
-                  <RiskBadge cls={cls}>{riskLabel(cls)}</RiskBadge>
-                  {cls == null && (
-                    <span style="color:var(--text-muted)">— расчёта по объекту не было</span>
-                  )}
-                </span>
-              ))}
-            </div>
+                  <div
+                    class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"
+                    style="color:var(--text-secondary)"
+                  >
+                    {LEGEND_STATES.map((cls) => (
+                      <span key={String(cls)} class="flex items-center gap-2">
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+                          <RiskMark cls={cls} cx={6} cy={6} size={10} />
+                        </svg>
+                        <RiskBadge cls={cls}>{riskLabel(cls)}</RiskBadge>
+                        {cls == null && (
+                          <span style="color:var(--text-muted)">— расчёта по объекту не было</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
 
-            {датчикОшибка && (
-              <p class="text-sm" style="color:var(--state-error)">
-                Датчик {датчик} не открыть: {датчикОшибка}
-              </p>
-            )}
-            {collector != null && (
-              <SensorDemo
-                collector={collector}
-                collectorName={collectorName}
-                sections={всеУчастки ?? []}
-                synthetic={синтетика}
-                channel={датчик}
-                scrollTo={демоДатчиков || датчик != null}
-              />
-            )}
+              {датчикОшибка && (
+                <p class="text-sm" style="color:var(--state-error)">
+                  Датчик {датчик} не открыть: {датчикОшибка}
+                </p>
+              )}
+              {collector != null && (
+                <SensorDemo
+                  collector={collector}
+                  collectorName={collectorName}
+                  sections={всеУчастки ?? []}
+                  synthetic={синтетика}
+                  channel={датчик}
+                  scrollTo={демоДатчиков || датчик != null}
+                />
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+        <aside aria-label="Журнал" class="xl:w-96 shrink-0">
+          <UnackedPanel unacked={unacked} />
+        </aside>
+      </div>
     </main>
+  )
+}
+
+// Переключатель оси — ссылками, режим живёт в адресе (?axis=sections), как у
+// дашборда: коллектор и синтетика едут вместе с переходом.
+function AxisSwitch({
+  поУчасткам,
+  collector,
+  синтетика,
+}: {
+  поУчасткам: boolean
+  collector: number | null
+  синтетика: boolean
+}) {
+  const q = `${collector != null ? `collector=${collector}&` : ''}${синтетика ? '' : 'synthetic=0&'}`
+  const пункты: [string, string, boolean][] = [
+    ['по датчикам', `/map?${q}`.replace(/[?&]$/, ''), !поУчасткам],
+    ['по участкам', `/map?${q}axis=sections`, поУчасткам],
+  ]
+  return (
+    <nav
+      aria-label="Ось схемы"
+      class="inline-flex self-start rounded-md overflow-hidden text-sm"
+      style="border:1px solid var(--border-strong)"
+    >
+      {пункты.map(([имя, href, выбран], i) => (
+        <a
+          key={имя}
+          href={href}
+          aria-current={выбран ? 'page' : undefined}
+          class="px-3 py-1"
+          style={`text-decoration:none; ${выбран ? 'background:var(--brand); color:var(--text-on-brand)' : 'background:var(--bg-surface); color:var(--text-primary)'}${i > 0 ? '; border-left:1px solid var(--border-strong)' : ''}`}
+        >
+          {имя}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+// Полоса-сводка над схемой: те же плитки, что на дашборде, в одну строку.
+function HomeStrip({
+  summary,
+  summaryError,
+  unacked,
+  orders,
+}: {
+  summary: SensorSummary | null
+  summaryError: string | null
+  unacked: Unacked | null
+  orders: OrdersSummary | null
+}) {
+  const нет = summaryError ? '—' : '…'
+  return (
+    <div
+      data-testid="home-strip"
+      class="grid gap-3"
+      style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))"
+    >
+      <Tile
+        label="▲ Высокий риск"
+        value={summary ? String(summary.high) : нет}
+        sub={summaryError ? 'сводка по датчикам не загрузилась' : 'датчиков'}
+        accent={summary && summary.high > 0 ? 'var(--risk-critical-border)' : undefined}
+        href="/dashboard?level=high"
+      />
+      <Tile
+        label="◆ Наблюдать"
+        value={summary ? String(summary.watch) : нет}
+        sub={summary ? `в норме ${summary.normal}` : undefined}
+        accent={summary && summary.watch > 0 ? 'var(--risk-medium-border)' : undefined}
+        href="/dashboard?level=watch"
+      />
+      <Tile
+        label="Неквитированные"
+        value={unacked ? String(unacked.total) : '…'}
+        sub={unacked ? (unacked.total > 0 ? 'уведомлений' : 'все квитированы') : undefined}
+        accent={unacked && unacked.total > 0 ? 'var(--state-warning)' : undefined}
+        href="/orders"
+      />
+      <Tile
+        label="Заявки в работе"
+        value={orders ? String(orders.open) : '…'}
+        sub={orders ? (orders.overdue > 0 ? undefined : 'просроченных нет') : undefined}
+        warn={orders && orders.overdue > 0 ? `из них просрочено ${orders.overdue}` : undefined}
+        href="/orders"
+      />
+      <Tile
+        label="Срез данных"
+        value={summary?.as_of ? formatDate(summary.as_of) : summary ? '—' : нет}
+        sub={summary ? срезРасчёта(summary.as_of, formatDateTime) : undefined}
+      />
+    </div>
   )
 }
