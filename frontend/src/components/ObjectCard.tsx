@@ -19,6 +19,12 @@ import {
   эпизодыПотериСвязи,
 } from './ObjectCard.logic'
 import { GasScale, ГАЗОВЫЙ_ДАТЧИК } from './GasScale'
+import {
+  sensorRiskUrl,
+  синтетикаВключена,
+  почемуРиск,
+  type SensorRiskPage,
+} from '../lib/sensorRisk'
 
 /* Карточка объекта — задача 5.5 (MOS-52). Открывают дашборд, схема и журнал
    по клику на маршрут /objects/:sectionId. Форма ответа GET /api/objects/{id}
@@ -128,6 +134,10 @@ export function ObjectCard({
   const [всеПрогнозы, setВсеПрогнозы] = useState(false)
   const [весьПаспорт, setВесьПаспорт] = useState(false)
   const [всеКаналы, setВсеКаналы] = useState(false)
+  // «Почему такой риск» — датчики участка по правилам (GET /api/sensor-risk?section=),
+  // а не объяснение прогноза коллектора: модели коллектора в продукте нет.
+  const [почему, setПочему] = useState<string[] | null>(null)
+  const [почемуError, setПочемуError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!sectionId) return
@@ -180,6 +190,26 @@ export function ObjectCard({
       })
       .catch((e) => {
         if (!отменено) setChannelFaultsError(errorMessage(e))
+      })
+
+    setПочему(null)
+    setПочемуError(null)
+    // Синтетика — как на дашборде и схеме: включена, пока в адресе нет ?synthetic=0.
+    const synthetic = синтетикаВключена(
+      new URLSearchParams(window.location.search).get('synthetic') ?? undefined,
+    )
+    apiFetch(sensorRiskUrl({ synthetic, section: Number(sectionId), limit: 200 }))
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+        return r.json() as Promise<SensorRiskPage>
+      })
+      .then((d) => {
+        // Ответ сверяем по section_id: сервер без параметра section отдал бы весь парк.
+        if (!отменено)
+          setПочему(почемуРиск(d.items.filter((s) => s.section_id === Number(sectionId))))
+      })
+      .catch((e) => {
+        if (!отменено) setПочемуError(errorMessage(e))
       })
     return () => {
       отменено = true
@@ -268,7 +298,6 @@ export function ObjectCard({
   }
 
   const risk = data.current_risk
-  const explanationLines = risk?.explanation_ru ? risk.explanation_ru.split('\n') : []
   const прогнозы = groupRepeatedForecasts(data.recent_forecasts)
   // Паспорт свёрнут до первых ПАСПОРТ_СТРОК каналов: у участка 158 их 60, и таблица
   // одна занимала 2 200 px. Остаток — кнопкой, по группам в том же порядке.
@@ -406,7 +435,7 @@ export function ObjectCard({
                 </div>
               </div>
 
-              {explanationLines.length > 0 && (
+              {(почему || почемуError) && (
                 <div
                   class="text-sm p-3 mt-3 rounded-md"
                   style="background:var(--accent-tint); border-left:3px solid var(--accent)"
@@ -414,7 +443,12 @@ export function ObjectCard({
                   <div class="font-semibold mb-1" style="color:var(--accent-text)">
                     Почему такой риск
                   </div>
-                  {explanationLines.map((line, i) => (
+                  {почемуError && (
+                    <p class="m-0" style="color:var(--state-error)">
+                      Причины по датчикам не загрузились: {почемуError}
+                    </p>
+                  )}
+                  {почему?.map((line, i) => (
                     <p key={i} class="m-0">
                       {line}
                     </p>
