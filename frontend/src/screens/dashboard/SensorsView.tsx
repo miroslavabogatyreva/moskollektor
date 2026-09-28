@@ -8,6 +8,7 @@ import { свежо } from '../../lib/poll'
 import {
   главнаяПричина,
   sensorRiskUrl,
+  сПараметром,
   страница,
   type SensorLevel,
   type SensorRiskPage,
@@ -59,18 +60,27 @@ export const наСхему = (q: string, synthetic: boolean) =>
 
 export function SensorTable({
   synthetic,
+  level,
   tick,
   коллекторы,
 }: {
   synthetic: boolean
+  // Фильтр из адреса ?level=: читаем при загрузке, пишем при смене (MOS-262).
+  level: SensorLevel | ''
   tick: number
   // collector_id → имя из /data/sections.json: в ответе метода имени коллектора нет.
   коллекторы: Map<number, string>
 }) {
-  const [level, setLevel] = useState<SensorLevel | ''>('')
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState<SensorRiskPage | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Смена уровня — новая запись истории, в отличие от переключателя синтетики:
+  // «Назад» возвращает прежний фильтр, как у фильтров схемы.
+  const setLevel = (l: SensorLevel | '') => {
+    const { pathname, search } = window.location
+    route(сПараметром(pathname, search, 'level', l || null))
+  }
 
   // Другой отбор — с первой страницы: пятая страница «высокого риска» обычно пуста.
   useEffect(() => setOffset(0), [synthetic, level])
@@ -162,7 +172,9 @@ export function SensorTable({
             >
               <thead>
                 <tr>
-                  {['Датчик', 'Тип', 'Коллектор, пикет', 'Уровень', 'Балл', 'Главная причина'].map(
+                  {/* «Уровень» и «Балл» первыми: на 390 px таблица в 760 px листается,
+                      и без прокрутки видно только первые колонки (MOS-262). */}
+                  {['Уровень', 'Балл', 'Датчик', 'Тип', 'Коллектор, пикет', 'Главная причина'].map(
                     (h) => (
                       <th
                         key={h}
@@ -185,6 +197,10 @@ export function SensorTable({
                       {...rowLink(() => route(наСхему(`channel=${s.channel_id}`, synthetic)))}
                       style={`border-bottom:1px solid var(--border-subtle); border-left:3px solid ${SENSOR_LEVELS[s.level].border}; cursor:pointer`}
                     >
+                      <td class="px-2 py-1.5">
+                        <SensorBadge level={s.level} />
+                      </td>
+                      <td class="px-2 py-2 num">{s.score.toFixed(2)}</td>
                       <td class="px-2 py-2">
                         {s.name}{' '}
                         <span class="num" style="color:var(--text-muted)">
@@ -200,10 +216,6 @@ export function SensorTable({
                           : (коллекторы.get(s.collector_id) ?? String(s.collector_id))}
                         {s.picket != null && ` · ПК${s.picket}`}
                       </td>
-                      <td class="px-2 py-1.5">
-                        <SensorBadge level={s.level} />
-                      </td>
-                      <td class="px-2 py-2 num">{s.score.toFixed(2)}</td>
                       <td class="px-2 py-2">
                         {причина ? (
                           <>

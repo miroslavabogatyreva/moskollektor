@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { имяУчастка } from '../../lib/format'
+import { изУчастков, участков } from '../../lib/plural'
 import { isDense, riskColors, riskLabel, riskShape, type RiskClass } from './risk'
 import type { Section } from './types'
 import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewport'
@@ -175,7 +176,7 @@ export function AxisLine({
         <span style="color:var(--text-secondary)">
           <strong style="color:var(--text-primary)">Линия {prefix}</strong>, ПК
           {Math.round(viewStart)}–ПК
-          {Math.round(viewEnd)} из ПК0–ПК{maxPicket} · {all.length} участков
+          {Math.round(viewEnd)} из ПК0–ПК{maxPicket} · {участков(all.length)}
         </span>
         <div
           role="group"
@@ -202,7 +203,7 @@ export function AxisLine({
         ref={svgRef}
         viewBox={`0 0 ${AXIS_WIDTH} ${L.height}`}
         role="img"
-        aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${all.length} участков`}
+        aria-label={`Линия ${prefix}, показан участок ПК${Math.round(viewStart)}–ПК${Math.round(viewEnd)} из ${изУчастков(all.length)}`}
         class="w-full"
         height={L.height * PX_PER_UNIT}
         style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:8px"
