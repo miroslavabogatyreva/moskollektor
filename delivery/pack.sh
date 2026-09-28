@@ -52,7 +52,7 @@ fail=0
 
 for f in README.md deploy/README.md \
          deploy/docker-compose.yml deploy/.env.example \
-         backend/Dockerfile backend/requirements.txt ml-stub/Dockerfile \
+         backend/Dockerfile backend/requirements.txt \
          frontend/package.json frontend/package-lock.json db/migrations db/seed contracts; do
   if [ -e "$root/$f" ]; then echo "OK    есть $f"; else echo "СБОЙ  нет $f"; fail=1; fi
 done

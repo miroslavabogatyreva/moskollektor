@@ -141,7 +141,6 @@ cp .env.example .env    # вписать POSTGRES_PASSWORD (openssl rand -hex 16
                         # и AUTH_SECRET (openssl rand -hex 32)
 sh make-cert.sh         # самоподписанный сертификат для nginx
 docker compose up -d    # база и nginx
-docker build -t moskollektor/ml-stub:latest -f ../ml-stub/Dockerfile ..
 docker compose --profile app up -d   # миграции, API, расчёт
 cd ../frontend && npm ci && npm run build \
   && mkdir -p ../deploy/nginx/app && cp -R dist/. ../deploy/nginx/app/

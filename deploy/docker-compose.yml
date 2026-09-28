@@ -174,7 +174,6 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      ML_URL: ${ML_URL}
       TZ: ${TZ}
       # MOS-39, находка проверяющей 92: без этих шести api не увидит вход по
       # паролю и каталог, даже когда все переменные заданы в .env — до сих
@@ -217,7 +216,6 @@ services:
     command: ["python", "-u", "-m", "app.worker.scheduler"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      ML_URL: ${ML_URL}
       TZ: ${TZ}
       SCHEDULER_INTERVAL_MIN: ${SCHEDULER_INTERVAL_MIN:-4}
       SCHEDULER_REFRESH_INTERVAL_MIN: ${SCHEDULER_REFRESH_INTERVAL_MIN:-5}
@@ -286,26 +284,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    restart: unless-stopped
-
-  ml:
-    profiles: ["app"]
-    # Образ Николая. Пока его нет, здесь стоит заглушка из Q7.3 (MOS-66):
-    # собирается командой `docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .`
-    # из корня репозитория. Подмена на настоящую модель — правка ML_IMAGE в deploy/.env,
-    # ни одной строки кода у нас при этом не меняется.
-    image: ${ML_IMAGE}
-    healthcheck:
-      # Проверяем /model, а не /predict: это метод из контракта (docs/HLD.md разд. 6),
-      # он есть и у заглушки, и у образа Николая, и он ничего не считает. curl
-      # в python:3.14-slim нет, поэтому зовём питоном — он есть в любом ML-образе.
-      # Разойдётся устройство образа Николая — снимаем эти четыре строки, они не
-      # держат ни одной зависимости: service_healthy на ml никто не ждёт.
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/model').read()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
     restart: unless-stopped
 
   # Демонстрационный каталог LDAP (MOS-39, НФ-76). Сам не поднимается —

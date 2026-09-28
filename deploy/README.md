@@ -281,26 +281,6 @@ SELECT rule_code, message, payload FROM load.error ORDER BY id;  -- причин
 "
 ```
 
-## Поднять заглушку модели
-
-Пока обученной модели нет, её место занимает `ml-stub/` (MOS-66). Собирается из корня
-репозитория, потому что в образ едет и `contracts/`:
-
-```
-docker build -t moskollektor/ml-stub:latest -f ml-stub/Dockerfile .
-docker compose --profile app up -d ml
-```
-
-Проверить:
-
-```
-docker compose exec -T ml python -c "import urllib.request,json; print(json.load(urllib.request.urlopen('http://ml:8100/model')))"
-# ждём: model_version stub-0.1, feature_schema feat.v1, degraded True
-```
-
-Флаг `degraded: true` стоит в каждом ответе нарочно: пока он на месте, заглушку
-не выдать за прогноз. Подмена на образ Николая — правка `ML_IMAGE` в `.env`,
-код при этом не меняется.
 
 ## Поднять каталог LDAP (демо, НФ-76, MOS-39)
 

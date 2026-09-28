@@ -102,3 +102,6 @@ ml-model/sensor/data/
 ml-model/sensor/run.json
 ml-model/sensor/sim_failures*.csv
 ml-model/sensor/SHA256SUMS
+
+# Заглушка модели: прогноз считают правила датчика, сервиса ml в compose больше нет (MOS-266).
+/ml-stub/
