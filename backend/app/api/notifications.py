@@ -79,12 +79,15 @@ FROM_SQL = """
 
 COUNT_SQL = f"SELECT count(*) {FROM_SQL}"
 
+# Свежие сверху по порядку создания, а не по reported_at: при проигрывании архива
+# reported_at новых уведомлений — срез архива (01.06.2026), и старые уведомления модели
+# коллектора с настоящей датой 17–20.09.2026 висели бы сверху всегда (28.09.2026).
 LIST_SQL = f"""
 SELECT n.id, n.reported_at, l.name AS object_name, x.smvu_key, x.section_id,
        f.probability, fc.probability AS current_probability, f.horizon_h, r.as_of,
        n.acked_at, au.login AS acked_by
 {FROM_SQL}
- ORDER BY n.reported_at DESC, n.id DESC
+ ORDER BY n.id DESC
  LIMIT $3 OFFSET $4
 """
 
