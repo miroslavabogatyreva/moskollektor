@@ -53,3 +53,33 @@ q checks      "select e.source_key::int as channel_id, mp.point_no, c.code as ch
 ## Проверка MOS-264
 
 Текущая причинная версия `sim-v3-causal`; два режима сохранены. Коэффициенты заморожены по 2025 год, Q1 используется для выбора; Q2 — ретроспектива. Актуальные метрики и ограничения — metrics.md и training-report.md; итоговая проверка — ../2026-09-28-mos264-review/review.md. Старые числа в истории Git не относятся к текущему JSON.
+
+## Признаки показаний, MOS-225 (28.09.2026)
+
+`data/reading_features.csv.gz` — отдельная суточная таблица по исходным журналам
+2025 и января–июня 2026. Она содержит очищенный метан, флаг вероятной поверки
+и счётчики отметок эпохи. Это реальные данные, синтетических паспортов в ней нет.
+Аудит исключений и список дней — `data/reading_features_audit.json`, контрольные
+суммы исходных CSV и результата — `data/reading_features_manifest.json`.
+
+Подробности и замер: `ml-model/docs/mos225-reading-features.md`.
+Контракт: `contracts/sensor-reading-features.v1.json`. Пример чтения:
+
+```python
+import csv
+import gzip
+from datetime import datetime
+
+cut = datetime.fromisoformat("2026-06-23T21:00:00+03:00")
+with gzip.open("docs/proof/2026-09-28-sensor-model/data/reading_features.csv.gz", "rt") as f:
+    history = [row for row in csv.DictReader(f)
+               if datetime.fromisoformat(row["available_at"]) <= cut]
+```
+
+Перед обучением выбрать историческое окно и агрегировать строки по `channel_id`;
+не присоединять итог за всё полугодие к каждой дате. В 21:00 сегодняшние сутки
+ещё недоступны. Дней до 2025 года в этой таблице нет: их отсутствие не равно нулю.
+`epoch_marker` и `selected_rows` — аудит, не признаки ошибки или молчания.
+`calibration_candidate` — общий флаг дня, а не доказанная поверка каждого канала.
+Действующая модель датчика этот файл пока не читает: подключение и повторная
+оценка модели требуют отдельного эксперимента после MOS-263/MOS-264.

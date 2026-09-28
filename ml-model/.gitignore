@@ -19,3 +19,6 @@ __pycache__/
 .pytest_cache/
 # Веса модели, работающей на стенде, лежат в git (MOS-145).
 !/models/lgbm-v3-bag-2026.09.21/
+# MOS-225: daily aggregate evaluation metrics, no raw customer readings.
+!/docs/mos225-precision/validation-precision-at-5.csv
+!/docs/mos225-precision/retrospective-precision-at-5.csv
