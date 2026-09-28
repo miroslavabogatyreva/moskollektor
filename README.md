@@ -20,6 +20,13 @@
 <sub>все методы API с описанием</sub>
 </td>
 </tr>
+<tr>
+<td align="center" colspan="2">
+<a href="documentation.pdf"><img src="https://img.shields.io/badge/📄%20%20Сопроводительная%20документация%20·%20PDF-1F6FEB?style=for-the-badge&labelColor=1F6FEB" width="460" alt="Сопроводительная документация, PDF"></a><br>
+<b><a href="documentation.pdf">documentation.pdf</a></b><br>
+<sub>методы, ограничения, архитектура, API, сборка и установка — 25 страниц</sub>
+</td>
+</tr>
 </table>
 
 <br>
@@ -67,12 +74,13 @@
 |---|---|
 | 🖥️ **Сервис** | **https://moskollektor.mbogatyreva.ru** — на экране входа кнопка «Войти как» у каждой демо-учётки |
 | 📘 **REST API (Swagger)** | **https://moskollektor.mbogatyreva.ru/docs** — все методы с описанием; вызвать их со страницы можно после входа в сервис в том же браузере |
+| 📄 **Сопроводительная документация** | **[documentation.pdf](documentation.pdf)** — 25 страниц: методы обработки данных, ограничения, архитектура, API, сборка и установка |
 
 ## Требования ТЗ
 
 Все требования технического задания заказчика — 175 пунктов по разделам, с номером страницы
 и цитатой, — [`tz-requirements.md`](tz-requirements.md). У каждого пункта отмечено, выполнен ли он
-и где это проверить: выполнено 93 из 147 требований, ещё 28 пунктов — критерии оценки экспертами.
+и где это проверить: выполнено 95 из 147 требований, ещё 28 пунктов — критерии оценки экспертами.
 
 ## Документация
 
@@ -160,7 +168,7 @@ cd ../frontend && npm ci && npm run build \
 
 <div align="center">
 
-**Сервис:** https://moskollektor.mbogatyreva.ru &nbsp;·&nbsp; **Swagger:** https://moskollektor.mbogatyreva.ru/docs
+**Сервис:** https://moskollektor.mbogatyreva.ru &nbsp;·&nbsp; **Swagger:** https://moskollektor.mbogatyreva.ru/docs &nbsp;·&nbsp; **Документация:** [documentation.pdf](documentation.pdf)
 
 </div>
 
