@@ -24,6 +24,17 @@ deploy/.env
 # Пересоздаются командой `sh deploy/make-cert.sh` за две секунды.
 deploy/nginx/certs/
 
+# Собранный фронт на стенде: его кладёт deploy/deploy.sh из frontend/dist.
+# Отдельно от заглушки deploy/nginx/html, которую держит git (задача 1.11).
+deploy/nginx/app/
+
+# Демо-стенд (задача 1.10): переменные с паролями, сертификат Let's Encrypt,
+# его рабочий каталог certbot и проверочные файлы. Образец — deploy/demo.env.example.
+deploy/demo.env
+deploy/nginx/certs-demo/
+deploy/nginx/letsencrypt/
+deploy/nginx/acme/
+
 # Промежуточный счёт analysis/inventory.py по восьми годовым файлам:
 # восемь .tsv, пересоздаются проходом по dataset/ за 7 минут.
 inventory_scan/

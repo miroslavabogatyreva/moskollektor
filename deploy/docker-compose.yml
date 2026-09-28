@@ -43,22 +43,55 @@ services:
     # а не жёсткий предел — он растёт с числом лидеров и хеш-узлов в плане.
     # Хост даёт 5,9 ГБ на /dev/shm (df -h, 23.09.2026), 1 ГиБ — шестая доля.
     shm_size: 1024m
+    # Свой pg_hba.conf вместо того, что пишет initdb (задача 1.6, MOS-82): без
+    # trust на 127.0.0.1 и ::1. Через hba_file, а не файлом в PGDATA: так правило
+    # приезжает из git и на кластер, заведённый раньше. Разбор — в самом файле.
+    #
+    # Архив журнала (задача 1.18, НФ-39): каждый заполненный сегмент WAL база
+    # сама сжимает и кладёт в том backups, а archive_timeout выгоняет сегмент
+    # не реже раза в 15 минут — отсюда потеря не больше 15 минут при норме в час.
+    # Сегмент кладёт deploy/archive-wal.sh: через .tmp, sync и mv, повтор того же
+    # сегмента — успех, чужой сегмент с тем же именем — ошибка (разбор в самом
+    # скрипте). Копии кластера снимает служба backup ниже (deploy/backup.sh).
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_timeout=900
+      - -c
+      - archive_command=sh /archive-wal.sh %p %f
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Пусто — compose отказывается поднимать стенд и называет переменную. В образце
+      # .env пароль пустой нарочно: до 27.09.2026 там стояла рабочая заглушка, и
+      # забытый пароль поднимал базу с паролем, известным всему git (задача 1.6).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
       TZ: ${TZ}
+      # Выключатель копий: 0 — archive-wal.sh не кладёт сегменты в архив
+      # (docs/restore.md, «Включить и выключить копии»).
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-1}
     volumes:
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./archive-wal.sh:/archive-wal.sh:ro
       # В PostgreSQL 18 каталог данных переехал: PGDATA теперь
       # /var/lib/postgresql/18/docker, а VOLUME объявлен на /var/lib/postgresql.
       # Смонтировать том на .../data, как делали до 17-й ветки, — значит отдать
       # кластер анонимному тому: `docker compose down -v` сотрёт базу, а бэкап
       # заберёт ноль байт из пустого каталога.
-      - pgdata:/var/lib/postgresql
-      - backups:/backups
+      #
+      # PGDATA_DIR и BACKUP_DIR — каталог на хосте вместо тома докера: так базу
+      # или копии выносят на второй диск. Пусто — тома pgdata и backups, как было.
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql
+      - ${BACKUP_DIR:-backups}:/backups
     ports:
       # Наружу база не смотрит: только петля хоста, чтобы ходить psql-ом со стенда.
-      - "127.0.0.1:5432:5432"
+      # Порт — переменной: демо-стенд живёт на том же сервере вторым проектом
+      # compose и берёт 5433 (deploy/demo.env.example, задача 1.10).
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -66,15 +99,58 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Резервные копии (задачи 1.2, 1.9, 1.18; НФ-39, НФ-78). Раз в сутки в BACKUP_AT
+  # снимает копию кластера pg_basebackup в том backups и хранит BACKUP_KEEP
+  # последних вместе с архивом WAL от самой старой. Образ тот же, что у db:
+  # pg_basebackup обязан быть той же ветки, что сервер. Не под профилем app —
+  # копии нужны и стенду без приложения. Устройство и режимы — deploy/backup.sh,
+  # восстановление — docs/restore.md.
+  backup:
+    image: postgis/postgis:18-3.6
+    platform: linux/amd64
+    # Режим — команда: `docker compose run --rm backup --restore latest` подставит
+    # свой вместо --loop, не трогая точку входа (docs/restore.md).
+    entrypoint: ["sh", "/backup.sh"]
+    command: ["--loop"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env — openssl rand -hex 16}
+      TZ: ${TZ}
+      BACKUP_AT: ${BACKUP_AT:-02:00}
+      BACKUP_KEEP: ${BACKUP_KEEP:-1}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-1}
+    volumes:
+      - ${BACKUP_DIR:-backups}:/backups
+      - ./backup.sh:/backup.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   nginx:
     image: nginx:1.31-alpine
+    environment:
+      HTTPS_PORT: ${HTTPS_PORT:-443}
     ports:
-      - "80:80"
-      - "443:443"
+      # Порты и сертификат — переменными ради демо-стенда (задача 1.10): он
+      # поднимается вторым проектом compose на 8080/8443 со своим сертификатом.
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${CERTS_DIR:-./nginx/certs}:/etc/nginx/certs:ro
+      # Проверочные файлы Let's Encrypt для сертификата демо-стенда
+      # (deploy/demo-cert.sh): удостоверяющий центр читает их по порту 80.
+      - ./nginx/acme:/var/www/acme:ro
+      # Шаблон редиректа с http на https: образ nginx подставляет HTTPS_PORT при
+      # старте и кладёт готовый файл в /etc/nginx/conf.d (задача 1.10).
+      - ./nginx/templates:/etc/nginx/templates:ro
+      # Заглушка «Стенд поднят» (в git) и собранный фронт (кладёт deploy.sh,
+      # в git его нет) — разные каталоги, задача 1.11. nginx отдаёт app,
+      # а заглушку — только пока app пуст.
       - ./nginx/html:/usr/share/nginx/html:ro
+      - ./nginx/app:/usr/share/nginx/app:ro
     healthcheck:
       # Адрес именно 127.0.0.1, а не localhost. В контейнере /etc/hosts отдаёт на имя
       # localhost два адреса, и wget из busybox берёт первым ::1, а nginx слушает
