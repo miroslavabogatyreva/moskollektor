@@ -348,10 +348,13 @@ def _selfcheck():
     assert fresh["score"] > old["score"] > здоровый["score"], (fresh, old)
     assert fresh["reasons"][0]["kind"] == "real"
     assert score([at + timedelta(hours=1)], None, at, kind=gas) == здоровый
-    # серия отказов — уровень high в обоих режимах
+    # отказ час назад (момент rearm) — high в обоих режимах, и вероятность одна на всех:
+    # свежий отказ отключает историю и вид датчика
+    свежий = score([at - timedelta(hours=1)], None, at, kind=gas)
+    assert свежий["level"] == "high" and score([at - timedelta(hours=1)], eq, at, kind=gas)["level"] == "high"
+    assert score([at - timedelta(hours=1), at - timedelta(days=40)], None, at, kind="Датчик дыма")["score"] == свежий["score"]
+    assert свежий["reasons"][0]["text"].startswith("канал отказал 1 ч назад"), свежий
     many = [at - timedelta(hours=h) for h in (3, 20, 50, 100, 200)]
-    assert score(many, None, at, kind=gas)["level"] == "high"
-    assert score(many, eq, at, kind=gas)["level"] == "high"
     # сумма весов причин — разница с тем же видом без отказов
     r = score(many, None, at, kind=gas)
     assert abs(sum(x["weight"] for x in r["reasons"]) - (r["score"] - здоровый["score"])) < 0.01

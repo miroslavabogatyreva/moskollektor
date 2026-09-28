@@ -190,11 +190,8 @@ moskollektor/
 │                        external_status.json — образец ответа эмулятора
 │                        хелпдеска, четыре шага цикла (MOS-63, Ф-96)
 ├── deploy/         27   стенд: docker-compose, nginx, сертификат, проверка TLS и доступа к базе
-├── code/           66   прототипы и считалки: то, по чему пишется продукт
+├── code/           65   прототипы и считалки: то, по чему пишется продукт
 │   ├── check_schema.py       проверка схемы на согласованность с самой собой
-│   ├── failure_sim.py        симулированные отказы по синтетическому паспорту:
-│   │                          Вейбулл по нормам регламента, детерминирован от
-│   │                          номера канала, реальные отказы не читает — MOS-263
 │   ├── check_write_policy.py  политика записи журнала не двигает метрику:
 │   │                          считает Precision и Recall по прореженному ряду
 │   │                          предупреждений модели v3 — MOS-147
@@ -274,7 +271,9 @@ backend/app/
                     объяснение прогноза (explain.py),
                     вероятность отказа датчика (sensor_risk.py) по модели
                     sensor_model.json и её сумме SHA256SUMS — модель обучена
-                    docs/proof/2026-09-28-sensor-model/train_sensor_model.py (MOS-263)
+                    docs/proof/2026-09-28-sensor-model/train_sensor_model.py;
+                    симулированные отказы и предупреждения прибора по
+                    синтетическому паспорту (failure_sim.py) (MOS-263)
 frontend/src/screens/{dashboard, map, log, orders}
 frontend/e2e/       E2E на Playwright: us-NN-*.spec.ts — файл на историю
                     из docs/user-stories.md, тест на сценарий; конфигурация

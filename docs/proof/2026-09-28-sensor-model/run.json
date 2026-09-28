@@ -7686,12 +7686,12 @@
   "horizon": 36,
   "moments": "own",
   "p_fresh": {
-   "select": 0.3014100602266382,
+   "select": 0.33399790396916107,
    "refit": 0.32133329961981044
   },
   "thresholds_real": {
-   "high": 0.3560752031982152,
-   "watch": 0.005680178497330885
+   "high": 0.32133329929847715,
+   "watch": 0.005125969123257243
   },
   "thresholds_sim": {
    "high": 0.4465337312099315,
@@ -7727,34 +7727,34 @@
   ],
   "real": {
    "model": {
-    "tp": 2,
-    "fp": 30,
-    "fn": 599,
+    "tp": 175,
+    "fp": 422,
+    "fn": 426,
     "dup": 0,
-    "alerts": 32,
+    "alerts": 597,
     "incidents": 601,
-    "precision": 0.062,
-    "recall": 0.003
+    "precision": 0.293,
+    "recall": 0.291
    },
    "model_watch": {
-    "tp": 222,
-    "fp": 2918,
-    "fn": 379,
+    "tp": 221,
+    "fp": 3289,
+    "fn": 380,
     "dup": 0,
-    "alerts": 3140,
+    "alerts": 3510,
     "incidents": 601,
-    "precision": 0.071,
-    "recall": 0.369
+    "precision": 0.063,
+    "recall": 0.368
    },
    "model_rearm_only": {
-    "tp": 0,
-    "fp": 0,
-    "fn": 601,
+    "tp": 176,
+    "fp": 421,
+    "fn": 425,
     "dup": 0,
-    "alerts": 0,
+    "alerts": 597,
     "incidents": 601,
-    "precision": 0.0,
-    "recall": 0.0
+    "precision": 0.295,
+    "recall": 0.293
    },
    "rule_rearm": {
     "tp": 176,
@@ -7800,14 +7800,14 @@
   "levels_real": {
    "2026-06-23": {
     "high": 0,
-    "watch": 29
+    "watch": 31
    },
    "2026-06-29": {
     "high": 0,
     "watch": 36
    },
    "test_ticks_high_median": 0.0,
-   "test_ticks_high_max": 8
+   "test_ticks_high_max": 9
   },
   "sim": {
    "model": {
