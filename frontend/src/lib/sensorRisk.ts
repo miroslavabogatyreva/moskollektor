@@ -101,6 +101,8 @@ export function sensorRiskUrl(q: {
   // Один датчик — чтобы /map?channel=<id> узнал коллектор датчика. В контракте
   // SL.4 параметра нет, просим добавить (PR sl-frontend); ответ проверяем по channel_id.
   channel?: number
+  // Датчики одного участка — блок «Почему такой риск» карточки /objects/{id}.
+  section?: number
   level?: SensorLevel
   limit?: number
   offset?: number
@@ -109,6 +111,7 @@ export function sensorRiskUrl(q: {
   if (q.collector != null) p.set('collector', String(q.collector))
   if (q.node != null) p.set('node', String(q.node))
   if (q.channel != null) p.set('channel', String(q.channel))
+  if (q.section != null) p.set('section', String(q.section))
   if (q.level) p.set('level', q.level)
   if (q.limit != null) p.set('limit', String(q.limit))
   if (q.offset) p.set('offset', String(q.offset))
@@ -165,4 +168,25 @@ export function линииДатчиков<T extends Pick<SensorRow, 'section_id
   return [...m.entries()].sort((a, b) =>
     a[0] === БЕЗ_ЛИНИИ ? 1 : b[0] === БЕЗ_ЛИНИИ ? -1 : Number(a[0]) - Number(b[0]),
   )
+}
+
+// «Почему такой риск» в карточке участка: до ПОКАЗАТЬ датчиков участка с уровнем
+// high или watch, каждый с главной причиной словами — какое правило сработало
+// и когда канал отказал. items — ответ ?section=<id>, сервер уже отсортировал
+// их по уровню, потом по баллу. Рискованных нет — одна строка про весь участок.
+const ПОКАЗАТЬ = 3
+export function почемуРиск(items: SensorRow[]): string[] {
+  if (items.length === 0) return ['Датчиков участка в расчёте по датчикам: 0 — балл не посчитан']
+  const риск = items.filter((s) => s.level !== 'normal')
+  if (риск.length === 0)
+    return [
+      `Датчиков участка: ${items.length}, все в норме — ни правило давности, ни правило предвестника не сработало`,
+    ]
+  const строки = риск.slice(0, ПОКАЗАТЬ).map((s) => {
+    const п = главнаяПричина(s.reasons)
+    return п ? `${s.name}: ${п.text}` : s.name
+  })
+  if (риск.length > ПОКАЗАТЬ)
+    строки.push(`Ещё датчиков с риском на участке: ${риск.length - ПОКАЗАТЬ}`)
+  return строки
 }
