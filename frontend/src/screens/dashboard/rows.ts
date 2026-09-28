@@ -1,6 +1,6 @@
 // Строка дашборда: имя объекта словами и уровень риска словом и цветом —
 // MOS-127, задача 5.16, приёмка М-04. Чистая логика без DOM, проверяется
-// node-скриптом (rows.selfcheck.ts), как lag.ts и risk.ts на соседнем экране.
+// node-скриптом (rows.selfcheck.ts), как risk.ts на соседнем экране.
 
 import { имяУчастка } from '../../lib/format.ts'
 import type { RiskClass } from './types'
@@ -72,39 +72,4 @@ export function цветРиска(cls: RiskClass): string {
 // различных вероятностей всего 16.
 export function процент(p: number): string {
   return `${(p * 100).toFixed(1).replace('.', ',')} %`
-}
-
-// ОЧАГИ. Где риск сосредоточен — коллекторы по числу участков высокого риска.
-// Коллектор — префикс smvu_key, тот же, что в имени участка («Коллектор 1044,
-// пикет 0»), чтобы блок и таблица под ним звали его одинаково. `top` — участок
-// с наибольшей вероятностью: по нему ссылка ведёт на схему (/map?section=…).
-export interface Очаг {
-  коллектор: string
-  высоких: number
-  всего: number
-  максимум: number
-  top: number
-}
-
-export function очаги(
-  rows: { section_id: number; probability: number; risk_class: RiskClass }[],
-  sections: Map<number, SectionRef>,
-): Очаг[] {
-  const по = new Map<string, Очаг>()
-  for (const r of rows) {
-    const s = sections.get(r.section_id)
-    if (!s) continue
-    const к = s.smvu_key.split(':')[0]
-    const о = по.get(к) ?? { коллектор: к, высоких: 0, всего: 0, максимум: -1, top: r.section_id }
-    о.всего++
-    if (r.risk_class === 'high') о.высоких++
-    if (r.probability > о.максимум) {
-      о.максимум = r.probability
-      о.top = r.section_id
-    }
-    по.set(к, о)
-  }
-  return [...по.values()]
-    .filter((о) => о.высоких > 0)
-    .sort((a, b) => b.высоких - a.высоких || b.максимум - a.максимум)
 }

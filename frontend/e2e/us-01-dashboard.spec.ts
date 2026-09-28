@@ -1,6 +1,10 @@
 // US-01. Начало смены: увидеть, где сейчас риск — docs/user-stories.md, приёмка
 // М-04, Ф-01, Ф-57. Названия test() — названия сценариев истории.
 import { expect, test, type Page } from '@playwright/test'
+import { свойБандл } from './helpers/sensor-mock'
+
+// E2E_BUNDLE=dist — своя сборка против живого API.
+test.beforeEach(({ page }) => свойБандл(page))
 
 interface Risk {
   section_id: number
@@ -18,46 +22,90 @@ async function участокСтроки(page: Page, i: number): Promise<number
   return Number(текст.match(/·\s*(\d+)\s*$/)?.[1])
 }
 
+// Порядок сервера с 28.09.2026 (publish.ранги): сначала уровень — участки high,
+// потом остальные, — внутри уровня балл по убыванию. Балл high бывает ниже балла
+// низкого риска: строка 8 — 1,9 % high, строка 9 — 50,2 % normal (стенд 28.09.2026).
+const высокий = (класс: string | null) => (класс === 'high' ? 0 : 1)
+
 test('US-01 сц. 1: самый рискованный участок наверху', async ({ page }) => {
   const риски = (await (await page.request.get('/api/risks')).json()) as Risk[]
   expect(риски.length, 'на дашборде больше одного участка').toBeGreaterThan(1)
-  const максимум = Math.max(...риски.map((r) => r.probability))
 
   const начало = Date.now()
-  await page.goto('/dashboard?view=sections')
+  // ?level=all — весь список: по умолчанию экран показывает только участки high.
+  await page.goto('/dashboard?view=sections&level=all')
   await expect(строки(page).first()).toBeVisible()
   const готово = Date.now() - начало
 
-  // Первые 50 строк — это больше, чем помещается на первом экране.
-  const вероятности = (await строки(page).locator('td:nth-child(4)').allInnerTexts())
-    .slice(0, 50)
-    // «91,5 %» — вероятность на экране процентом с запятой (дашборд 28.09.2026).
-    .map((т) => parseFloat(т.replace(',', '.')))
-  for (let i = 1; i < вероятности.length; i++) {
-    expect(вероятности[i], `строка ${i + 1} не выше строки ${i}`).toBeLessThanOrEqual(
-      вероятности[i - 1],
+  // Первые 50 строк — это больше, чем помещается на первом экране; и все участки high.
+  const высоких = риски.filter((r) => r.risk_class === 'high').length
+  const n = Math.max(50, высоких + 5)
+  const наЭкране = (
+    await строки(page).evaluateAll(
+      (trs, n) =>
+        trs.slice(0, n).map((tr) => {
+          const td = tr.querySelectorAll('td')
+          return [td[2].textContent!, parseFloat(td[3].textContent!.replace(',', '.'))] as const
+        }),
+      n,
     )
+  ).map(([слово, p]) => ({ уровень: /высокий риск/.test(слово) ? 0 : 1, p }))
+  for (let i = 1; i < наЭкране.length; i++) {
+    const [было, стало] = [наЭкране[i - 1], наЭкране[i]]
+    expect(стало.уровень, `строка ${i + 1}: уровень не выше строки ${i}`).toBeGreaterThanOrEqual(
+      было.уровень,
+    )
+    if (стало.уровень === было.уровень)
+      expect(
+        стало.p,
+        `строка ${i + 1}: балл не выше строки ${i} того же уровня`,
+      ).toBeLessThanOrEqual(было.p)
   }
+  // Первая строка — ранг 1 из /api/risks, и это участок с наибольшим баллом среди
+  // участков его уровня (high, если такие есть).
   const первый = риски.find((r) => r.risk_rank === 1)!
-  expect(первый.probability).toBe(максимум)
+  expect(высокий(первый.risk_class)).toBe(Math.min(...риски.map((r) => высокий(r.risk_class))))
+  expect(первый.probability).toBe(
+    Math.max(
+      ...риски
+        .filter((r) => высокий(r.risk_class) === высокий(первый.risk_class))
+        .map((r) => r.probability),
+    ),
+  )
   expect(await участокСтроки(page, 0), 'первая строка — участок ранга 1 из /api/risks').toBe(
     первый.section_id,
   )
 
   const высота = page.viewportSize()!.height
-  let наЭкране = 0
+  let видно = 0
   for (const box of await строки(page).evaluateAll((els) =>
     els.slice(0, 100).map((e) => e.getBoundingClientRect().bottom),
   ))
-    if (box <= высота) наЭкране++
+    if (box <= высота) видно++
   test.info().annotations.push({
     type: 'замер',
-    description: `список готов за ${готово} мс; строк на первом экране без прокрутки: ${наЭкране}`,
+    description: `список готов за ${готово} мс; строк на первом экране без прокрутки: ${видно}`,
   })
 })
 
-test('US-01 сц. 2: уровень риска читается без цифр', async ({ page }) => {
+// Решение Славы 28.09.2026: по умолчанию — только участки высокого риска, остальные
+// свёрнуты строкой с числом; «Показать» открывает весь список (?level=all).
+test('US-01 сц. 1: по умолчанию видны участки высокого риска, остальные свёрнуты', async ({
+  page,
+}) => {
+  const риски = (await (await page.request.get('/api/risks')).json()) as Risk[]
+  const высоких = риски.filter((r) => r.risk_class === 'high').length
   await page.goto('/dashboard?view=sections')
+  const свёрнуто = page.getByTestId('sections-normal')
+  await expect(свёрнуто).toContainText((риски.length - высоких).toLocaleString('ru-RU'))
+  await expect(строки(page)).toHaveCount(высоких)
+  await свёрнуто.getByRole('link', { name: 'Показать' }).click()
+  await expect(page).toHaveURL(/\/dashboard\?view=sections&level=all$/)
+  await expect(строки(page)).toHaveCount(риски.length, { timeout: 30_000 })
+})
+
+test('US-01 сц. 2: уровень риска читается без цифр', async ({ page }) => {
+  await page.goto('/dashboard?view=sections&level=all')
   await expect(строки(page).first()).toBeVisible()
 
   // Цвет полоски строки для каждого уровня, который есть на экране.
@@ -92,8 +140,12 @@ test('US-01 сц. 2: уровень риска читается без цифр'
 test('US-01 сц. 3: при равном риске важнее газ', async ({ page }) => {
   const риски = (await (await page.request.get('/api/risks')).json()) as Risk[]
   // Группы участков с одинаковой вероятностью — на них порядок решает система.
-  const группы = new Map<number, Risk[]>()
-  for (const r of риски) группы.set(r.probability, [...(группы.get(r.probability) ?? []), r])
+  // Внутри одного уровня: high стоит выше низкого риска при любом балле.
+  const группы = new Map<string, Risk[]>()
+  for (const r of риски) {
+    const к = `${r.risk_class}:${r.probability}`
+    группы.set(к, [...(группы.get(к) ?? []), r])
+  }
   const равные = [...группы.values()].filter((g) => g.length > 1)
   test.skip(равные.length === 0, 'на стенде нет участков с равной вероятностью')
 

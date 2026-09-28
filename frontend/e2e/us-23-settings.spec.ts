@@ -54,7 +54,7 @@ test('US-23 сц. 1: «высокий риск» на дашборде — у у
   const ctx = await browser.newContext({ extraHTTPHeaders: ODS })
   const page = await ctx.newPage()
   const риски = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
-  await page.goto('/dashboard?view=sections')
+  await page.goto('/dashboard?view=sections&level=all')
   const строки = (await (await риски).json()) as { probability: number; risk_class: string }[]
   const неНижеПорога = строки.filter((r) => r.risk_class === 'high').length
   const таблица = page.locator('main table tbody tr')

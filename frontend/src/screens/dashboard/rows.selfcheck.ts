@@ -3,7 +3,7 @@
 
 declare const process: { exitCode?: number }
 
-import { имяОбъекта, очаги, процент, словоРиска, указатель, цветРиска } from './rows.ts'
+import { имяОбъекта, процент, словоРиска, указатель, цветРиска } from './rows.ts'
 
 let failed = false
 const assertEqual = (got: unknown, want: unknown, label: string) => {
@@ -94,34 +94,7 @@ if (failed) {
   console.log('rows.selfcheck ok')
 }
 
-// Проценты и очаги (дашборд диспетчера, 28.09.2026).
+// Проценты (дашборд диспетчера, 28.09.2026).
 assertEqual(процент(0.9149649739265442), '91,5 %', 'вероятность — процент с запятой')
 assertEqual(процент(0.05), '5,0 %', 'малая вероятность — один знак')
-{
-  const с = указатель([
-    { section_id: 1, smvu_key: '1044:0', collector: 5, picket: 0 },
-    { section_id: 2, smvu_key: '1044:7', collector: 5, picket: 7 },
-    { section_id: 3, smvu_key: '889:1', collector: 2, picket: 1 },
-    { section_id: 4, smvu_key: '889:2', collector: 2, picket: 2 },
-  ])
-  const о = очаги(
-    [
-      { section_id: 1, probability: 0.5, risk_class: 'high' },
-      { section_id: 2, probability: 0.9, risk_class: 'high' },
-      { section_id: 3, probability: 0.95, risk_class: 'high' },
-      { section_id: 4, probability: 0.1, risk_class: 'normal' },
-      { section_id: 99, probability: 0.99, risk_class: 'high' }, // нет в справочнике — пропуск
-    ],
-    с,
-  )
-  assertEqual(о.length, 2, 'два коллектора с высоким риском')
-  assertEqual(
-    о[0].коллектор,
-    '1044',
-    'первый — где больше участков высокого риска, а не где выше максимум',
-  )
-  assertEqual(о[0].top, 2, 'ссылка ведёт на самый рискованный участок коллектора')
-  assertEqual(о[1].всего, 2, 'всего считает и участки низкого риска')
-  assertEqual(о[1].высоких, 1, 'высоких — только high')
-}
-if (!failed) console.log('rows.selfcheck: проценты и очаги ok')
+if (!failed) console.log('rows.selfcheck: проценты ok')

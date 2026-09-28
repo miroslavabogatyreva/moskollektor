@@ -2,8 +2,9 @@ import { formatDateTime } from '../lib/format'
 import { процент } from '../screens/dashboard/rows'
 import type { Unacked } from '../screens/dashboard/types'
 
-/* Плитка, панель и журнал «Ждут квитирования» — общие для дашборда и главной
-   (схема пикетов, MOS-265): одна вёрстка и одни подписи на обоих экранах. */
+/* Плитка — дашборд, режим «по участкам»; панель и журнал «Ждут квитирования» —
+   главная (схема пикетов, MOS-265). С 28.09.2026 на дашборде панели нет:
+   сводку смены показывает только главная. */
 
 export function Panel({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return (
