@@ -188,15 +188,20 @@ test('SL.6: самый плотный коллектор — «объект Мю
     const высота = await полоса.locator('svg[role="img"]').evaluate((e) => e.clientHeight)
     expect(высота).toBeLessThanOrEqual(188)
   }
-  // Каждый датчик с пикетом учтён: нарисован значком (не больше 8 на пикет, кольцо ППР —
-  // отдельный круг без заливки) или вошёл в число «+N» над стопкой.
+  // Каждый датчик с пикетом учтён: рискованный нарисован значком (не больше 8 на пикет,
+  // кольцо ППР — отдельный круг без заливки) или вошёл в число «+N» над стопкой, а датчик
+  // в норме — в число data-normal стопки (MOS-265: значком он больше не рисуется).
   const значков = await демо
     .locator('g[data-picket] > :is(polygon, circle):not([fill="none"])')
     .count()
   const скрыто = await демо
     .locator('g[data-picket] > text[data-hidden]')
     .evaluateAll((es) => es.reduce((n, e) => n + Number(e.getAttribute('data-hidden')), 0))
-  expect(значков + скрыто).toBe(наОси)
+  const вНорме = await демо
+    .locator('g[data-picket]')
+    .evaluateAll((es) => es.reduce((n, e) => n + Number(e.getAttribute('data-normal')), 0))
+  await expect(демо.locator('g[data-picket] [data-level="normal"]')).toHaveCount(0)
+  expect(значков + скрыто + вНорме).toBe(наОси)
   for (const g of await демо.locator('g[data-picket]').all())
     expect(
       await g.locator(':scope > :is(polygon, circle):not([fill="none"])').count(),

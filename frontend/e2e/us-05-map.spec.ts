@@ -190,7 +190,7 @@ async function пересечения(page: Page): Promise<string[]> {
 // объекта Зита (21 метка, ПК55/56/57 через 13 ед.) рисовалась рамками внахлёст.
 test('US-05 сц. 2: масштаб', async ({ page }) => {
   test.setTimeout(120_000)
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await expect(page.locator('svg[role="img"]').first()).toBeVisible()
   const коллекторы = await page
     .locator('select')
@@ -229,6 +229,10 @@ test('US-05 сц. 2: масштаб', async ({ page }) => {
 
 test('US-05 сц. 5: риск различим без цвета', async ({ page }) => {
   test.setTimeout(120_000)
+  // С MOS-265 над схемой полоса-сводка, справа журнал 384 px. Снимок значка берётся
+  // в пределах окна, а чипы появляются только на широкой оси, поэтому окно выше
+  // (оси нижних линий ушли ниже 720 px) и шире (ось та же ~960 px, что до журнала).
+  await page.setViewportSize({ width: 1700, height: 1600 })
   // «Класса нет» стенд не отдаёт: /api/risks возвращает класс всем 3 173 участкам.
   // Чтобы оно появилось на оси, выкидываем из ответа стенда каждый третий участок.
   await page.route('**/api/risks', async (route) => {
@@ -236,7 +240,7 @@ test('US-05 сц. 5: риск различим без цвета', async ({ page
     const строки = (await ответ.json()) as { section_id: number }[]
     await route.fulfill({ response: ответ, json: строки.filter((с) => с.section_id % 3 !== 0) })
   })
-  await Promise.all([page.waitForResponse('**/api/risks'), page.goto('/map')])
+  await Promise.all([page.waitForResponse('**/api/risks'), page.goto('/map?axis=sections')])
   await expect(page.locator('svg[role="img"]').first()).toBeVisible()
 
   const легенда: string[] = []
@@ -317,7 +321,7 @@ test('US-05 сц. 6: узел дерева сужает схему', async ({ pa
   const узлаНаОси = наОсиБеты.filter((у) => узел.section_ids.includes(у.section_id))
   expect(узлаНаОси).toHaveLength(22) // 23 минус 1490, который на оси Зиты
 
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   const tree = page.getByRole('navigation', { name: 'Дерево объектов' })
   await tree.getByRole('button', { name: 'объект Бета', exact: true }).click()
   const меток = page.locator('main svg[role="img"] g > title')
@@ -393,7 +397,7 @@ test('US-05 сц. 1: риск виден на схеме', async ({ page }) => {
 
   // Метки рисуются до ответа /api/risks — тогда у всех значок «класса нет».
   const рискиЭкрана = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await рискиЭкрана
   await expect(page.locator('svg[role="img"]').first()).toBeVisible()
   const значения = await коллекторы(page)
@@ -440,7 +444,7 @@ test('US-05 сц. 3: фильтры складываются', async ({ page }) 
   const [коллектор, ждём] = [...поКоллектору.entries()].sort((a, b) => b[1] - a[1])[0]
   const всего = участки.filter((у) => у.collector === коллектор).length
 
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await коллекторы(page).selectOption(String(коллектор))
   await page.getByLabel('Уровень риска').selectOption({ label: 'Высокий' })
   await page.getByLabel('Тип объекта').selectOption({ label: 'Охраняемый объект' })
@@ -462,7 +466,7 @@ test('US-05 сц. 4: со схемы в карточку', async ({ page }) => {
   const высокий = new Set(риски.filter((r) => r.risk_class === 'high').map((r) => r.section_id))
   const коллектор = участки.find((у) => высокий.has(у.section_id))!.collector
   const рискиЭкрана = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await рискиЭкрана
   await коллекторы(page).selectOption(String(коллектор))
   await page.getByLabel('Уровень риска').selectOption({ label: 'Высокий' })
