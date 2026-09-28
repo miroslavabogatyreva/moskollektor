@@ -650,6 +650,24 @@ else
   skip_msg "НФ-43, НФ-77" "контракт каждого GET из openapi — задайте BASE_URL"
 fi
 
+# М-03 стенд отдаёт приложение, а не заглушку (MOS-246, задача 1.11). 17.09.2026
+# разворот дерева из git положил заглушку «Стенд поднят» поверх собранного фронта,
+# и все экраны пропали при коде 200: try_files отдаёт заглушку на любой маршрут.
+# Поэтому смотрим содержимое корня: ссылка на бандл есть, заголовка заглушки нет.
+stend_otdaet_prilozhenie() {
+  page=$(curl -s ${CURL_OPTS:-} "$BASE_URL/")
+  bundle=$(printf '%s' "$page" | grep -c 'index-')
+  stub=$(printf '%s' "$page" | grep -c 'Москоллектор — стенд')
+  [ "$bundle" -ge 1 ] && [ "$stub" -eq 0 ] && return 0
+  echo "корень стенда: строк с бандлом index- $bundle (нужно ≥1), строк заглушки $stub (нужно 0)"
+  return 1
+}
+if [ -n "${BASE_URL:-}" ]; then
+  run "М-03"        "стенд отдаёт приложение" stend_otdaet_prilozhenie
+else
+  skip_msg "М-03" "стенд отдаёт приложение — задайте BASE_URL"
+fi
+
 # Пять экранных строк стояли закрытыми на разовом curl от 16.09.2026, и ни одна
 # не была привязана сюда. Способ доказательства при этом не работал: nginx отдаёт
 # try_files $uri $uri/ /index.html, то есть КОД 200 НА ЛЮБОЙ ПУТЬ без /api/
@@ -936,6 +954,27 @@ if [ -n "${TLS_HOST:-}" ]; then
   run "НФ-75"       "версии TLS и шифры"     sh deploy/check-tls.sh "$TLS_HOST"
 else
   skip_msg "НФ-75" "версии TLS — задайте TLS_HOST"
+fi
+
+# Замечания приёмки 1.1 про доступ к базе (задача 1.6, MOS-82): образец .env
+# без пароля compose не поднимает, trust на 127.0.0.1 в контейнере db нет,
+# пароль на стенде сгенерирован. Своей строки приёмки у них нет, как у
+# «порядка миграций». Без DB_CONTAINER проверяется только образец.
+if ! command -v docker >/dev/null 2>&1; then
+  skip_msg "—" "доступ к базе — нет docker"
+else
+  run "—"           "доступ к базе: пароль и pg_hba" env DB_CONTAINER="${DB_CONTAINER:-}" API_CONTAINER="${API_CONTAINER:-}" sh deploy/check-db-access.sh
+  [ -z "${DB_CONTAINER:-}" ] && echo "        только образец .env: база стенда — DB_CONTAINER=moskollektor-db-1 с DOCKER_HOST=ssh://root@СЕРВЕР"
+fi
+
+# Копии идут сами (задачи 1.2 и 1.18): архив WAL живой — последний сегмент
+# не старше часа, последняя копия моложе 26 часов и снята расписанием.
+# Учения восстановления (1.9) здесь не гоняем: им нужно столько же места,
+# сколько весит база, — docs/restore.md.
+if [ -n "${DB_CONTAINER:-}" ]; then
+  run "НФ-39, НФ-78" "резервные копии"         env DB_CONTAINER="$DB_CONTAINER" sh deploy/check-backup.sh
+else
+  skip_msg "НФ-39, НФ-78" "резервные копии — задайте DB_CONTAINER (и DOCKER_HOST для стенда)"
 fi
 
 # MOS-140, 21.09.2026: закрепление версий в requirements.txt само по себе
