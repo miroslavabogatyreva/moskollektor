@@ -390,7 +390,7 @@ test('US-05 сц. 1: риск виден на схеме', async ({ page }) => {
   const класс = new Map(риски.map((r) => [r.section_id, r.risk_class]))
 
   // Цвет уровня на дашборде — полоска строки.
-  await page.goto('/dashboard?view=sections')
+  await page.goto('/dashboard?view=sections&level=all')
   const цвет: Record<string, string> = {}
   for (const [cls, слово] of [
     ['high', 'высокий риск'],

@@ -29,8 +29,9 @@ export async function проверитьЭкраны(page: Page, свои: Set<n
     return m ? поКлючу.get(`${m[1]}:${m[2]}`) : undefined
   }
 
-  // Дашборд: строк столько же, сколько участков роли, и все свои.
-  await page.goto('/dashboard')
+  // Дашборд: строк столько же, сколько участков роли, и все свои. Весь список —
+  // режим «по участкам» с ?level=all (по умолчанию экран по датчикам, 28.09.2026).
+  await page.goto('/dashboard?view=sections&level=all')
   const строки = page.locator('main table tbody tr')
   await expect(строки).toHaveCount(свои.size, { timeout: 30_000 })
   const номера = (await строки.locator('td:nth-child(2)').allInnerTexts()).map((т) =>
@@ -41,9 +42,10 @@ export async function проверитьЭкраны(page: Page, свои: Set<n
     'на дашборде чужих участков нет',
   ).toEqual([])
 
-  // Схема: в списке только коллекторы своих участков, метки только свои.
+  // Схема: в списке только коллекторы своих участков, метки только свои. Метки участков
+  // и /api/risks — на оси участков (?axis=sections): по умолчанию главная — ось датчиков.
   const рискиСхемы = page.waitForResponse((r) => r.url().endsWith('/api/risks'))
-  await page.goto('/map')
+  await page.goto('/map?axis=sections')
   await рискиСхемы
   const своиКоллекторы = new Set(
     участки.filter((у) => свои.has(у.section_id)).map((у) => String(у.collector)),

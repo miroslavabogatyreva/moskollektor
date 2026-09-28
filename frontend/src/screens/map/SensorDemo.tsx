@@ -699,7 +699,9 @@ function Details({ s }: { s: SensorRow }) {
       {rest.length > 0 && (
         <ul class="flex flex-col gap-1" style="list-style:none; padding:0; margin:0">
           {rest.map((r) => (
-            <li key={r.text} data-kind={r.kind} class="flex items-center gap-2">
+            // flex-wrap: на 390 px плашка «синтетика» за длинной причиной вылезала
+            // за окно на 26 px (e2e mos-265-home, 28.09.2026) — теперь уходит строкой ниже.
+            <li key={r.text} data-kind={r.kind} class="flex flex-wrap items-center gap-2">
               <span class="tabular-nums w-16 shrink-0 text-right" style="color:var(--text-primary)">
                 +{процент(r.weight)}
               </span>
