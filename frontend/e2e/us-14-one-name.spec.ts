@@ -49,7 +49,7 @@ test('US-14 сц. 1: одно имя на пяти экранах', async ({ pag
   await expect(page.getByText(имя).first()).toBeVisible()
 
   // 2. Дашборд.
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await expect(page.getByRole('cell', { name: имя, exact: false }).first()).toBeVisible()
 
   // 3. Карточка участка.

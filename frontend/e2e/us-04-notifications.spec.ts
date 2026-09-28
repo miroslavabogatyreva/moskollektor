@@ -312,7 +312,7 @@ test('US-04 сц. 4: риск ниже порога не отвлекает', as
     `уведомлений по участку ${низкий.section_id} (p = ${низкий.probability}) нет`,
   ).toEqual([])
 
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await expect(
     page.locator('main table tbody tr', { hasText: new RegExp(`·\\s*${низкий.section_id}\\b`) }),
     'прогноз виден в списке рисков',

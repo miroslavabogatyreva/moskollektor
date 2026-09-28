@@ -1,0 +1,253 @@
+// Экраны по датчикам — SL.5 (дашборд, MOS-254) и SL.6 (схема, MOS-255), эпик MOS-248.
+// Ответы GET /api/sensor-risk и /summary — из мока helpers/sensor-mock.ts по контракту
+// SL.4 (MOS-253): метод на стенде пишет параллельная сессия. Всё остальное — стенд.
+// Против стенда целиком эти сценарии повторит SL.7 (MOS-256, e2e/sensor-level.spec.ts).
+//
+// Запуск с локальной сборкой: BASE_URL — сервер, который отдаёт dist/ и проксирует
+// /api и /data на стенд. E2E_SHOTS=<каталог> — ещё и снимки экранов на 1440 и 390.
+import { expect, test, type Page } from '@playwright/test'
+import { mockSensorRisk, ДАТЧИКОВ_МЮ, КАППА, МЮ } from './helpers/sensor-mock'
+
+const ошибкиКонсоли = (page: Page) => {
+  const ошибки: string[] = []
+  page.on('console', (m) => m.type() === 'error' && ошибки.push(m.text()))
+  return ошибки
+}
+const число = (s: string) => Number(s.replace(/\s/g, ''))
+const плитка = (page: Page, имя: string) => page.locator('article', { hasText: имя })
+
+test('SL.5: дашборд по датчикам — плитки, коллекторы, таблица постранично', async ({ page }) => {
+  const ошибки = ошибкиКонсоли(page)
+  const мок = await mockSensorRisk(page)
+  const парк = мок.items(true)
+  const high = парк.filter((s) => s.level === 'high')
+  const коллекторов = new Set(high.map((s) => s.collector_id)).size
+
+  await page.goto('/dashboard')
+  await expect(page.getByRole('link', { name: 'По датчикам' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(page.getByTestId('synthetic-toggle')).toBeChecked()
+  await expect(page.getByTestId('synthetic-note')).toContainText('Демо: паспорта синтетические')
+
+  // Плитка: число датчиков high и «на N коллекторах».
+  const высокий = плитка(page, 'Высокий риск')
+  await expect(высокий.locator('div').first()).toHaveText(String(high.length))
+  await expect(высокий).toContainText(`на ${коллекторов} коллектор`)
+
+  // «Где риск сосредоточен» — коллекторы по числу датчиков high, первый — самый нагруженный.
+  const поКоллекторам = new Map<string, number>()
+  for (const s of high)
+    поКоллекторам.set(s.collector_name, (поКоллекторам.get(s.collector_name) ?? 0) + 1)
+  const первый = [...поКоллекторам.entries()].sort((a, b) => b[1] - a[1])[0]
+  const очаги = page.getByTestId('sensor-hotspots').locator('li')
+  await expect(очаги.first()).toContainText(первый[0])
+  await expect(очаги.first()).toContainText(String(первый[1]))
+
+  // Таблица: 50 строк, самый рискованный датчик первым, главная причина — самая весомая.
+  const строки = page.getByTestId('sensor-table').locator('tbody tr')
+  await expect(строки).toHaveCount(50)
+  await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[0].channel_id))
+  const ячейки = строки.first().locator('td')
+  await expect(ячейки.nth(0)).toContainText(парк[0].name)
+  await expect(ячейки.nth(1)).toHaveText(парк[0].sensor_kind)
+  await expect(ячейки.nth(2)).toHaveText(`${парк[0].collector_name} · ПК${парк[0].picket}`)
+  await expect(ячейки.nth(3).locator('[data-level]')).toHaveAttribute('data-level', парк[0].level)
+  await expect(ячейки.nth(4)).toHaveText(парк[0].score.toFixed(2))
+  const главная = парк[0].reasons
+    .filter((r) => r.kind !== 'plan')
+    .reduce((a, b) => (b.weight > a.weight ? b : a))
+  await expect(ячейки.nth(5)).toContainText(главная.text)
+
+  const страница = page.getByTestId('sensor-page')
+  expect(число((await страница.innerText()).split('из')[1])).toBe(парк.length)
+  await page.getByRole('button', { name: 'следующие →' }).click()
+  await expect(страница).toHaveText(/^51–100 из/)
+  await expect(строки.first()).toHaveAttribute('data-channel-id', String(парк[50].channel_id))
+
+  // Отбор по уровню — с первой страницы.
+  await page.getByLabel('Уровень').selectOption('high')
+  await expect(страница).toHaveText(new RegExp(`из ${high.length}$`))
+  expect(await строки.locator('[data-level="high"]').count()).toBe(Math.min(50, high.length))
+
+  expect(ошибки).toEqual([])
+})
+
+test('SL.5: переключатель синтетики — в адресе, запросы и плашка следуют за ним', async ({
+  page,
+}) => {
+  const ошибки = ошибкиКонсоли(page)
+  const мок = await mockSensorRisk(page)
+  await page.goto('/dashboard')
+  await expect(page.getByTestId('sensor-table').locator('tbody tr')).toHaveCount(50)
+
+  await page.getByTestId('synthetic-toggle').uncheck()
+  await expect(page).toHaveURL(/\/dashboard\?synthetic=0$/)
+  await expect(page.getByTestId('synthetic-note')).toHaveCount(0)
+  const безПаспорта = мок.items(false).filter((s) => s.level === 'high').length
+  await expect(плитка(page, 'Высокий риск').locator('div').first()).toHaveText(String(безПаспорта))
+  expect(мок.urls.some((u) => u.startsWith('/api/sensor-risk/summary?synthetic=0'))).toBe(true)
+  expect(мок.urls.some((u) => u.startsWith('/api/sensor-risk?synthetic=0&limit=50'))).toBe(true)
+
+  // Адрес с ?synthetic=0 открывает экран уже выключенным.
+  await page.reload()
+  await expect(page.getByTestId('synthetic-toggle')).not.toBeChecked()
+
+  // Клик по строке — на схему с датчиком, переключатель едет с ним.
+  const строка = page.getByTestId('sensor-table').locator('tbody tr').first()
+  const id = await строка.getAttribute('data-channel-id')
+  await строка.click()
+  await expect(page).toHaveURL(new RegExp(`/map\\?channel=${id}&synthetic=0$`))
+  await expect(page.getByTestId('synthetic-toggle')).not.toBeChecked()
+  await expect(page.locator(`li[data-channel-id="${id}"] > button`)).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+
+  expect(ошибки).toEqual([])
+})
+
+test('SL.5: вид «по участкам» остался вторым режимом', async ({ page }) => {
+  await mockSensorRisk(page)
+  await page.goto('/dashboard')
+  await page.getByRole('link', { name: 'По участкам' }).click()
+  await expect(page).toHaveURL(/\/dashboard\?view=sections$/)
+  await expect(page.getByRole('heading', { name: /Все участки по риску/ })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(плитка(page, 'Участков в расчёте')).toBeVisible()
+  await expect(page.getByTestId('sensor-table')).toHaveCount(0)
+})
+
+test('SL.6: /map?channel= выбирает коллектор и пикет, раскрывает датчик; ПК632 — 5 и 2 high', async ({
+  page,
+}) => {
+  const ошибки = ошибкиКонсоли(page)
+  await mockSensorRisk(page)
+  await page.goto('/map?channel=267051')
+  const демо = page.getByTestId('sensor-demo')
+  await expect(page.locator('main select').first()).toHaveValue(String(КАППА))
+  await expect(демо.getByTestId('sensor-picket')).toContainText('ПК632')
+  await expect(демо.locator('g[data-picket="632"][data-selected]')).toHaveCount(1)
+  const датчик = демо.locator('li[data-channel-id="267051"]')
+  await expect(датчик.getByRole('button')).toHaveAttribute('aria-expanded', 'true')
+  await expect(датчик.locator('[data-level]').first()).toHaveAttribute('data-level', 'high')
+  const пикет = демо.locator('li[data-channel-id]')
+  await expect(пикет.locator('button [data-level="high"]')).toHaveCount(5)
+  await expect(демо.getByRole('note')).toContainText('Демо: паспорта синтетические')
+
+  // Без паспорта: high два (267052, 267064), 267051 — «наблюдать», паспорта нет.
+  await демо.getByTestId('synthetic-toggle').uncheck()
+  await expect(page).toHaveURL(/\/map\?channel=267051&synthetic=0$/)
+  await expect(пикет.locator('button [data-level="high"]')).toHaveCount(2)
+  for (const id of [267052, 267064])
+    await expect(демо.locator(`li[data-channel-id="${id}"] button [data-level]`)).toHaveAttribute(
+      'data-level',
+      'high',
+    )
+  await expect(датчик.locator('button [data-level]')).toHaveAttribute('data-level', 'watch')
+  await expect(датчик.getByRole('button')).toHaveAttribute('aria-expanded', 'true')
+  await expect(датчик).toContainText('Паспорта оборудования нет.')
+  await expect(демо.getByRole('note')).toHaveCount(0)
+
+  expect(ошибки).toEqual([])
+})
+
+test('SL.6: самый плотный коллектор — «объект Мю», 1 487 каналов, по полосе на линию', async ({
+  page,
+}) => {
+  const ошибки = ошибкиКонсоли(page)
+  const мок = await mockSensorRisk(page)
+  const мю = мок.items(true).filter((s) => s.collector_id === МЮ)
+  expect(мю).toHaveLength(ДАТЧИКОВ_МЮ)
+
+  const начало = Date.now()
+  await page.goto(`/map?collector=${МЮ}`)
+  const демо = page.getByTestId('sensor-demo')
+  await expect(демо).toContainText(`${ДАТЧИКОВ_МЮ} датчиков`)
+  console.log(`Мю: блок датчиков готов за ${Date.now() - начало} мс`)
+  await expect(page.locator('main select').first()).toHaveValue(String(МЮ))
+
+  // Две линии, как у оси: 914 и 915, у каждой своя полоса и свои кнопки масштаба.
+  await expect(демо.locator('[data-line]')).toHaveCount(2)
+  for (const линия of ['914', '915']) {
+    const полоса = демо.locator(`[data-line="${линия}"]`)
+    await expect(полоса.getByRole('group')).toBeVisible()
+    // Стопка сжата: чертёж не выше 12 + 140 + 34 px, сколько бы датчиков ни стояло на пикете.
+    const высота = await полоса.locator('svg[role="img"]').evaluate((e) => e.clientHeight)
+    expect(высота).toBeLessThanOrEqual(188)
+  }
+  // Каждый датчик нарисован: значков — ровно 1 487 (кольцо ППР — отдельный круг без заливки).
+  const значков = await демо
+    .locator('g[data-picket] > :is(polygon, circle):not([fill="none"])')
+    .count()
+  expect(значков).toBe(ДАТЧИКОВ_МЮ)
+
+  // Датчик с другой линии по адресу: выбрана его линия и пикет, полоса приближена.
+  const участки = (await (await page.request.get('/data/sections.json')).json()) as {
+    section_id: number
+    smvu_key: string
+  }[]
+  const линии915 = new Set(
+    участки.filter((у) => у.smvu_key.startsWith('915:')).map((у) => у.section_id),
+  )
+  const на915 = мю.find((s) => s.section_id != null && линии915.has(s.section_id))!
+  await page.goto(`/map?channel=${на915.channel_id}`)
+  await expect(демо.getByTestId('sensor-picket')).toContainText(`ПК${на915.picket}`)
+  await expect(демо.locator(`li[data-channel-id="${на915.channel_id}"] > button`)).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  await expect(демо.locator('[data-line="915"] g[data-selected]')).toHaveCount(1)
+  // Окно полосы 915 сужено до десятой части линии — кнопка «вся линия» ожила.
+  await expect(
+    демо.locator('[data-line="915"]').getByRole('button', { name: 'вся линия' }),
+  ).toBeEnabled()
+
+  expect(ошибки).toEqual([])
+})
+
+// Правый край самого широкого элемента внутри root, кроме блоков с собственной прокруткой.
+// На схеме root — блок датчиков: кнопка «вся линия» оси участков (AxisLine.tsx)
+// на 390 px вылезает на 3 px, и это тоже не SL.6.
+const правыйКрай = (page: Page, root = 'main') =>
+  page.evaluate(
+    (root) =>
+      Math.max(
+        ...[...document.querySelectorAll(`${root} *`)]
+          .filter((e) => !e.closest('.overflow-x-auto'))
+          .map((e) => e.getBoundingClientRect().right),
+      ),
+    root,
+  )
+
+const КАТАЛОГ = process.env.E2E_SHOTS
+for (const [ширина, высота] of [
+  [1440, 900],
+  [390, 844],
+] as const) {
+  test(`снимки экранов на ${ширина} px`, async ({ page }) => {
+    test.skip(!КАТАЛОГ, 'E2E_SHOTS не задан')
+    await page.setViewportSize({ width: ширина, height: высота })
+    await mockSensorRisk(page)
+    await page.goto('/dashboard')
+    await expect(page.getByTestId('sensor-table').locator('tbody tr')).toHaveCount(50)
+    // Содержимое экрана не шире окна: широкая таблица листается в своём блоке.
+    // Мерим main, а не страницу: шапка (Nav.tsx) на 390 px сама шире окна — до 812 px
+    // на любом экране, включая /orders; это отдельная находка, не SL.5.
+    expect(await правыйКрай(page)).toBeLessThanOrEqual(ширина)
+    await page.screenshot({ path: `${КАТАЛОГ}/dashboard-${ширина}.png`, fullPage: true })
+    await page.goto('/map?channel=267051')
+    await expect(page.locator('li[data-channel-id="267051"] > button')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(await правыйКрай(page, '[data-testid=sensor-demo]')).toBeLessThanOrEqual(ширина)
+    await page.screenshot({ path: `${КАТАЛОГ}/map-kappa-${ширина}.png`, fullPage: true })
+    await page.goto(`/map?collector=${МЮ}`)
+    await expect(page.getByTestId('sensor-demo')).toContainText(`${ДАТЧИКОВ_МЮ} датчиков`)
+    await page.getByTestId('sensor-demo').scrollIntoViewIfNeeded()
+    await page.getByTestId('sensor-demo').screenshot({ path: `${КАТАЛОГ}/map-mu-${ширина}.png` })
+  })
+}

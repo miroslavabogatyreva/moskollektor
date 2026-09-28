@@ -24,7 +24,7 @@ test('US-01 сц. 1: самый рискованный участок навер
   const максимум = Math.max(...риски.map((r) => r.probability))
 
   const начало = Date.now()
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await expect(строки(page).first()).toBeVisible()
   const готово = Date.now() - начало
 
@@ -57,7 +57,7 @@ test('US-01 сц. 1: самый рискованный участок навер
 })
 
 test('US-01 сц. 2: уровень риска читается без цифр', async ({ page }) => {
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await expect(строки(page).first()).toBeVisible()
 
   // Цвет полоски строки для каждого уровня, который есть на экране.
@@ -133,7 +133,7 @@ test('US-01 сц. 4: видно, что посчитаны не все учас�
     sections_total: number
   }
   expect(статус.sections_total, 'M пришло в ответе API').toBeGreaterThan(0)
-  await page.goto('/dashboard')
+  await page.goto('/dashboard?view=sections')
   await expect(
     page.locator('article', { hasText: 'Участков в расчёте' }),
     'N и M на экране совпадают с GET /api/data-status',
