@@ -44,8 +44,11 @@ import { fullView, isFullView, panView, zoomView, type ViewRange } from './viewp
 
 // Сколько значков рисуем в стопке пикета: красные и жёлтые сверху, остальное — «+N».
 const НА_ПИКЕТЕ = 8
-// С какого масштаба (px на пикет) у стопки подпись «N в норме»: уже она налезает на соседей.
+// С какого масштаба (px на пикет) у стопки серое число датчиков в норме, и с какого —
+// подпись целиком «N в норме»: при 9 px шрифта она шириной около 50 px и уже налезает
+// на соседний пикет.
 const ПОДПИСЬ_ОТ = 24
+const ПОДПИСЬ_ЦЕЛИКОМ_ОТ = 60
 
 // «объект Каппа ДУ» — узел демо SL.0; /map?demo=sensors открывает его коллектор.
 export const DEMO_NODE = 5657
@@ -378,6 +381,7 @@ function SensorLine({
   const inner = Math.max(1, width - PAD * 2)
   const x = (pk: number) => PAD + ((pk - lo - v0) / (v1 - v0)) * inner
   const подпись = inner / (v1 - v0) >= ПОДПИСЬ_ОТ
+  const целиком = inner / (v1 - v0) >= ПОДПИСЬ_ЦЕЛИКОМ_ОТ
   // Под подпись «N в норме» стопка поднимается на 12 px.
   const под = подпись ? 12 : 0
   const tallest = Math.max(0, ...stacks.map((st) => st.shown.length))
@@ -550,7 +554,7 @@ function SensorLine({
                         text-anchor="middle"
                         fill="var(--text-muted)"
                       >
-                        {normal} в норме
+                        {целиком ? `${normal} в норме` : normal}
                       </text>
                     )}
                   </g>
@@ -583,7 +587,7 @@ function Legend() {
             )}
           </svg>
           {SENSOR_LEVELS[l].label}
-          {l === 'normal' && ' — штрих на оси, число в списке пикета'}
+          {l === 'normal' && ' — штрих на оси, при приближении серое число у пикета'}
         </li>
       ))}
       <li class="flex items-center gap-2">
