@@ -669,7 +669,7 @@ function HomeStrip({
         )}
       </StatTile>
       <StatTile
-        href="/orders"
+        href="/orders?status=active"
         tone={!orders ? 'idle' : orders.overdue > 0 ? 'danger' : 'ok'}
         icon={<Значок d={ПЛАНШЕТ} />}
         value={orders ? тыс(orders.open) : '…'}

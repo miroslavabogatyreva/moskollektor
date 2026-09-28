@@ -2,11 +2,12 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
 import { usePoll, свежо } from '../../lib/poll'
-import type { OrderListItem, UnackedNotification } from './types'
+import { PRIORITY_LABEL, STATUS_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { OrderStatusBadge, PriorityBadge } from '../../components/Badge'
 import { errorMessage, formatDateTime } from '../../lib/format'
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { isoDate } from '../../components/ObjectCard.logic'
+import { сПараметром } from '../../lib/sensorRisk'
 
 /* Экран заявок — задача 6.7 (MOS-62), постраничность — 4.13 (MOS-117). Данные
    читаются из GET /api/orders, форма ответа — contracts/examples/orders/order-list.json
@@ -45,7 +46,20 @@ const TABS = [
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
-export function OrdersScreen(_props: Record<string, unknown>) {
+// Отбор по статусу и приоритету живёт в адресе (?status=&priority=), как уровень
+// на дашборде: ссылка открывает тот же отбор, плитка «Заявки в работе» на главной
+// ведёт на ?status=active. Значения — те, что принимает GET /api/orders: статусы
+// из STATUS_LABEL (CHECK maint.notification.status) плюс группа active, коды
+// приоритета из PRIORITY_LABEL (сид ref.priority). Чужое значение в адресе — как
+// «все»: сервер ответил бы на него 422, а ссылка с опечаткой не должна ломать экран.
+const СТАТУС_ОТБОРА: Record<string, string> = { active: 'Открытые и в работе', ...STATUS_LABEL }
+const изАдреса = (v: unknown, словарь: Record<string, string>) =>
+  typeof v === 'string' && v in словарь ? v : ''
+
+export function OrdersScreen({
+  status,
+  priority,
+}: { status?: string; priority?: string } & Record<string, unknown>) {
   const [tab, setTab] = useState<TabId>('orders')
 
   return (
@@ -70,13 +84,20 @@ export function OrdersScreen(_props: Record<string, unknown>) {
       </div>
 
       <div role="tabpanel" id={`orders-panel-${tab}`} aria-labelledby={`orders-tab-${tab}`}>
-        {tab === 'orders' ? <OrdersTab /> : <UnackedTab />}
+        {tab === 'orders' ? (
+          <OrdersTab
+            status={изАдреса(status, СТАТУС_ОТБОРА)}
+            priority={изАдреса(priority, PRIORITY_LABEL)}
+          />
+        ) : (
+          <UnackedTab />
+        )}
       </div>
     </main>
   )
 }
 
-function OrdersTab() {
+function OrdersTab({ status, priority }: { status: string; priority: string }) {
   const [items, setItems] = useState<OrderListItem[] | null>(null)
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -89,13 +110,18 @@ function OrdersTab() {
   // «Неквитированные» не опрашивается: она копит страницы «Показать ещё»,
   // и перезапрос первой страницы выбросил бы подгруженные.
   const { tick } = usePoll()
+  // Другой отбор — с первой страницы: вторая страница «выполненных» обычно пуста.
+  useEffect(() => setOffset(0), [status, priority])
+  // «Назад» возвращает прежний отбор, как на дашборде.
+  const отбор = (ключ: 'status' | 'priority', v: string) =>
+    route(сПараметром('/orders', window.location.search, ключ, v || null))
 
   useEffect(() => {
     // Флажок отмены — та же гонка, что в ObjectCard.tsx (MOS-178): offset
     // в зависимостях перезапускает эффект на каждое «дальше», и ответ
     // прошлой страницы, пришедший позже нового, клал чужие строки в таблицу.
     let отменено = false
-    fetchOrders(offset, dueFrom, dueTo, q)
+    fetchOrders(offset, dueFrom, dueTo, q, status, priority)
       .then((r) => {
         if (!отменено) {
           setItems(r.items)
@@ -109,7 +135,7 @@ function OrdersTab() {
     return () => {
       отменено = true
     }
-  }, [offset, tick, dueFrom, dueTo, q])
+  }, [offset, tick, dueFrom, dueTo, q, status, priority])
 
   function период(from: string, to: string) {
     setDueFrom(from)
@@ -124,7 +150,11 @@ function OrdersTab() {
     <>
       {error && <p style="color:var(--state-error)">Не удалось загрузить заявки: {error}</p>}
 
-      <div class="flex flex-wrap items-end gap-3 text-sm mb-3" style="color:var(--text-secondary)">
+      <div
+        data-tour="orders-search"
+        class="flex flex-wrap items-end gap-3 text-sm mb-3"
+        style="color:var(--text-secondary)"
+      >
         <label class="flex flex-col gap-1">
           Номер заявки
           <input
@@ -139,6 +169,38 @@ function OrdersTab() {
             class="px-2 py-1 rounded text-sm"
             style={стильПоля}
           />
+        </label>
+        <label class="flex flex-col gap-1">
+          Статус
+          <select
+            value={status}
+            onChange={(e) => отбор('status', (e.target as HTMLSelectElement).value)}
+            class="px-2 py-1 rounded text-sm"
+            style={стильПоля}
+          >
+            <option value="">Все</option>
+            {Object.entries(СТАТУС_ОТБОРА).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label class="flex flex-col gap-1">
+          Приоритет
+          <select
+            value={priority}
+            onChange={(e) => отбор('priority', (e.target as HTMLSelectElement).value)}
+            class="px-2 py-1 rounded text-sm"
+            style={стильПоля}
+          >
+            <option value="">Все</option>
+            {Object.entries(PRIORITY_LABEL).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
         </label>
         <label class="flex flex-col gap-1">
           Срок с
@@ -174,8 +236,12 @@ function OrdersTab() {
         )}
         {items !== null && (
           <span data-testid="orders-count">
-            {q.trim() ? 'найдено заявок' : dueFrom || dueTo ? 'заявок в периоде' : 'заявок'}:{' '}
-            {total}
+            {q.trim() || status || priority
+              ? 'найдено заявок'
+              : dueFrom || dueTo
+                ? 'заявок в периоде'
+                : 'заявок'}
+            : {total}
           </span>
         )}
       </div>
@@ -239,7 +305,11 @@ function OrdersTab() {
       {items === null && !error && <p style="color:var(--text-muted)">Загрузка…</p>}
       {items !== null && items.length === 0 && (
         <p style="color:var(--text-muted)">
-          {dueFrom || dueTo ? 'Заявок со сроком в этом периоде нет.' : 'Заявок пока нет.'}
+          {status || priority || q.trim()
+            ? 'По этому отбору заявок нет.'
+            : dueFrom || dueTo
+              ? 'Заявок со сроком в этом периоде нет.'
+              : 'Заявок пока нет.'}
         </p>
       )}
 
