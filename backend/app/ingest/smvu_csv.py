@@ -65,6 +65,9 @@ ON CONFLICT, а дубли в выгрузке возможны: ext-journal-202
         dataset/ext-journal-*.csv
 
     PYTHONPATH=backend .venv/bin/python -m app.ingest.smvu_csv --selfcheck
+
+Любой из файлов можно подать в XLSX вместо CSV: берётся первый лист, заголовки
+и колонки те же. Формат загрузчик узнаёт по расширению: .csv — CSV, иначе XLSX.
 """
 
 import argparse
@@ -75,12 +78,13 @@ import shutil
 import sys
 import time
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 from .channel_place import дозаполнить_место, есть_место
-from .synthetic_geometry import нарисовать_геометрию
 from .kind_names import canon, canon_map
+from .synthetic_geometry import нарисовать_геометрию
 from .tag_to_section import collector_of, location_kind, section_key
 
 # Пояс заказчик не назвал (ОВ-48). Ставим московский и пишем это в отчёт:
@@ -233,21 +237,61 @@ def rows_from_file(path):
     Запись — кортеж в порядке CHUNK_COLUMNS. Причина заполнена, когда строка
     не годится: тогда запись None, и строка попадает только в отчёт о качестве.
     """
+    rows = table_rows(path)
+    header = next(rows, None)
+    if header is None:
+        return
+    yield from _rows(rows, header, start=2)
+
+
+def table_rows(path):
+    """Строки файла списками текста: .csv — csv.reader, иначе первый лист XLSX.
+
+    ТЗ разд. 7 требует импорт истории из CSV и XLSX (ТЗ-050, ТЗ-055). Строка XLSX
+    приводится к тому же тексту, который дала бы та же выгрузка в CSV, поэтому
+    разбор дальше один на оба формата.
+    """
     if path.lower().endswith(".csv"):
         with open(path, encoding="utf-8", newline="") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            if header is None:
-                return
-            yield from _rows(reader, header, start=2)
-    else:
-        from python_calamine import CalamineWorkbook
+            yield from csv.reader(f)
+        return
+    from openpyxl import load_workbook
 
-        wb = CalamineWorkbook.from_path(path)
-        data = wb.get_sheet_by_index(0).to_python(skip_empty_area=False)
-        if not data:
-            return
-        yield from _rows(iter(data[1:]), data[0], start=2)
+    # read_only читает лист потоком: годовой журнал целиком в память не ляжет.
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        for row in wb.worksheets[0].iter_rows(values_only=True):
+            yield [xlsx_text(v) for v in row]
+    finally:
+        wb.close()
+
+
+def xlsx_text(v):
+    """Ячейка Excel -> текст, как в CSV той же выгрузки.
+
+    Excel хранит не текст: номер события приходит числом 4524243389.0, дата —
+    datetime с нулевым временем, пустая ячейка — None. str() дал бы «4524243389.0»,
+    «2026-08-01 00:00:00» и «None», и разбор отверг бы хорошую строку.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if isinstance(v, datetime) and v.time() == dtime():
+        return v.date().isoformat()
+    if isinstance(v, (datetime, date, dtime)):
+        return v.isoformat(sep=" ") if isinstance(v, datetime) else v.isoformat()
+    return str(v)
+
+
+def read_dicts(path):
+    """Справочник строками-словарями, как csv.DictReader, из CSV или XLSX."""
+    rows = table_rows(path)
+    header = next(rows, [])
+    return [{h: (r[i] if i < len(r) else None) for i, h in enumerate(header)}
+            for r in rows if any(r)]
 
 
 def _rows(reader, header, start):
@@ -296,8 +340,7 @@ async def load_objects(conn, path):
     if await conn.fetchval("SELECT count(*) FROM smvu.object_tree"):
         print("объекты: уже залиты, пропускаю")
         return 0
-    with open(path, encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = read_dicts(path)
     ids = {int(r["ид_объект"]) for r in rows}
     orphan = 0
     recs = []
@@ -402,8 +445,7 @@ async def load_channels(conn, path):
     Пропускаем, если справочник уже залит, — по той же причине, что и объекты.
     Заглушки каналов из журнала сюда не считаем: их заводит flush().
     """
-    with open(path, encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows = read_dicts(path)
     if await conn.fetchval("SELECT count(*) FROM smvu.channel WHERE NOT is_stub"):
         print("каналы: уже залиты, пропускаю")
         проставлено = await дозаполнить_объекты(conn, rows)
@@ -782,6 +824,41 @@ def selfcheck():
     assert хорошие[1][4] == "Неисправен"        # целевая переменная не теряется
     assert хорошие[1][5] is None                # и числом не притворяется
     assert len(CHUNK_COLUMNS) == len(хорошие[0])
+
+    # XLSX (ТЗ-050, ТЗ-055): тот же журнал в двух форматах даёт те же записи.
+    # В XLSX ячейки такие, какими их оставит Excel: номера — числами, дата — датой,
+    # время — временем, флаг — булевым, пустое значение — пустой ячейкой.
+    import os
+    import tempfile
+    from datetime import time as _t
+
+    from openpyxl import Workbook
+
+    with tempfile.TemporaryDirectory() as d:
+        wb = Workbook()
+        ws = wb.active
+        ws.append(header)
+        ws.append([4524243389, 120473, datetime(2026, 8, 1), _t(3, 9, 27), False, 28])
+        ws.append([4524253385, 120475, date(2026, 8, 1), _t(3, 19, 55), True, "Неисправен"])
+        ws.append([4524253386, 120475, "2026-08-01", "03:20:00", "f", None])
+        wb.save(os.path.join(d, "j.xlsx"))
+        with open(os.path.join(d, "j.csv"), "w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerows([header,
+                                     ["4524243389", "120473", "2026-08-01", "03:09:27", "false", "28"],
+                                     ["4524253385", "120475", "2026-08-01", "03:19:55", "true", "Неисправен"],
+                                     ["4524253386", "120475", "2026-08-01", "03:20:00", "f", ""]])
+        из_xlsx = list(rows_from_file(os.path.join(d, "j.xlsx")))
+        из_csv = list(rows_from_file(os.path.join(d, "j.csv")))
+        assert [f for _, _, f in из_xlsx] == [None, None, None], из_xlsx
+        assert из_xlsx == из_csv, (из_xlsx, из_csv)
+        assert из_xlsx[0][1] == хорошие[0]
+        # справочник из XLSX читается теми же словарями, что из CSV; пустая строка пропущена
+        wb = Workbook()
+        wb.active.append(["ид_объект", "имя"])
+        wb.active.append([5332, "объект Альфа"])
+        wb.active.append([None, None])
+        wb.save(os.path.join(d, "o.xlsx"))
+        assert read_dicts(os.path.join(d, "o.xlsx")) == [{"ид_объект": "5332", "имя": "объект Альфа"}]
 
     print("selfcheck ok")
     return 0

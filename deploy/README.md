@@ -214,6 +214,9 @@ PYTHONPATH=backend .venv/bin/python -u -m app.ingest.smvu_csv \
     dataset/ext-journal-*.csv
 ```
 
+Любой из файлов можно подать в XLSX вместо CSV, с теми же колонками: загрузчик
+узнаёт формат по расширению и читает первый лист.
+
 Пароль берётся из `deploy/.env`, переменная `POSTGRES_PASSWORD`. Нужен `asyncpg`:
 `python3 -m venv .venv && .venv/bin/pip install asyncpg`.
 

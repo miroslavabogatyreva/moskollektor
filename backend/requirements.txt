@@ -13,6 +13,10 @@ argon2-cffi==25.1.0
 # app.auth.ldap (Q4.2) — simple bind и поиск групп, лицензия в стиле Python
 # (классификатор PyPI — PSF), не ldap3 (LGPLv3, запрещена HLD разд. 7.3).
 python-ldap==3.4.8
+# app.ingest.smvu_csv — импорт выгрузки из XLSX (ТЗ разд. 7: «CSV/XLSX»), лицензия MIT;
+# et-xmlfile — её единственная зависимость, тоже MIT. Обе на чистом Python.
+openpyxl==3.1.5
+et-xmlfile==2.0.0
 # Транзитивные python-ldap/argon2-cffi — закреплены той же причиной, что idna
 # ниже: собраны в `.venv` командой `pip install argon2-cffi python-ldap`
 # 24.09.2026, не переписаны руками.
