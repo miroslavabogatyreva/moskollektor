@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { route } from 'preact-router'
 import { ackNotification, fetchOrders, fetchUnackedNotifications } from './api'
 import { usePoll, свежо } from '../../lib/poll'
+import { NowStrip } from '../../components/NowStrip'
 import { PRIORITY_LABEL, STATUS_LABEL, type OrderListItem, type UnackedNotification } from './types'
 import { OrderStatusBadge, PriorityBadge } from '../../components/Badge'
 import { errorMessage, formatDateTime } from '../../lib/format'
@@ -65,7 +66,10 @@ export function OrdersScreen({
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)">Заявки на превентивное обслуживание</h1>
+      <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h1 style="font-family:var(--font-display)">Заявки на превентивное обслуживание</h1>
+        <NowStrip />
+      </div>
 
       <div role="tablist" aria-label="Вкладки заявок" class="tabs">
         {TABS.map((t) => (

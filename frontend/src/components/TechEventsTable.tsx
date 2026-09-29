@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks'
 import { apiFetch } from '../lib/api'
 import { errorMessage, formatDateTime } from '../lib/format'
 import { usePoll, свежо } from '../lib/poll'
+import { NowStrip } from './NowStrip'
 
 /* Журнал технологических событий участка — план 5.7 (MOS-54), приёмка Ф-89,
    US-12. Пять колонок по форме Приложения 2 ТЗ; отбор, сортировку, окно дат
@@ -68,6 +69,9 @@ const inputStyle =
 export function TechEventsScreen(_props: Record<string, unknown>) {
   return (
     <main class="p-5 flex flex-col gap-4">
+      <div class="flex justify-end">
+        <NowStrip />
+      </div>
       <TechEventsTable />
     </main>
   )

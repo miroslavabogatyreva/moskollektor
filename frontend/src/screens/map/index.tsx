@@ -20,7 +20,7 @@ import {
 } from '../../lib/sensorRisk'
 import { fetchOrdersSummary, fetchUnacked } from '../dashboard/api'
 import { useSensorSummary } from '../dashboard/SensorsView'
-import { NowStrip } from '../dashboard'
+import { NowStrip } from '../../components/NowStrip'
 import type { OrdersSummary, Unacked } from '../dashboard/types'
 import type { RiskClassRow, Section } from './types'
 import { fullView, zoomView, type ViewRange } from './viewport'

@@ -6,6 +6,7 @@ import { errorMessage, formatDateTime, isoDateMoscow, имяУчастка } fro
 import { rowLink, SkipTable } from '../../lib/a11y'
 import { Badge } from '../../components/Badge'
 import { usePoll, свежо } from '../../lib/poll'
+import { NowStrip } from '../../components/NowStrip'
 
 /* Журнал прогнозов — задача 5.4 (MOS-51), постраничность — 4.13 (MOS-117).
    Данные читаются из GET /api/forecasts. Колонки — время, объект, направление,
@@ -192,7 +193,10 @@ export function LogScreen(_props: Record<string, unknown>) {
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)">Журнал прогнозов</h1>
+      <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h1 style="font-family:var(--font-display)">Журнал прогнозов</h1>
+        <NowStrip />
+      </div>
 
       {error && <p style="color:var(--state-error)">Не удалось загрузить прогнозы: {error}</p>}
 
