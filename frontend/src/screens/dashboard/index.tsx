@@ -6,10 +6,11 @@ import { Tile } from '../../components/Tiles'
 import { коллекторов, слово } from '../../lib/plural'
 import { синтетикаВключена, уровеньИзАдреса } from '../../lib/sensorRisk'
 import { rowLink, SkipTable } from '../../lib/a11y'
-import { fetchMe } from '../../lib/auth'
-import { fetchDataStatus, fetchRisks, fetchSections, fetchWeatherNow } from './api'
+import { fetchDataStatus, fetchRisks, fetchSections } from './api'
 import { errorMessage, formatTime, МОСКВА } from '../../lib/format'
 import { usePoll, свежо } from '../../lib/poll'
+import { fetchMe } from '../../lib/auth'
+import { fetchWeatherNow } from './api'
 import { имяОбъекта, процент, словоРиска, указатель, цветРиска } from './rows'
 import type { SectionRef } from './rows'
 import { SensorTable } from './SensorsView'
@@ -51,8 +52,6 @@ export function DashboardScreen({
      не гасит ни список, ни плитки: без него в столбце «Объект» останется
      номер участка, и таблица работает дальше. */
   const [sections, setSections] = useState<SectionRef[] | null>(null)
-  const [weather, setWeather] = useState<WeatherNow | 'нет' | null>(null)
-  const [roles, setRoles] = useState<string[] | null>(null)
 
   // Всё, что меняется, — раз в минуту от общего опроса (НФ-89, MOS-123),
   // справочник участков и роль статичны и грузятся один раз.
@@ -76,9 +75,6 @@ export function DashboardScreen({
       fetchDataStatus()
         .then((s) => !отменено && setStatus(s))
         .catch(() => !отменено && setStatus(null))
-    fetchWeatherNow()
-      .then((w) => !отменено && setWeather(w))
-      .catch(() => !отменено && setWeather('нет'))
     return () => {
       отменено = true
     }
@@ -88,9 +84,6 @@ export function DashboardScreen({
     fetchSections()
       .then(setSections)
       .catch(() => setSections([]))
-    fetchMe()
-      .then((u) => setRoles(u?.roles ?? []))
-      .catch(() => setRoles([]))
   }, [])
 
   const sorted = useMemo(
@@ -130,11 +123,7 @@ export function DashboardScreen({
     <main class="p-5 flex flex-col gap-4">
       <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
         <h1 style="font-family:var(--font-display)">Дашборд рисков</h1>
-        <NowStrip
-          roles={roles}
-          коллекторов={поУчасткам ? (stats?.коллекторов ?? null) : null}
-          weather={weather}
-        />
+        <NowStrip коллекторов={поУчасткам ? (stats?.коллекторов ?? null) : null} />
       </div>
 
       <ViewSwitch поУчасткам={поУчасткам} />
@@ -294,22 +283,31 @@ const день = new Intl.DateTimeFormat('ru-RU', {
   year: 'numeric',
 })
 
-/* Полоса «сейчас»: зона, дата и часы по Москве, погода за окном. Часы тикают
-   сами раз в 15 секунд — минуты на них не должны отставать от настенных. */
-function NowStrip({
-  roles,
-  коллекторов: n,
-  weather,
-}: {
-  roles: string[] | null
-  коллекторов: number | null
-  weather: WeatherNow | 'нет' | null
-}) {
+/* Полоса «сейчас»: зона, дата и часы по Москве, погода за окном. Стоит на
+   дашборде и на схеме (Слава, 29.09.2026), поэтому погоду и роль грузит сама;
+   погода — с общим опросом раз в минуту. Часы тикают раз в 15 секунд —
+   минуты на них не должны отставать от настенных. */
+export function NowStrip({ коллекторов: n = null }: { коллекторов?: number | null }) {
   const [сейчас, setСейчас] = useState(() => new Date())
+  const [weather, setWeather] = useState<WeatherNow | 'нет' | null>(null)
+  const [roles, setRoles] = useState<string[] | null>(null)
+  const { tick } = usePoll()
   useEffect(() => {
     const id = setInterval(() => setСейчас(new Date()), 15_000)
+    fetchMe()
+      .then((u) => setRoles(u?.roles ?? []))
+      .catch(() => setRoles([]))
     return () => clearInterval(id)
   }, [])
+  useEffect(() => {
+    let отменено = false
+    fetchWeatherNow()
+      .then((w) => !отменено && setWeather(w))
+      .catch(() => !отменено && setWeather('нет'))
+    return () => {
+      отменено = true
+    }
+  }, [tick])
   return (
     <div data-testid="now-strip" class="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
       <span>

@@ -20,6 +20,7 @@ import {
 } from '../../lib/sensorRisk'
 import { fetchOrdersSummary, fetchUnacked } from '../dashboard/api'
 import { useSensorSummary } from '../dashboard/SensorsView'
+import { NowStrip } from '../dashboard'
 import type { OrdersSummary, Unacked } from '../dashboard/types'
 import type { RiskClassRow, Section } from './types'
 import { fullView, zoomView, type ViewRange } from './viewport'
@@ -343,7 +344,10 @@ export function MapScreen({
 
   return (
     <main class="p-5 flex flex-col gap-4">
-      <h1 style="font-family:var(--font-display)">Схема коллектора по пикетам</h1>
+      <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <h1 style="font-family:var(--font-display)">Схема коллектора по пикетам</h1>
+        <NowStrip />
+      </div>
 
       <HomeStrip
         summary={сводка.summary}
