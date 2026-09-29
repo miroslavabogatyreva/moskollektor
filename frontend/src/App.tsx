@@ -58,7 +58,8 @@ export function App() {
     <>
       {currentPath !== '/login' && <Nav currentPath={currentPath} me={me} />}
       {currentPath !== '/login' && me && <AlertBar key={me.login} login={me.login} />}
-      <Router onChange={(e) => setCurrentPath(e.url)}>
+      {/* e.url приходит с параметрами (/login?next=…), сравниваем только путь */}
+      <Router onChange={(e) => setCurrentPath(e.url.split('?')[0])}>
         <LoginScreen path="/login" />
         <DashboardScreen path="/dashboard" />
         <MapScreen path="/map" />
