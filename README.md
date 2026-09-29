@@ -68,6 +68,12 @@
 </tr>
 </table>
 
+## Видеодемонстрация
+
+https://github.com/user-attachments/assets/79aaafae-4893-42f2-a217-07286ea2a860
+
+<sub>84 секунды, 720p. Полная версия 1080p — [`delivery-materials/brag.mp4`](delivery-materials/brag.mp4).</sub>
+
 ## Где посмотреть
 
 **[Скачать архив установки](https://github.com/miroslavabogatyreva/moskollektor/releases/tag/v1.0.1)** · **[Инструкция установки](delivery/INSTALL.md)** · **[Видеодемонстрация](delivery-materials/brag.mp4)**
